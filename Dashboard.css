@@ -918,34 +918,77 @@ button {
     .sidebar {
         width: 100%;
         height: auto;
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
         flex-direction: row;
         align-items: center;
         overflow-x: auto;
         overflow-y: visible;
+        position: relative;
     }
 
     .sidebar.is-collapsed { width: 100%; }
 
-    .sidebar__top { display: none; }
+    .sidebar__top {
+        display: flex;
+        order: 2;
+        margin-bottom: 0;
+        margin-left: 8px;
+        flex-shrink: 0;
+    }
+
+    .sidebar__identity { display: none; }
+
+    .sidebar__collapse-btn {
+        transform: none !important;
+    }
+
+    .sidebar.is-account-menu-open .sidebar__collapse-btn {
+        background: var(--brand-green);
+        color: #ffffff;
+    }
 
     .sidebar__nav {
+        order: 1;
         flex-direction: row;
         gap: 6px;
         flex: 1;
+        min-width: 0;
+        overflow-x: auto;
     }
 
+    /* Hidden by default — only appears after a deliberate tap on the
+       menu button (see wireCollapse() in Sidebar.js). This is the
+       actual fix for accidental taps: Logout/Delete Account are never
+       sitting exposed in the normal scroll/tap flow of the page. */
     .sidebar__foot {
-        width: 100%;
-        display: flex;
-        justify-content: flex-end;
-        gap: 14px;
-        border-top: 1px solid var(--border);
-        border-left: none;
-        padding-top: 8px;
+        display: none;
+        position: absolute;
+        top: 100%;
+        right: 0;
         margin-top: 8px;
-        padding-left: 0;
-        margin-left: 0;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 4px;
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        box-shadow: 0 12px 28px rgba(0, 0, 0, 0.15);
+        padding: 10px;
+        min-width: 170px;
+        z-index: 50;
+    }
+
+    .sidebar.is-account-menu-open .sidebar__foot {
+        display: flex;
+    }
+
+    .sidebar__foot .nav-item__label {
+        display: inline;
+    }
+
+    .sidebar__foot .nav-item {
+        width: 100%;
+        justify-content: flex-start;
     }
 
     .nav-item__label { display: none; }

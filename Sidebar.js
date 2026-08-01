@@ -236,8 +236,26 @@ function wireCollapse() {
   const collapseBtn = document.getElementById("collapse-btn");
   if (!sidebar || !collapseBtn) return;
 
-  collapseBtn.addEventListener("click", () => {
-    sidebar.classList.toggle("is-collapsed");
+  const isMobile = () => window.matchMedia("(max-width: 720px)").matches;
+
+  collapseBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (isMobile()) {
+      sidebar.classList.toggle("is-account-menu-open");
+    } else {
+      sidebar.classList.toggle("is-collapsed");
+    }
+  });
+
+  // Mobile only: tapping anywhere outside the sidebar closes the
+  // account menu, so Logout/Delete Account are never sitting exposed
+  // during normal scrolling/tapping — they only ever show up right
+  // after a deliberate tap on the menu button.
+  document.addEventListener("click", (event) => {
+    if (!isMobile()) return;
+    if (!sidebar.classList.contains("is-account-menu-open")) return;
+    if (sidebar.contains(event.target)) return;
+    sidebar.classList.remove("is-account-menu-open");
   });
 }
 
