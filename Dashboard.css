@@ -58,6 +58,10 @@ button {
     flex-direction: column;
     padding: 18px 14px;
     transition: width var(--transition);
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
 }
 
 .sidebar.is-collapsed {
@@ -913,9 +917,12 @@ button {
 
     .sidebar {
         width: 100%;
+        height: auto;
+        flex-wrap: wrap;
         flex-direction: row;
         align-items: center;
         overflow-x: auto;
+        overflow-y: visible;
     }
 
     .sidebar.is-collapsed { width: 100%; }
@@ -925,15 +932,20 @@ button {
     .sidebar__nav {
         flex-direction: row;
         gap: 6px;
+        flex: 1;
     }
 
     .sidebar__foot {
-        border-top: none;
-        border-left: 1px solid var(--border);
-        padding-top: 0;
-        margin-top: 0;
-        padding-left: 10px;
-        margin-left: 10px;
+        width: 100%;
+        display: flex;
+        justify-content: flex-end;
+        gap: 14px;
+        border-top: 1px solid var(--border);
+        border-left: none;
+        padding-top: 8px;
+        margin-top: 8px;
+        padding-left: 0;
+        margin-left: 0;
     }
 
     .nav-item__label { display: none; }
