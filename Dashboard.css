@@ -921,9 +921,12 @@ button {
         flex-wrap: nowrap;
         flex-direction: row;
         align-items: center;
-        overflow-x: auto;
-        overflow-y: visible;
         position: relative;
+        /* No overflow set here on purpose — the account-menu dropdown
+           is an absolutely-positioned child that renders outside this
+           box, and setting overflow-x here (even with overflow-y:
+           visible) silently clips it. Horizontal scrolling, if the
+           nav icons ever need it, lives on .sidebar__nav instead. */
     }
 
     .sidebar.is-collapsed { width: 100%; }
