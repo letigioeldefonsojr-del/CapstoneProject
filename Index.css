@@ -64,6 +64,7 @@ body {
     position: absolute;
     top: 28px;
     left: 40px;
+    z-index: 2;
     display: flex;
     align-items: center;
     gap: 12px;
@@ -461,13 +462,17 @@ input:focus-visible {
     }
 
     .left-panel {
-        padding: 28px 24px 22px;
-        min-height: 260px;
+        padding: 24px 24px 20px;
+        min-height: 140px;
     }
 
     .brand-kicker {
         top: 20px;
         left: 24px;
+    }
+
+    .logo-container {
+        width: min(38%, 150px);
     }
 
     .right-panel {
@@ -477,11 +482,16 @@ input:focus-visible {
 
 @media (max-width: 480px) {
     .left-panel {
-        padding: 22px 20px 18px;
+        padding: 20px 18px 16px;
+        min-height: 110px;
     }
 
     .brand-kicker {
         left: 20px;
+    }
+
+    .logo-container {
+        width: min(34%, 110px);
     }
 }
 
