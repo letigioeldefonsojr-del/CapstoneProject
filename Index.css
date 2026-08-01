@@ -462,16 +462,28 @@ input:focus-visible {
     }
 
     .left-panel {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
         padding: 24px 24px 20px;
-        min-height: 140px;
+        min-height: 0;
+    }
+
+    .brand-wrapper {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        width: 100%;
     }
 
     .brand-kicker {
-        top: 20px;
-        left: 24px;
+        position: static;
+        margin-bottom: 16px;
     }
 
     .logo-container {
+        position: static;
+        transform: none;
         width: min(38%, 150px);
     }
 
@@ -483,11 +495,6 @@ input:focus-visible {
 @media (max-width: 480px) {
     .left-panel {
         padding: 20px 18px 16px;
-        min-height: 110px;
-    }
-
-    .brand-kicker {
-        left: 20px;
     }
 
     .logo-container {
