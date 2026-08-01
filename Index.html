@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WholeSale Grocery Store - Login</title>
+    <link rel="icon" type="image/png" href="Logo.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="Index.css">
+</head>
+<body>
+    <div class="login-container">
+
+        <!-- ============================================================
+             LEFT PANEL — BRAND
+             ============================================================ -->
+        <div class="left-panel">
+            <div class="brand-wrapper">
+                <div class="brand-kicker">
+                    <span class="brand-kicker__dot"></span>
+                    <span class="brand-kicker__line"></span>
+                    <span class="brand-kicker__text">Almares 328 Grocery Store</span>
+                </div>
+                <div class="logo-container">
+                    <img src="Logo.png" alt="WholeSale Grocery Store Logo" class="brand-logo no-download" draggable="false">
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================================
+             RIGHT PANEL — LOGIN CARD
+             ============================================================ -->
+        <div class="right-panel">
+            <div class="login-card">
+
+                <div class="card-header">
+                    <span class="line"></span>
+                    <h2 id="card-title">Login</h2>
+                    <span class="line"></span>
+                </div>
+
+                <!-- ROLE TOGGLE ==================================== -->
+                <div class="role-toggle" id="role-toggle" role="tablist" aria-label="Login type">
+                    <button type="button" class="role-toggle__btn is-active" id="tab-admin" role="tab" aria-selected="true" data-role="admin">Administrator</button>
+                    <button type="button" class="role-toggle__btn" id="tab-employee" role="tab" aria-selected="false" data-role="employee">Employee</button>
+                    <span class="role-toggle__thumb" id="role-thumb" aria-hidden="true"></span>
+                </div>
+
+                <!-- STATUS MESSAGE (shared) ========================= -->
+                <div class="form-status" id="form-status" role="alert" hidden></div>
+
+                <!-- ADMINISTRATOR FORM ============================== -->
+                <form class="login-form" id="form-admin">
+                    <div class="input-label">Email:</div>
+                    <div class="input-wrapper">
+                        <div class="icon-badge">
+                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.8"/>
+                                <path d="M3.5 6.5L12 13L20.5 6.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                            </svg>
+                        </div>
+                        <input type="email" id="admin-email" placeholder="Enter your email" autocomplete="username" required>
+                    </div>
+
+                    <div class="input-label">Password:</div>
+                    <div class="input-wrapper">
+                        <div class="icon-badge">
+                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <rect x="5" y="11" width="14" height="9" rx="1.6" stroke="currentColor" stroke-width="1.8"/>
+                                <path d="M8 11V7.5A4 4 0 0 1 16 7.5V11" stroke="currentColor" stroke-width="1.8"/>
+                            </svg>
+                        </div>
+                        <input type="password" id="admin-password" placeholder="Enter your password" autocomplete="current-password" required>
+                        <span class="password-toggle" data-target="admin-password"><svg class="icon-eye-slash" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M2 12C4 7.5 7.8 5 12 5C16.2 5 20 7.5 22 12C20 16.5 16.2 19 12 19C7.8 19 4 16.5 2 12Z" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/><line x1="3.5" y1="20.5" x2="20.5" y2="3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><svg class="icon-eye" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" hidden><path d="M2 12C4 7.5 7.8 5 12 5C16.2 5 20 7.5 22 12C20 16.5 16.2 19 12 19C7.8 19 4 16.5 2 12Z" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/></svg></span>
+                    </div>
+
+                    <div class="forgot-password-container">
+                        <a href="forgot-password.html" class="forgot-password">Forgot Password</a>
+                    </div>
+
+                    <button type="submit" class="login-btn" id="admin-submit">
+                        <span class="login-btn__label">Login</span>
+                        <svg class="icon-chevron" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M9 5L15 12L9 19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+
+                    <p class="auth-switch">
+                        Have no account?
+                        <button type="button" class="auth-switch__link" id="to-admin-signup">Register here</button>
+                    </p>
+                </form>
+
+                <!-- ADMINISTRATOR CREATE ACCOUNT FORM ================ -->
+                <form class="login-form" id="form-admin-signup" hidden>
+                    <div class="input-label">Full name:</div>
+                    <div class="input-wrapper">
+                        <div class="icon-badge">
+                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <circle cx="12" cy="8" r="3.2" stroke="currentColor" stroke-width="1.8"/>
+                                <path d="M4.5 20C5.5 16 8.4 14.3 12 14.3C15.6 14.3 18.5 16 19.5 20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                            </svg>
+                        </div>
+                        <input type="text" id="admin-signup-name" placeholder="Enter your full name" autocomplete="name" required>
+                    </div>
+
+                    <div class="input-label">Email:</div>
+                    <div class="input-wrapper">
+                        <div class="icon-badge">
+                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.8"/>
+                                <path d="M3.5 6.5L12 13L20.5 6.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                            </svg>
+                        </div>
+                        <input type="email" id="admin-signup-email" placeholder="Enter your email" autocomplete="username" required>
+                    </div>
+
+                    <div class="input-label">Password:</div>
+                    <div class="input-wrapper">
+                        <div class="icon-badge">
+                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <rect x="5" y="11" width="14" height="9" rx="1.6" stroke="currentColor" stroke-width="1.8"/>
+                                <path d="M8 11V7.5A4 4 0 0 1 16 7.5V11" stroke="currentColor" stroke-width="1.8"/>
+                            </svg>
+                        </div>
+                        <input type="password" id="admin-signup-password" placeholder="Create a password" autocomplete="new-password" required>
+                        <span class="password-toggle" data-target="admin-signup-password"><svg class="icon-eye-slash" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M2 12C4 7.5 7.8 5 12 5C16.2 5 20 7.5 22 12C20 16.5 16.2 19 12 19C7.8 19 4 16.5 2 12Z" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/><line x1="3.5" y1="20.5" x2="20.5" y2="3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><svg class="icon-eye" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" hidden><path d="M2 12C4 7.5 7.8 5 12 5C16.2 5 20 7.5 22 12C20 16.5 16.2 19 12 19C7.8 19 4 16.5 2 12Z" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/></svg></span>
+                    </div>
+
+                    <div class="input-label">Confirm password:</div>
+                    <div class="input-wrapper">
+                        <div class="icon-badge">
+                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <rect x="5" y="11" width="14" height="9" rx="1.6" stroke="currentColor" stroke-width="1.8"/>
+                                <path d="M8 11V7.5A4 4 0 0 1 16 7.5V11" stroke="currentColor" stroke-width="1.8"/>
+                            </svg>
+                        </div>
+                        <input type="password" id="admin-signup-confirm-password" placeholder="Re-enter your password" autocomplete="new-password" required>
+                        <span class="password-toggle" data-target="admin-signup-confirm-password"><svg class="icon-eye-slash" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M2 12C4 7.5 7.8 5 12 5C16.2 5 20 7.5 22 12C20 16.5 16.2 19 12 19C7.8 19 4 16.5 2 12Z" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/><line x1="3.5" y1="20.5" x2="20.5" y2="3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><svg class="icon-eye" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" hidden><path d="M2 12C4 7.5 7.8 5 12 5C16.2 5 20 7.5 22 12C20 16.5 16.2 19 12 19C7.8 19 4 16.5 2 12Z" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/></svg></span>
+                    </div>
+
+                    <button type="submit" class="login-btn login-btn--top-gap" id="admin-signup-submit">
+                        <span class="login-btn__label">Create Account</span>
+                        <svg class="icon-chevron" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M9 5L15 12L9 19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+
+                    <p class="auth-switch">
+                        Already have an account?
+                        <button type="button" class="auth-switch__link" id="to-admin-login">Login here</button>
+                    </p>
+                </form>
+
+                <!-- EMPLOYEE FORM ==================================== -->
+                <form class="login-form" id="form-employee" hidden>
+                    <div class="input-label">Username:</div>
+                    <div class="input-wrapper">
+                        <div class="icon-badge">
+                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <circle cx="12" cy="8" r="3.2" stroke="currentColor" stroke-width="1.8"/>
+                                <path d="M4.5 20C5.5 16 8.4 14.3 12 14.3C15.6 14.3 18.5 16 19.5 20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                            </svg>
+                        </div>
+                        <input type="text" id="employee-username" placeholder="Enter your username" autocomplete="username" required>
+                    </div>
+
+                    <div class="input-label">Password:</div>
+                    <div class="input-wrapper">
+                        <div class="icon-badge">
+                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <rect x="5" y="11" width="14" height="9" rx="1.6" stroke="currentColor" stroke-width="1.8"/>
+                                <path d="M8 11V7.5A4 4 0 0 1 16 7.5V11" stroke="currentColor" stroke-width="1.8"/>
+                            </svg>
+                        </div>
+                        <input type="password" id="employee-password" placeholder="Enter your password" autocomplete="current-password" required>
+                        <span class="password-toggle" data-target="employee-password"><svg class="icon-eye-slash" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M2 12C4 7.5 7.8 5 12 5C16.2 5 20 7.5 22 12C20 16.5 16.2 19 12 19C7.8 19 4 16.5 2 12Z" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/><line x1="3.5" y1="20.5" x2="20.5" y2="3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><svg class="icon-eye" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" hidden><path d="M2 12C4 7.5 7.8 5 12 5C16.2 5 20 7.5 22 12C20 16.5 16.2 19 12 19C7.8 19 4 16.5 2 12Z" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/></svg></span>
+                    </div>
+
+                    <div class="forgot-password-container">
+                        <a href="forgot-password.html" class="forgot-password">Forgot Password</a>
+                    </div>
+
+                    <button type="submit" class="login-btn" id="employee-submit">
+                        <span class="login-btn__label">Login</span>
+                        <svg class="icon-chevron" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M9 5L15 12L9 19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+
+                    <p class="auth-switch">
+                        Have no account?
+                        <button type="button" class="auth-switch__link" id="to-signup">Register here</button>
+                    </p>
+                </form>
+
+                <!-- EMPLOYEE CREATE ACCOUNT FORM ===================== -->
+                <form class="login-form" id="form-employee-signup" hidden>
+                    <div class="input-label">Full name:</div>
+                    <div class="input-wrapper">
+                        <div class="icon-badge">
+                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <circle cx="12" cy="8" r="3.2" stroke="currentColor" stroke-width="1.8"/>
+                                <path d="M4.5 20C5.5 16 8.4 14.3 12 14.3C15.6 14.3 18.5 16 19.5 20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                            </svg>
+                        </div>
+                        <input type="text" id="signup-name" placeholder="Enter your full name" autocomplete="name" required>
+                    </div>
+
+                    <div class="input-label">Username:</div>
+                    <div class="input-wrapper">
+                        <div class="icon-badge">
+                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <rect x="4" y="4" width="16" height="16" rx="3" stroke="currentColor" stroke-width="1.8"/>
+                                <circle cx="12" cy="10" r="2.2" stroke="currentColor" stroke-width="1.8"/>
+                                <path d="M8 17C8.6 15 10 14.2 12 14.2C14 14.2 15.4 15 16 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                            </svg>
+                        </div>
+                        <input type="text" id="signup-username" placeholder="Choose a username" autocomplete="username" required>
+                    </div>
+
+                    <div class="input-label">Email:</div>
+                    <div class="input-wrapper">
+                        <div class="icon-badge">
+                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.8"/>
+                                <path d="M3.5 6.5L12 13L20.5 6.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                            </svg>
+                        </div>
+                        <input type="email" id="signup-email" placeholder="Enter your email" autocomplete="email" required>
+                    </div>
+
+                    <div class="input-label">Password:</div>
+                    <div class="input-wrapper">
+                        <div class="icon-badge">
+                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <rect x="5" y="11" width="14" height="9" rx="1.6" stroke="currentColor" stroke-width="1.8"/>
+                                <path d="M8 11V7.5A4 4 0 0 1 16 7.5V11" stroke="currentColor" stroke-width="1.8"/>
+                            </svg>
+                        </div>
+                        <input type="password" id="signup-password" placeholder="Create a password" autocomplete="new-password" required>
+                        <span class="password-toggle" data-target="signup-password"><svg class="icon-eye-slash" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M2 12C4 7.5 7.8 5 12 5C16.2 5 20 7.5 22 12C20 16.5 16.2 19 12 19C7.8 19 4 16.5 2 12Z" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/><line x1="3.5" y1="20.5" x2="20.5" y2="3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><svg class="icon-eye" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" hidden><path d="M2 12C4 7.5 7.8 5 12 5C16.2 5 20 7.5 22 12C20 16.5 16.2 19 12 19C7.8 19 4 16.5 2 12Z" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/></svg></span>
+                    </div>
+
+                    <div class="input-label">Confirm password:</div>
+                    <div class="input-wrapper">
+                        <div class="icon-badge">
+                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <rect x="5" y="11" width="14" height="9" rx="1.6" stroke="currentColor" stroke-width="1.8"/>
+                                <path d="M8 11V7.5A4 4 0 0 1 16 7.5V11" stroke="currentColor" stroke-width="1.8"/>
+                            </svg>
+                        </div>
+                        <input type="password" id="signup-confirm-password" placeholder="Re-enter your password" autocomplete="new-password" required>
+                        <span class="password-toggle" data-target="signup-confirm-password"><svg class="icon-eye-slash" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M2 12C4 7.5 7.8 5 12 5C16.2 5 20 7.5 22 12C20 16.5 16.2 19 12 19C7.8 19 4 16.5 2 12Z" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/><line x1="3.5" y1="20.5" x2="20.5" y2="3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><svg class="icon-eye" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" hidden><path d="M2 12C4 7.5 7.8 5 12 5C16.2 5 20 7.5 22 12C20 16.5 16.2 19 12 19C7.8 19 4 16.5 2 12Z" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/></svg></span>
+                    </div>
+
+                    <button type="submit" class="login-btn login-btn--top-gap" id="signup-submit">
+                        <span class="login-btn__label">Create Account</span>
+                        <svg class="icon-chevron" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M9 5L15 12L9 19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+
+                    <p class="auth-switch">
+                        Already have an account?
+                        <button type="button" class="auth-switch__link" id="to-login">Login here</button>
+                    </p>
+                </form>
+
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="firebase-config.js"></script>
+    <script type="module" src="Index.js"></script>
+</body>
+</html>

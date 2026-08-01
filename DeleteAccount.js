@@ -1,0 +1,121 @@
+import { auth, db } from "./firebase-config.js";
+import {
+  EmailAuthProvider, reauthenticateWithCredential, deleteUser
+} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
+import { doc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+
+// ====================================================================
+// DELETE ACCOUNT
+// ----------------------------------------------------------------
+// Firebase Auth refuses deleteUser() unless the session is "recent" —
+// it throws auth/requires-recent-login otherwise. Password re-entry
+// here isn't just a UX confirmation step, it's what actually satisfies
+// that requirement (reauthenticateWithCredential proves it's really
+// them, right now, not just an old still-valid session).
+//
+// Deletes, in order: the Firestore profile doc (employees/{uid} or
+// admins/{uid} depending on role), then the Auth account itself. If
+// the Firestore delete succeeds but the Auth delete somehow fails,
+// they'd be left signed in with no profile doc — unlikely, but worth
+// knowing if you ever see someone stuck in that state.
+// ====================================================================
+const LOGIN_PAGE_URL = "Index.html";
+
+export function promptDeleteAccount(user, role) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal">
+      <div class="modal__header">
+        <h3>Delete your account?</h3>
+        <button type="button" class="modal__close" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <path d="M6 6L18 18M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal__body">
+        <p class="confirm-dialog__message">This permanently deletes your account and profile. This can't be undone.</p>
+        <div class="form-field" style="margin-top: 14px;">
+          <label for="delete-account-password">Enter your password to confirm</label>
+          <input type="password" id="delete-account-password" autocomplete="current-password">
+        </div>
+        <p class="form-status" id="delete-account-status" hidden></p>
+      </div>
+      <div class="modal__footer">
+        <button type="button" class="btn-outline" data-action="cancel">Cancel</button>
+        <button type="button" class="btn-danger-outline" data-action="confirm">Delete Account</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  const passwordInput = overlay.querySelector("#delete-account-password");
+  const statusEl = overlay.querySelector("#delete-account-status");
+  const confirmBtn = overlay.querySelector('[data-action="confirm"]');
+
+  function close() {
+    overlay.remove();
+  }
+
+  overlay.querySelector(".modal__close").addEventListener("click", close);
+  overlay.querySelector('[data-action="cancel"]').addEventListener("click", close);
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) close();
+  });
+  overlay.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") close();
+  });
+
+  confirmBtn.addEventListener("click", async () => {
+    const password = passwordInput.value;
+
+    if (!password) {
+      showStatus(statusEl, "Enter your password to confirm.", "error");
+      return;
+    }
+
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = "Deleting...";
+    statusEl.hidden = true;
+
+    try {
+      const credential = EmailAuthProvider.credential(user.email, password);
+      await reauthenticateWithCredential(user, credential);
+
+      const profileCollection = role === "admin" ? "admins" : "employees";
+      await deleteDoc(doc(db, profileCollection, user.uid));
+
+      await deleteUser(user);
+
+      sessionStorage.clear();
+      window.location.href = LOGIN_PAGE_URL;
+    } catch (error) {
+      console.error("Couldn't delete account:", error);
+      showStatus(statusEl, mapDeleteError(error), "error");
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = "Delete Account";
+    }
+  });
+
+  passwordInput.focus();
+}
+
+function showStatus(el, message, kind) {
+  el.textContent = message;
+  el.dataset.kind = kind;
+  el.hidden = false;
+}
+
+function mapDeleteError(error) {
+  switch (error.code) {
+    case "auth/wrong-password":
+    case "auth/invalid-credential":
+      return "Incorrect password.";
+    case "auth/too-many-requests":
+      return "Too many attempts. Try again in a moment.";
+    default:
+      return "Something went wrong. Please try again.";
+  }
+}

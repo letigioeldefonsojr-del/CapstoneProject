@@ -1,0 +1,493 @@
+/* ===========================
+   ROOT / RESET
+   =========================== */
+:root {
+    --brand-green: #14532d;
+    --brand-green-dark: #0a2f1a;
+    --brand-green-mid: #1d6b3f;
+    --light-bg: #D8DBD6;
+    --text-dark: #1f2a24;
+    --text-muted: #6b7a72;
+    --danger: #ef4444;
+    --font-display: 'Bricolage Grotesque', 'Segoe UI', sans-serif;
+    --font-body: 'Bricolage Grotesque', 'Segoe UI', sans-serif;
+    --radius: 14px;
+    --transition: 0.25s ease-in-out;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: var(--font-body);
+}
+
+body {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #eef0ec;
+}
+
+/* ===========================
+   LOGIN CONTAINER
+   =========================== */
+.login-container {
+    display: flex;
+    width: 100%;
+    max-width: 1200px;
+    min-height: 650px;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+}
+
+/* ===========================
+   LEFT PANEL (brand)
+   =========================== */
+.left-panel {
+    position: relative;
+    flex: 1;
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-start;
+    padding: 50px 40px;
+    background: #D3D3D3;
+}
+
+.brand-wrapper {
+    text-align: left;
+}
+
+.brand-kicker {
+    position: absolute;
+    top: 28px;
+    left: 40px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.brand-kicker__dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--brand-green);
+    flex-shrink: 0;
+}
+
+.brand-kicker__line {
+    width: 40px;
+    height: 1px;
+    background: var(--brand-green);
+    opacity: 0.5;
+    flex-shrink: 0;
+}
+
+.brand-kicker__text {
+    font-family: var(--font-body);
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-dark);
+    white-space: nowrap;
+}
+
+.logo-container {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(95%, 560px);
+}
+
+.brand-logo {
+    display: block;
+    width: 100%;
+    height: auto;
+    object-fit: contain;
+}
+
+/* Discourages casual right-click-save / drag-out. Note: this is a
+   deterrent, not real protection — anyone using devtools or view-source
+   can still get the file. For actual protection, don't serve the raw
+   file publicly (e.g. serve a watermarked/low-res version). */
+.no-download {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-user-drag: none;
+    user-drag: none;
+    pointer-events: none;
+}
+
+/* ===========================
+   RIGHT PANEL (form) - dark green
+   =========================== */
+.right-panel {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 50px 40px;
+    background: linear-gradient(160deg, var(--brand-green-mid) 0%, var(--brand-green) 55%, var(--brand-green-dark) 100%);
+}
+
+.login-card {
+    width: 100%;
+    max-width: 400px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 20px;
+    padding: 40px 34px;
+    backdrop-filter: blur(4px);
+}
+
+/* ===========================
+   CARD HEADER — "— Login —"
+   =========================== */
+.card-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 24px;
+}
+
+.card-header h2 {
+    font-family: var(--font-display);
+    font-size: 1.9rem;
+    font-weight: 700;
+    color: #ffffff;
+    white-space: nowrap;
+}
+
+.card-header .line {
+    flex: 1;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.4);
+}
+
+/* ===========================
+   ROLE TOGGLE (Administrator / Employee)
+   — styled to sit inside the translucent card like a pill switch,
+     echoing the same white-pill look as .login-btn
+   =========================== */
+.role-toggle {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    background: rgba(255, 255, 255, 0.10);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 30px;
+    padding: 4px;
+    margin-bottom: 26px;
+}
+
+.role-toggle[hidden] {
+    display: none !important;
+}
+
+.role-toggle__thumb {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    width: calc(50% - 4px);
+    height: calc(100% - 8px);
+    background: #ffffff;
+    border-radius: 26px;
+    transition: transform var(--transition);
+    z-index: 0;
+}
+
+.role-toggle__btn {
+    position: relative;
+    z-index: 1;
+    border: none;
+    background: transparent;
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: #ffffff;
+    padding: 10px 8px;
+    border-radius: 26px;
+    cursor: pointer;
+    transition: color var(--transition);
+}
+
+.role-toggle__btn.is-active { color: var(--brand-green); }
+
+/* ===========================
+   AUTH SWITCH LINK
+   ("Have no account? Register here." / "Already have an account? Login here.")
+   =========================== */
+.auth-switch {
+    text-align: center;
+    font-size: 0.82rem;
+    color: rgba(255, 255, 255, 0.75);
+    margin-top: 18px;
+}
+
+.auth-switch__link {
+    border: none;
+    background: none;
+    padding: 0;
+    margin-left: 4px;
+    font-family: var(--font-body);
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #ffffff;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.auth-switch__link:hover { color: #d4e8d6; }
+
+/* Gives the Create Account button the same breathing room the Login
+   button gets from .forgot-password-container, since the sign-up form
+   has no forgot-password link above its submit button. */
+.login-btn--top-gap {
+    margin-top: 26px;
+}
+
+/* ===========================
+   STATUS MESSAGE
+   =========================== */
+.form-status {
+    font-size: 0.82rem;
+    padding: 10px 14px;
+    border-radius: 10px;
+    margin-bottom: 18px;
+    line-height: 1.45;
+}
+
+.form-status[data-kind="error"] {
+    background: rgba(239, 68, 68, 0.16);
+    color: #ffd9d9;
+    border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.form-status[data-kind="success"] {
+    background: rgba(255, 255, 255, 0.14);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+/* ===========================
+   FORM ELEMENTS
+   =========================== */
+.input-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #ffffff;
+    margin-bottom: 8px;
+    margin-top: 20px;
+}
+
+.input-label:first-of-type {
+    margin-top: 0;
+}
+
+.input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.icon-badge {
+    position: absolute;
+    left: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 2;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(15, 81, 50, 0.08);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    /* icon-badge now colors an inline SVG rather than an <img>,
+       so the icon color follows this one variable */
+    color: var(--brand-green);
+}
+
+.icon-badge svg {
+    width: 16px;
+    height: 16px;
+}
+
+.input-wrapper input {
+    width: 100%;
+    height: 50px;
+    border: none;
+    border-radius: 10px;
+    background: #ffffff;
+    outline: none;
+    font-size: 0.95rem;
+    color: var(--text-dark);
+    padding: 0 44px 0 52px;
+    transition: box-shadow var(--transition);
+}
+
+.input-wrapper input::placeholder {
+    font-size: 0.95rem;
+    color: #a9b3ac;
+}
+
+.input-wrapper input:focus {
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.35);
+}
+
+.password-toggle {
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--brand-green);
+    cursor: pointer;
+    z-index: 2;
+    display: flex;
+}
+
+.password-toggle svg {
+    width: 17px;
+    height: 17px;
+}
+
+.password-toggle svg[hidden] {
+    display: none !important;
+}
+
+.password-toggle:hover {
+    color: var(--brand-green-dark);
+}
+
+/* ===========================
+   FORGOT PASSWORD + LOGIN BUTTON
+   =========================== */
+.forgot-password-container {
+    text-align: right;
+    margin-top: 10px;
+    margin-bottom: 26px;
+}
+
+.forgot-password {
+    font-size: 0.82rem;
+    color: #ffffff;
+    text-decoration: underline;
+    font-weight: 500;
+    transition: color var(--transition);
+}
+
+.forgot-password:hover {
+    color: #d4e8d6;
+}
+
+.back-to-login {
+    display: block;
+    text-align: center;
+    margin-top: 18px;
+    font-size: 0.82rem;
+    color: #ffffff;
+    text-decoration: underline;
+}
+
+.back-to-login:hover {
+    color: #d4e8d6;
+}
+
+.login-btn {
+    width: 100%;
+    height: 50px;
+    border: none;
+    border-radius: 30px;
+    background: #ffffff;
+    color: var(--brand-green);
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    transition: all var(--transition);
+}
+
+.login-btn:hover {
+    background: #eef7f0;
+    transform: translateY(-1px);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+}
+
+.login-btn:active {
+    transform: translateY(1px);
+}
+
+.login-btn:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.login-btn .icon-chevron {
+    width: 14px;
+    height: 14px;
+    transition: transform var(--transition);
+}
+
+.login-btn:hover .icon-chevron {
+    transform: translateX(3px);
+}
+
+/* Keyboard accessibility */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible {
+    outline: 2px solid #ffffff;
+    outline-offset: 2px;
+}
+
+/* ===========================
+   RESPONSIVE
+   =========================== */
+@media (max-width: 760px) {
+    .login-container {
+        flex-direction: column;
+        max-width: 420px;
+        height: auto;
+    }
+
+    .left-panel {
+        padding: 28px 24px 22px;
+        min-height: 260px;
+    }
+
+    .brand-kicker {
+        top: 20px;
+        left: 24px;
+    }
+
+    .right-panel {
+        padding: 32px 24px;
+    }
+}
+
+@media (max-width: 480px) {
+    .left-panel {
+        padding: 22px 20px 18px;
+    }
+
+    .brand-kicker {
+        left: 20px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    * {
+        animation: none !important;
+        transition: none !important;
+    }
+}
