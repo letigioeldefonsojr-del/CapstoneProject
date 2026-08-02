@@ -5,6 +5,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getProducts, invalidateProductsCache } from "./ProductCache.js";
 import { confirmDialog } from "./ConfirmDialog.js";
+import { promptPasswordConfirm } from "./PasswordConfirm.js";
 
 // ====================================================================
 // CHUNK 0 — CONFIG
@@ -89,8 +90,10 @@ let isAdmin = false;
 let currentUser = null;
 let currentUserRole = "employee";
 let editOriginalProduct = null; // snapshot of the product before an Edit, used to log what changed
+let selectedProductIds = new Set(); // bulk-delete selection (admin only)
 let editingProductId = null; // null = Add mode, a product id = Edit mode
 let parsedCsvRows = [];      // rows staged for the CSV preview/confirm step
+let rawCsvRows = [];         // unmapped rows from Papa Parse — re-mapped whenever the ignore-qty checkbox changes
 
 // ====================================================================
 // CHUNK 0B — FORCE-CLOSE MODALS ON PAGE ENTRY
@@ -111,6 +114,7 @@ function forceCloseAllModals() {
   if (productModal) productModal.hidden = true;
   if (csvModal) csvModal.hidden = true;
   if (scannerModal) scannerModal.hidden = true;
+  document.getElementById("scanner-add-new-btn")?.setAttribute("hidden", "");
   if (stockLogModal) stockLogModal.hidden = true;
   document.getElementById("product-form")?.reset();
   editOriginalProduct = null;
@@ -126,6 +130,7 @@ function forceCloseAllModals() {
   document.getElementById("simple-stock-field")?.removeAttribute("hidden");
   document.getElementById("variant-editor-field")?.setAttribute("hidden", "");
   parsedCsvRows = [];
+  rawCsvRows = [];
 }
 
 forceCloseAllModals();
@@ -325,13 +330,21 @@ function renderInventoryTable(products, stockFilter) {
   const tbody = document.getElementById("inventory-tbody");
   const countLabel = document.getElementById("inventory-count");
   document.getElementById("actions-header").hidden = !isAdmin;
+  document.getElementById("select-all-header").hidden = !isAdmin;
   expandedVariantRow = null;
   expandedVariantMainRow = null;
+
+  // Selection resets on every re-render (filter/search/sort change) —
+  // safer than silently keeping a selection the user can no longer see.
+  selectedProductIds.clear();
+  updateBulkDeleteBar();
+  const selectAllCheckbox = document.getElementById("select-all-checkbox");
+  if (selectAllCheckbox) selectAllCheckbox.checked = false;
 
   countLabel.textContent = `${products.length} product${products.length === 1 ? "" : "s"}`;
 
   if (products.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="${isAdmin ? 6 : 5}" class="inventory-empty">No products found.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${isAdmin ? 7 : 5}" class="inventory-empty">No products found.</td></tr>`;
     return;
   }
 
@@ -351,7 +364,7 @@ function renderInventoryTable(products, stockFilter) {
       tbody.appendChild(variantRow);
 
       mainRow.addEventListener("click", (event) => {
-        if (event.target.closest(".inventory-edit-btn")) return;
+        if (event.target.closest(".inventory-edit-btn, .inventory-row-checkbox")) return;
         const expanding = variantRow.hidden;
 
         // Accordion: collapse whichever product's variant row was
@@ -382,7 +395,12 @@ function buildProductRow(product, hasVariants, variants) {
   row.className = "inventory-row";
   if (hasVariants) row.classList.add("inventory-row--expandable");
 
+  const checkboxCellHtml = isAdmin
+    ? `<td><input type="checkbox" class="inventory-row-checkbox" aria-label="Select ${escapeHtmlAttr(name)}"></td>`
+    : "";
+
   row.innerHTML = `
+    ${checkboxCellHtml}
     <td><div class="inventory-product"></div></td>
     <td></td>
     <td></td>
@@ -419,22 +437,31 @@ function buildProductRow(product, hasVariants, variants) {
   productCell.appendChild(nameSpan);
 
   const cells = row.querySelectorAll("td");
-  cells[1].textContent = category;
+  const offset = isAdmin ? 1 : 0;
+  cells[1 + offset].textContent = category;
 
   if (hasVariants) {
-    cells[2].textContent = `${variants.length} variant${variants.length === 1 ? "" : "s"}`;
-    cells[3].textContent = variantPriceRange(variants);
-    cells[4].appendChild(buildVariantSummaryBadge(variants));
+    cells[2 + offset].textContent = `${variants.length} variant${variants.length === 1 ? "" : "s"}`;
+    cells[3 + offset].textContent = variantPriceRange(variants);
+    cells[4 + offset].appendChild(buildVariantSummaryBadge(variants));
   } else {
     const stock = product[STOCK_FIELD];
     const price = product[PRODUCT_PRICE_FIELD];
     const isAvailable = product[PRODUCT_AVAILABLE_FIELD];
-    cells[2].textContent = typeof stock === "number" ? stock : "—";
-    cells[3].textContent = price || "—";
-    cells[4].appendChild(buildStockBadge(stock, isAvailable));
+    cells[2 + offset].textContent = typeof stock === "number" ? stock : "—";
+    cells[3 + offset].textContent = price || "—";
+    cells[4 + offset].appendChild(buildStockBadge(stock, isAvailable));
   }
 
   if (isAdmin) {
+    const checkbox = row.querySelector(".inventory-row-checkbox");
+    checkbox.addEventListener("click", (event) => event.stopPropagation());
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) selectedProductIds.add(product.id);
+      else selectedProductIds.delete(product.id);
+      updateBulkDeleteBar();
+    });
+
     const actionsCell = document.createElement("td");
     const editBtn = document.createElement("button");
     editBtn.type = "button";
@@ -465,7 +492,7 @@ function buildVariantRow(variants) {
   row.hidden = true;
 
   const cell = document.createElement("td");
-  cell.colSpan = isAdmin ? 6 : 5;
+  cell.colSpan = isAdmin ? 7 : 5;
 
   const list = document.createElement("div");
   list.className = "variant-list";
@@ -553,6 +580,9 @@ function buildStockBadge(stock, isAvailable) {
 function wireAdminControls() {
   document.getElementById("admin-toolbar").hidden = false;
 
+  document.getElementById("select-all-checkbox").addEventListener("change", handleSelectAllToggle);
+  document.getElementById("bulk-delete-btn").addEventListener("click", handleBulkDelete);
+
   document.getElementById("add-product-btn").addEventListener("click", () => openAddModal());
   document.getElementById("product-modal-close").addEventListener("click", closeProductModal);
   document.getElementById("product-modal-cancel").addEventListener("click", closeProductModal);
@@ -584,6 +614,9 @@ function wireAdminControls() {
     document.getElementById("csv-file-input").click();
   });
   document.getElementById("csv-file-input").addEventListener("change", handleCsvFileSelected);
+  document.getElementById("csv-ignore-qty").addEventListener("change", () => {
+    if (rawCsvRows.length > 0) remapAndRenderCsvPreview();
+  });
   document.getElementById("csv-modal-close").addEventListener("click", closeCsvModal);
   document.getElementById("csv-modal-cancel").addEventListener("click", closeCsvModal);
   document.getElementById("csv-confirm-import").addEventListener("click", handleConfirmCsvImport);
@@ -1026,8 +1059,8 @@ function handleCsvFileSelected(event) {
       }
 
       hideCsvStatus();
-      parsedCsvRows = results.data.map(csvRowToProduct);
-      renderCsvPreview();
+      rawCsvRows = results.data;
+      remapAndRenderCsvPreview();
     },
     error: (error) => {
       console.error("Couldn't parse CSV:", error);
@@ -1036,9 +1069,19 @@ function handleCsvFileSelected(event) {
   });
 }
 
+// Re-runs the raw→product mapping (honoring the current ignore-qty
+// checkbox state) and re-renders the preview — used both on first
+// parse and whenever the checkbox is toggled, without re-parsing the file.
+function remapAndRenderCsvPreview() {
+  const ignoreQty = document.getElementById("csv-ignore-qty").checked;
+  parsedCsvRows = rawCsvRows.map((row) => csvRowToProduct(row, ignoreQty));
+  renderCsvPreview();
+}
+
 // Rejects the file entirely — no preview, no row data, Confirm Import
 // stays disabled — until a CSV with the correct headers is uploaded.
 function showCsvHeaderError(missingHeaders) {
+  rawCsvRows = [];
   parsedCsvRows = [];
   document.getElementById("csv-preview-tbody").innerHTML = "";
   document.getElementById("csv-summary").textContent = "";
@@ -1054,7 +1097,7 @@ function hideCsvStatus() {
   document.getElementById("csv-status").hidden = true;
 }
 
-function csvRowToProduct(rawRow) {
+function csvRowToProduct(rawRow, ignoreQty) {
   const normalized = {};
   Object.keys(rawRow).forEach((key) => {
     const cleanKey = key.trim().toLowerCase();
@@ -1078,12 +1121,16 @@ function csvRowToProduct(rawRow) {
     sku: get("sku") || null,
     principal: get("principal") || null,
     unit: get("unit") || null,
-    [STOCK_FIELD]: isNaN(stockCount) ? 0 : stockCount,
+    // When ignoreQty is true, stock is deliberately left unset (null)
+    // rather than trusting a "qty" column that isn't confirmed
+    // accurate — shows correctly as "Stock Not Set" instead of
+    // falsely appearing In Stock. See CHUNK 0 note above.
+    [STOCK_FIELD]: ignoreQty ? null : (isNaN(stockCount) ? 0 : stockCount),
     qty1: isNaN(qty1) ? null : qty1,
     qty2: isNaN(qty2) ? null : qty2,
     [PRODUCT_PRICE_FIELD]: isNaN(priceNum) ? "₱0.00" : formatPrice(priceNum),
     wholesalePrice: isNaN(wsNum) ? null : formatPrice(wsNum),
-    [PRODUCT_AVAILABLE_FIELD]: true,
+    [PRODUCT_AVAILABLE_FIELD]: ignoreQty ? null : true,
     _valid: Boolean(name) && Boolean(category)
   };
 }
@@ -1112,7 +1159,7 @@ function renderCsvPreview() {
     const cells = tr.querySelectorAll("td");
     cells[0].textContent = row[PRODUCT_NAME_FIELD] || "(missing name)";
     cells[1].textContent = row[PRODUCT_CATEGORY_FIELD] || "(missing category)";
-    cells[2].textContent = row[STOCK_FIELD];
+    cells[2].textContent = typeof row[STOCK_FIELD] === "number" ? row[STOCK_FIELD] : "Not set";
     cells[3].textContent = row[PRODUCT_PRICE_FIELD];
     cells[4].textContent = row.sku || "—";
     tbody.appendChild(tr);
@@ -1123,6 +1170,7 @@ function closeCsvModal() {
   document.getElementById("csv-modal-overlay").hidden = true;
   hideCsvStatus();
   parsedCsvRows = [];
+  rawCsvRows = [];
 }
 
 async function handleConfirmCsvImport() {
@@ -1227,6 +1275,7 @@ function openScannerModal() {
     b.classList.toggle("is-active", b.dataset.mode === "sale")
   );
   document.getElementById("scanner-found").hidden = true;
+  document.getElementById("scanner-add-new-btn").hidden = true;
   hideScannerStatus();
   document.getElementById("scanner-log").innerHTML =
     `<p class="scanner-log__empty">Scanned items will appear here.</p>`;
@@ -1296,8 +1345,22 @@ function handleBarcodeScanned(barcode) {
     scannerCurrentMatch = null;
     document.getElementById("scanner-found").hidden = true;
     showScannerStatus(`No product found for barcode "${barcode}".`, "error");
+
+    const addNewBtn = document.getElementById("scanner-add-new-btn");
+    if (isAdmin) {
+      addNewBtn.hidden = false;
+      addNewBtn.onclick = () => {
+        closeScannerModal();
+        openAddModal();
+        document.getElementById("pf-barcode").value = barcode;
+      };
+    } else {
+      addNewBtn.hidden = true;
+    }
     return;
   }
+
+  document.getElementById("scanner-add-new-btn").hidden = true;
 
   const info = getMatchDisplayInfo(product, barcode);
   scannerCurrentMatch = { product, barcode, info };
@@ -1629,4 +1692,69 @@ function buildStockLogItem(entry) {
   el.appendChild(meta);
 
   return el;
+}
+
+// ====================================================================
+// CHUNK 10 — BULK SELECT / DELETE (admin only)
+// ----------------------------------------------------------------
+// Select individual rows, or all currently-visible rows via the
+// header checkbox, then delete them in one batch. Gated behind a
+// REAL password check (PasswordConfirm.js reauthenticates against
+// Firebase, not just a click-through dialog) since this is
+// permanent and irreversible — "strict validation" for a
+// destructive bulk action.
+// ====================================================================
+function updateBulkDeleteBar() {
+  const bar = document.getElementById("bulk-delete-bar");
+  const count = selectedProductIds.size;
+  bar.hidden = count === 0;
+  document.getElementById("bulk-delete-count").textContent =
+    `${count} selected`;
+}
+
+function handleSelectAllToggle(event) {
+  const checked = event.target.checked;
+  document.querySelectorAll(".inventory-row-checkbox").forEach((checkbox) => {
+    checkbox.checked = checked;
+    checkbox.dispatchEvent(new Event("change"));
+  });
+}
+
+async function handleBulkDelete() {
+  const ids = Array.from(selectedProductIds);
+  if (ids.length === 0) return;
+
+  const verified = await promptPasswordConfirm(
+    `Enter your password to permanently delete ${ids.length} product${ids.length === 1 ? "" : "s"}. This can't be undone.`,
+    {
+      title: `Delete ${ids.length} product${ids.length === 1 ? "" : "s"}?`,
+      confirmLabel: "Delete"
+    }
+  );
+  if (!verified) return;
+
+  const deleteBtn = document.getElementById("bulk-delete-btn");
+  deleteBtn.disabled = true;
+  deleteBtn.textContent = "Deleting...";
+
+  try {
+    // Firestore batches cap at 500 ops — chunk just like CSV import.
+    const BATCH_LIMIT = 450;
+    for (let i = 0; i < ids.length; i += BATCH_LIMIT) {
+      const chunk = ids.slice(i, i + BATCH_LIMIT);
+      const batch = writeBatch(db);
+      chunk.forEach((id) => batch.delete(doc(db, PRODUCTS_COLLECTION, id)));
+      await batch.commit();
+    }
+
+    selectedProductIds.clear();
+    await reloadAfterWrite();
+  } catch (error) {
+    console.error("Couldn't delete selected products:", error);
+    window.alert("Something went wrong deleting some products. Check your inventory list — some may not have been removed.");
+  } finally {
+    deleteBtn.disabled = false;
+    deleteBtn.textContent = "Delete Selected";
+    updateBulkDeleteBar();
+  }
 }

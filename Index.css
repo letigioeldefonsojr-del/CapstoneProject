@@ -508,3 +508,10 @@ input:focus-visible {
         transition: none !important;
     }
 }
+
+/* ===========================
+   GLOBAL [hidden] FIX — see Dashboard.css for the full explanation.
+   =========================== */
+[hidden] {
+    display: none !important;
+}

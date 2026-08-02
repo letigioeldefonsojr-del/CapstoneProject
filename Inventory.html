@@ -179,10 +179,18 @@
             <span class="inventory-count" id="inventory-count">— products</span>
         </div>
 
+        <div class="bulk-delete-bar" id="bulk-delete-bar" hidden>
+            <span id="bulk-delete-count">0 selected</span>
+            <button type="button" class="btn-danger-outline" id="bulk-delete-btn">Delete Selected</button>
+        </div>
+
         <div class="panel inventory-panel">
             <table class="inventory-table">
                 <thead>
                     <tr>
+                        <th id="select-all-header" hidden>
+                            <input type="checkbox" id="select-all-checkbox" aria-label="Select all products">
+                        </th>
                         <th>Product</th>
                         <th>Category</th>
                         <th>Stock</th>
@@ -326,6 +334,10 @@
         </div>
         <div class="modal__body">
             <p class="form-status" id="csv-status" hidden></p>
+            <label class="checkbox-field csv-qty-option">
+                <input type="checkbox" id="csv-ignore-qty" checked>
+                Don't trust the "qty" column — import without stock counts (recommended if quantities aren't confirmed accurate)
+            </label>
             <div class="csv-preview-wrap">
                 <table class="inventory-table" id="csv-preview-table">
                     <thead>
@@ -374,6 +386,7 @@
             </div>
 
             <p class="form-status" id="scanner-status" hidden></p>
+            <button type="button" class="btn-primary" id="scanner-add-new-btn" hidden>+ Add as New Product</button>
 
             <div class="scanner-found" id="scanner-found" hidden>
                 <img class="scanner-found__thumb" id="scanner-found-thumb" src="" alt="">
