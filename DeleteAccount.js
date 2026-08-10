@@ -80,23 +80,56 @@ export function promptDeleteAccount(user, role) {
     confirmBtn.textContent = "Deleting...";
     statusEl.hidden = true;
 
+    // Step 1: reauthenticate. If this fails, nothing has been
+    // touched yet — safe to just show the error and let them retry.
     try {
       const credential = EmailAuthProvider.credential(user.email, password);
       await reauthenticateWithCredential(user, credential);
-
-      const profileCollection = role === "admin" ? "admins" : "employees";
-      await deleteDoc(doc(db, profileCollection, user.uid));
-
-      await deleteUser(user);
-
-      sessionStorage.clear();
-      window.location.href = LOGIN_PAGE_URL;
     } catch (error) {
-      console.error("Couldn't delete account:", error);
+      console.error("Reauthentication failed:", error);
       showStatus(statusEl, mapDeleteError(error), "error");
       confirmBtn.disabled = false;
       confirmBtn.textContent = "Delete Account";
+      return;
     }
+
+    // Step 2: delete the Firestore profile doc. Password is already
+    // verified at this point, so a failure here is a real problem —
+    // but nothing about their login has changed yet.
+    const profileCollection = role === "admin" ? "admins" : "employees";
+    try {
+      await deleteDoc(doc(db, profileCollection, user.uid));
+    } catch (error) {
+      console.error("Couldn't delete profile document:", error);
+      showStatus(statusEl, "Couldn't remove your profile data. Please try again.", "error");
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = "Delete Account";
+      return;
+    }
+
+    // Step 3: delete the actual login (Authentication) record — this
+    // is the piece that controls whether the email can be reused.
+    // If THIS specific step fails, the profile from step 2 is already
+    // gone, but the login itself still exists — an actionable partial
+    // state, not a silent one. Clicking Delete Account again will
+    // finish it (the profile delete above is a harmless no-op on an
+    // already-deleted doc, so retrying is always safe).
+    try {
+      await deleteUser(user);
+    } catch (error) {
+      console.error("Profile was deleted, but deleting the login itself failed:", error);
+      showStatus(
+        statusEl,
+        "Your profile was removed, but we couldn't finish deleting your login. Please click Delete Account one more time to finish.",
+        "error"
+      );
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = "Delete Account";
+      return;
+    }
+
+    sessionStorage.clear();
+    window.location.href = LOGIN_PAGE_URL;
   });
 
   passwordInput.focus();
