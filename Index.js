@@ -1,7 +1,9 @@
 import { auth, db } from "./firebase-config.js";
 import { promptForgotPassword } from "./ForgotPassword.js";
+import { validatePasswordStrength } from "./PasswordStrength.js";
+import { checkLoginAllowed, recordFailedAttempt, resetAttempts } from "./LoginAttempts.js";
 import {
-  signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, onAuthStateChanged
+  signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, onAuthStateChanged, signOut
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import {
   collection, query, where, getDocs, limit, serverTimestamp, doc, setDoc
@@ -225,18 +227,34 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
+    const lockStatus = await checkLoginAllowed(email);
+    if (!lockStatus.allowed) {
+      showStatus(lockStatus.message, "error");
+      return;
+    }
+
     setButtonLoading(submitBtn, true, "Login", "Signing in...");
 
     try {
       await signInWithEmailAndPassword(auth, email, password);
+      await resetAttempts(email);
       sessionStorage.setItem("almares_role", "admin");
       showStatus("Signed in. Redirecting...", "success");
       window.location.replace(ADMIN_REDIRECT_URL);
     } catch (error) {
-      showStatus(mapAuthError(error), "error");
+      if (isWrongCredentialError(error)) {
+        const message = await recordFailedAttempt(email);
+        showStatus(message, "error");
+      } else {
+        showStatus(mapAuthError(error), "error");
+      }
     } finally {
       setButtonLoading(submitBtn, false, "Login", "Signing in...");
     }
+  }
+
+  function isWrongCredentialError(error) {
+    return ["auth/wrong-password", "auth/invalid-credential", "auth/user-not-found"].includes(error.code);
   }
 
   function mapAuthError(error) {
@@ -252,7 +270,7 @@ document.addEventListener("DOMContentLoaded", () => {
       case "auth/email-already-in-use":
         return "An account already exists with that email.";
       case "auth/weak-password":
-        return "Password should be at least 6 characters.";
+        return "Password must be at least 8 characters and include a mix of uppercase, lowercase, numbers, and symbols.";
       default:
         return "Something went wrong. Please try again.";
     }
@@ -282,6 +300,12 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
+    const strength = validatePasswordStrength(password, name);
+    if (!strength.valid) {
+      showStatus(strength.message, "error");
+      return;
+    }
+
     setButtonLoading(submitBtn, true, "Create Account", "Creating account...");
 
     try {
@@ -295,10 +319,18 @@ document.addEventListener("DOMContentLoaded", () => {
         createdAt: serverTimestamp()
       });
 
-      sessionStorage.setItem("almares_role", "admin");
+      // Sign back out rather than auto-redirecting to the dashboard —
+      // account creation succeeding isn't the same as choosing to log
+      // in right now. This also closes a real gap: without an explicit
+      // signOut(), the person would stay secretly authenticated while
+      // looking at the login form, which could let them slip past the
+      // "bounce already signed-in users" guard on a later page load.
+      await signOut(auth);
+      sessionStorage.removeItem("almares_role");
 
-      showStatus("Account created. Redirecting...", "success");
-      window.location.replace(ADMIN_REDIRECT_URL);
+      showStatus("Account created. Please log in.", "success");
+      formAdminSignup.reset();
+      setAdminMode("login");
     } catch (error) {
       showStatus(mapAuthError(error), "error");
     } finally {
@@ -328,13 +360,20 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
+    const lockStatus = await checkLoginAllowed(usernameInput);
+    if (!lockStatus.allowed) {
+      showStatus(lockStatus.message, "error");
+      return;
+    }
+
     setButtonLoading(submitBtn, true, "Login", "Signing in...");
 
     try {
       const employeeDoc = await findEmployeeRecord(usernameInput);
 
       if (!employeeDoc) {
-        showStatus("No employee found with that username.", "error");
+        const message = await recordFailedAttempt(usernameInput);
+        showStatus(message, "error");
         return;
       }
 
@@ -352,6 +391,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       await signInWithEmailAndPassword(auth, email, password);
+      await resetAttempts(usernameInput);
 
       sessionStorage.setItem("almares_role", "employee");
       sessionStorage.setItem("almares_employee_doc_id", employeeDoc.id);
@@ -360,7 +400,12 @@ document.addEventListener("DOMContentLoaded", () => {
       window.location.replace(EMPLOYEE_REDIRECT_URL);
     } catch (error) {
       console.error(error);
-      showStatus(mapAuthError(error), "error");
+      if (isWrongCredentialError(error)) {
+        const message = await recordFailedAttempt(usernameInput);
+        showStatus(message, "error");
+      } else {
+        showStatus(mapAuthError(error), "error");
+      }
     } finally {
       setButtonLoading(submitBtn, false, "Login", "Signing in...");
     }
@@ -402,6 +447,12 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
+    const strength = validatePasswordStrength(password, name);
+    if (!strength.valid) {
+      showStatus(strength.message, "error");
+      return;
+    }
+
     setButtonLoading(submitBtn, true, "Create Account", "Creating account...");
 
     try {
@@ -422,6 +473,13 @@ document.addEventListener("DOMContentLoaded", () => {
         role: "employee",
         createdAt: serverTimestamp()
       });
+
+      // Sign back out — createUserWithEmailAndPassword auto-authenticates,
+      // so without this the person would stay secretly signed in while
+      // looking at the login form (a real gap: it could let them slip
+      // past the "bounce already signed-in users" guard on a later
+      // page load, even with activated:false).
+      await signOut(auth);
 
       showStatus("Account created. Verify your email to activate it before logging in.", "success");
       formSignup.reset();
