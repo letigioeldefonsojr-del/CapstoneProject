@@ -662,3 +662,13 @@ input:focus-visible {
 [hidden] {
     display: none !important;
 }
+
+/* ===========================
+   RESET PASSWORD PAGE
+   =========================== */
+.reset-password__email {
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.85);
+    margin-bottom: 18px;
+    text-align: center;
+}

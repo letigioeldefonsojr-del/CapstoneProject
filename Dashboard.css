@@ -1794,3 +1794,40 @@ button {
     accent-color: var(--brand-green);
     cursor: pointer;
 }
+
+/* ===========================
+   PASSWORD FIELD WITH SHOW/HIDE TOGGLE (DeleteAccount, PasswordConfirm)
+   =========================== */
+.password-field-wrapper {
+    position: relative;
+}
+
+.password-field-input {
+    width: 100%;
+    padding-right: 40px;
+    /* Larger, more visible masked dots than the browser default. */
+    letter-spacing: 3px;
+    font-size: 16px;
+}
+
+.password-field-toggle {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: none;
+    background: none;
+    color: var(--muted);
+    display: flex;
+    cursor: pointer;
+    padding: 4px;
+}
+
+.password-field-toggle:hover {
+    color: var(--ink);
+}
+
+.password-field-toggle svg {
+    width: 17px;
+    height: 17px;
+}

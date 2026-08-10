@@ -38,7 +38,13 @@ export function promptDeleteAccount(user, role) {
         <p class="confirm-dialog__message">This permanently deletes your account and profile. This can't be undone.</p>
         <div class="form-field" style="margin-top: 14px;">
           <label for="delete-account-password">Enter your password to confirm</label>
-          <input type="password" id="delete-account-password" autocomplete="current-password">
+          <div class="password-field-wrapper">
+            <input type="password" id="delete-account-password" autocomplete="current-password" class="password-field-input">
+            <button type="button" class="password-field-toggle" aria-label="Show password">
+              <svg class="icon-eye-slash" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M2 12C4 7.5 7.8 5 12 5C16.2 5 20 7.5 22 12C20 16.5 16.2 19 12 19C7.8 19 4 16.5 2 12Z" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/><line x1="3.5" y1="20.5" x2="20.5" y2="3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+              <svg class="icon-eye" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" hidden><path d="M2 12C4 7.5 7.8 5 12 5C16.2 5 20 7.5 22 12C20 16.5 16.2 19 12 19C7.8 19 4 16.5 2 12Z" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/></svg>
+            </button>
+          </div>
         </div>
         <p class="form-status" id="delete-account-status" hidden></p>
       </div>
@@ -54,6 +60,14 @@ export function promptDeleteAccount(user, role) {
   const passwordInput = overlay.querySelector("#delete-account-password");
   const statusEl = overlay.querySelector("#delete-account-status");
   const confirmBtn = overlay.querySelector('[data-action="confirm"]');
+
+  overlay.querySelector(".password-field-toggle").addEventListener("click", () => {
+    const toggle = overlay.querySelector(".password-field-toggle");
+    const isPass = passwordInput.type === "password";
+    passwordInput.type = isPass ? "text" : "password";
+    toggle.querySelector(".icon-eye").hidden = isPass;
+    toggle.querySelector(".icon-eye-slash").hidden = !isPass;
+  });
 
   function close() {
     overlay.remove();
