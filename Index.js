@@ -2,9 +2,9 @@ import { auth, db } from "./firebase-config.js";
 import { promptForgotPassword } from "./ForgotPassword.js";
 import { validatePasswordStrength } from "./PasswordStrength.js";
 import { checkLoginAllowed, recordFailedAttempt, resetAttempts } from "./LoginAttempts.js";
-import { verifyStaffCode } from "./StaffCode.js?v=2";
-import { sendOtpCode, verifyOtpCode } from "./OtpVerification.js?v=2";
-import { generateUniqueUsername } from "./UsernameGenerator.js?v=2";
+import { verifyStaffCode } from "./StaffCode.js";
+import { sendOtpCode, verifyOtpCode } from "./OtpVerification.js";
+import { generateUniqueUsername } from "./UsernameGenerator.js";
 import {
   signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, onAuthStateChanged, signOut
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
