@@ -28,7 +28,13 @@ import { sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.13
 const RESET_PASSWORD_URL = "https://capstoneproject-403.pages.dev/ResetPassword.html";
 const actionCodeSettings = {
   url: RESET_PASSWORD_URL,
-  handleCodeInApp: false
+  // This is the flag that actually matters here — true tells Firebase
+  // to send the person straight to OUR page with the reset code
+  // attached, instead of handling everything on Firebase's own
+  // default hosted widget. Previously set to false, which was wrong —
+  // that's why the link kept opening Firebase's page regardless of
+  // the url above.
+  handleCodeInApp: true
 };
 
 const POPULAR_EMAIL_DOMAINS = [
