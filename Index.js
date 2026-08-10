@@ -1,4 +1,5 @@
 import { auth, db } from "./firebase-config.js";
+import { promptForgotPassword } from "./ForgotPassword.js";
 import {
   signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
@@ -176,6 +177,13 @@ document.addEventListener("DOMContentLoaded", () => {
       toggle.querySelector(".icon-eye").hidden = isPass;
       toggle.querySelector(".icon-eye-slash").hidden = !isPass;
     });
+  });
+
+  // ------------------------------------------------------------------
+  // CHUNK 4B — FORGOT PASSWORD
+  // ------------------------------------------------------------------
+  document.querySelectorAll(".forgot-password-btn").forEach((btn) => {
+    btn.addEventListener("click", () => promptForgotPassword());
   });
 
   // ------------------------------------------------------------------
