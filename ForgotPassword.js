@@ -6,12 +6,31 @@ import { sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.13
 // ----------------------------------------------------------------
 // Uses Firebase's built-in password reset flow — sendPasswordResetEmail
 // sends a real email with a reset link; the person sets a new password
-// on Firebase's own hosted page, no custom reset page needed here.
+// on our own custom ResetPassword.html page (see ActionCodeSettings
+// below), not Firebase's default hosted page — that's what lets
+// PasswordStrength.js's real rules actually apply to a reset, not
+// just to signup.
+//
+// The Console's "Action URL" template field got locked down by a
+// recent Firebase security change — it can no longer be edited
+// directly (confirmed by Firebase support; they now have to set it
+// manually on request). Working around that entirely by specifying
+// the redirect URL programmatically instead, via ActionCodeSettings —
+// a legitimate, fully-supported parameter of sendPasswordResetEmail()
+// itself, independent of that broken Console setting. Still requires
+// this exact domain to be listed under Authentication → Settings →
+// Authorized domains (a separate, still-working setting).
 //
 // Deliberately shows the same success message whether or not an
 // account actually exists for that email (standard security practice
 // — doesn't let someone probe which emails are registered).
 // ====================================================================
+const RESET_PASSWORD_URL = "https://capstoneproject-403.pages.dev/ResetPassword.html";
+const actionCodeSettings = {
+  url: RESET_PASSWORD_URL,
+  handleCodeInApp: false
+};
+
 const POPULAR_EMAIL_DOMAINS = [
   "gmail.com", "yahoo.com", "yahoo.com.ph", "hotmail.com", "outlook.com",
   "icloud.com", "aol.com", "live.com", "msn.com", "protonmail.com"
@@ -136,7 +155,7 @@ export function promptForgotPassword() {
     sendBtn.textContent = "Sending...";
 
     try {
-      await sendPasswordResetEmail(auth, email);
+      await sendPasswordResetEmail(auth, email, actionCodeSettings);
       showStatus("If an account exists for that email, a reset link has been sent. Check your inbox.", "success");
       sendBtn.textContent = "Sent";
     } catch (error) {
