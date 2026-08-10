@@ -177,10 +177,10 @@ function startClock() {
 // the active state — no manual "which page am I on" flags needed.
 // ====================================================================
 function highlightActiveNav() {
-  const currentPage = window.location.pathname.split("/").pop() || "Dashboard.html";
+  const currentPage = (window.location.pathname.split("/").pop() || "Dashboard.html").replace(/\.html$/i, "");
 
   document.querySelectorAll(".nav-item[href]").forEach((link) => {
-    const linkPage = link.getAttribute("href");
+    const linkPage = link.getAttribute("href").replace(/\.html$/i, "");
     link.classList.toggle("is-active", linkPage.toLowerCase() === currentPage.toLowerCase());
   });
 }
