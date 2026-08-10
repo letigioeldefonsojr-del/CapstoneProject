@@ -5,6 +5,7 @@ import { getProducts } from "./ProductCache.js";
 import { getNotifications } from "./NotificationCache.js";
 import { getReadSet, getClearedSet } from "./ReadStatus.js";
 import { promptDeleteAccount } from "./DeleteAccount.js";
+import { confirmDialog } from "./ConfirmDialog.js";
 
 // ====================================================================
 // CHUNK 0 — CONFIG
@@ -267,6 +268,12 @@ function wireLogout() {
   if (!logoutBtn) return;
 
   logoutBtn.addEventListener("click", async () => {
+    const confirmed = await confirmDialog(
+      "You'll need to log back in to continue.",
+      { title: "Log out?", confirmLabel: "Log Out" }
+    );
+    if (!confirmed) return;
+
     try {
       await signOut(auth);
     } finally {
