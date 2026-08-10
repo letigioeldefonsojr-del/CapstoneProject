@@ -12,6 +12,52 @@ import { sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.13
 // account actually exists for that email (standard security practice
 // — doesn't let someone probe which emails are registered).
 // ====================================================================
+const POPULAR_EMAIL_DOMAINS = [
+  "gmail.com", "yahoo.com", "yahoo.com.ph", "hotmail.com", "outlook.com",
+  "icloud.com", "aol.com", "live.com", "msn.com", "protonmail.com"
+];
+
+function isValidEmailFormat(email) {
+  // Structural check only (has an @, a domain with a dot, no spaces).
+  // Can't catch a real typo in an otherwise well-formed domain (e.g.
+  // "gmai.com" instead of "gmail.com") — no client-side check can,
+  // since that's still a syntactically valid email address. This
+  // catches genuinely malformed input: missing @, no domain, spaces,
+  // etc. See suggestDomainCorrection() for the typo case.
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+// Catches close-but-wrong domains a pure format check can't — e.g.
+// "gmai.com" or "gmail.co" are each one character off from
+// "gmail.com". Compares against a short list of popular providers
+// using edit distance; a small distance (1-2) that ISN'T an exact
+// match is almost certainly a typo, not a real alternate domain.
+function suggestDomainCorrection(email) {
+  const atIndex = email.lastIndexOf("@");
+  if (atIndex === -1) return null;
+  const domain = email.slice(atIndex + 1).toLowerCase();
+
+  for (const popular of POPULAR_EMAIL_DOMAINS) {
+    if (domain === popular) return null; // exact match — nothing to suggest
+    if (levenshteinDistance(domain, popular) <= 2) return popular;
+  }
+  return null;
+}
+
+function levenshteinDistance(a, b) {
+  const rows = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+  for (let i = 0; i <= a.length; i++) rows[i][0] = i;
+  for (let j = 0; j <= b.length; j++) rows[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      rows[i][j] = a[i - 1] === b[j - 1]
+        ? rows[i - 1][j - 1]
+        : 1 + Math.min(rows[i - 1][j], rows[i][j - 1], rows[i - 1][j - 1]);
+    }
+  }
+  return rows[a.length][b.length];
+}
+
 export function promptForgotPassword() {
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
@@ -60,11 +106,30 @@ export function promptForgotPassword() {
     if (event.target === overlay) close();
   });
 
+  let domainWarningShown = false;
+  emailInput.addEventListener("input", () => {
+    domainWarningShown = false; // re-check from scratch if they edit after seeing a warning
+  });
+
   sendBtn.addEventListener("click", async () => {
     const email = emailInput.value.trim();
     if (!email) {
       showStatus("Enter your email address.", "error");
       return;
+    }
+    if (!isValidEmailFormat(email)) {
+      showStatus("Enter a valid email address (e.g. name@example.com).", "error");
+      return;
+    }
+
+    if (!domainWarningShown) {
+      const suggestion = suggestDomainCorrection(email);
+      if (suggestion) {
+        const localPart = email.slice(0, email.lastIndexOf("@"));
+        showStatus(`Did you mean ${localPart}@${suggestion}? Click "Send Reset Link" again to use this email as typed.`, "error");
+        domainWarningShown = true;
+        return;
+      }
     }
 
     sendBtn.disabled = true;
