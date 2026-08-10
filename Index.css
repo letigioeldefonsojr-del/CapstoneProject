@@ -643,6 +643,22 @@ input:focus-visible {
 .btn-primary:hover { background: var(--brand-green-mid); }
 .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
 
+/* The base .form-status[data-kind] colors (further up this file) are
+   designed for the dark green login card. Inside the white modal,
+   those same colors have almost no contrast — this overrides them
+   with proper light-background colors, scoped to just the modal. */
+.modal .form-status[data-kind="error"] {
+    background: #fdecea;
+    color: #c0392b;
+    border: 1px solid #f3b7b0;
+}
+
+.modal .form-status[data-kind="success"] {
+    background: #e3f3e8;
+    color: var(--brand-green);
+    border: 1px solid #b7ddc3;
+}
+
 [hidden] {
     display: none !important;
 }
