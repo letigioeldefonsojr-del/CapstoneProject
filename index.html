@@ -139,6 +139,28 @@
                         <span class="password-toggle" data-target="admin-signup-confirm-password"><svg class="icon-eye-slash" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M2 12C4 7.5 7.8 5 12 5C16.2 5 20 7.5 22 12C20 16.5 16.2 19 12 19C7.8 19 4 16.5 2 12Z" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/><line x1="3.5" y1="20.5" x2="20.5" y2="3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><svg class="icon-eye" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" hidden><path d="M2 12C4 7.5 7.8 5 12 5C16.2 5 20 7.5 22 12C20 16.5 16.2 19 12 19C7.8 19 4 16.5 2 12Z" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/></svg></span>
                     </div>
 
+                    <div class="input-label">Phone number:</div>
+                    <div class="input-wrapper">
+                        <div class="icon-badge">
+                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <rect x="7" y="2.5" width="10" height="19" rx="2" stroke="currentColor" stroke-width="1.8"/>
+                                <line x1="10" y1="18" x2="14" y2="18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                            </svg>
+                        </div>
+                        <input type="tel" id="admin-signup-phone" placeholder="Enter your phone number" autocomplete="tel" required>
+                    </div>
+
+                    <div class="input-label">Staff code:</div>
+                    <div class="input-wrapper">
+                        <div class="icon-badge">
+                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <rect x="4" y="10.5" width="16" height="9.5" rx="2" stroke="currentColor" stroke-width="1.6"/>
+                                <path d="M7 10.5V7.5C7 5 9 3.5 12 3.5C15 3.5 17 5 17 7.5V10.5" stroke="currentColor" stroke-width="1.6"/>
+                            </svg>
+                        </div>
+                        <input type="text" id="admin-signup-staffcode" placeholder="Enter the staff code" autocomplete="off" required>
+                    </div>
+
                     <button type="submit" class="login-btn login-btn--top-gap" id="admin-signup-submit">
                         <span class="login-btn__label">Create Account</span>
                         <svg class="icon-chevron" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M9 5L15 12L9 19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -203,18 +225,6 @@
                         <input type="text" id="signup-name" placeholder="Enter your full name" autocomplete="name" required>
                     </div>
 
-                    <div class="input-label">Username:</div>
-                    <div class="input-wrapper">
-                        <div class="icon-badge">
-                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                                <rect x="4" y="4" width="16" height="16" rx="3" stroke="currentColor" stroke-width="1.8"/>
-                                <circle cx="12" cy="10" r="2.2" stroke="currentColor" stroke-width="1.8"/>
-                                <path d="M8 17C8.6 15 10 14.2 12 14.2C14 14.2 15.4 15 16 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-                            </svg>
-                        </div>
-                        <input type="text" id="signup-username" placeholder="Choose a username" autocomplete="username" required>
-                    </div>
-
                     <div class="input-label">Email:</div>
                     <div class="input-wrapper">
                         <div class="icon-badge">
@@ -224,6 +234,28 @@
                             </svg>
                         </div>
                         <input type="email" id="signup-email" placeholder="Enter your email" autocomplete="email" required>
+                    </div>
+
+                    <div class="input-label">Phone number:</div>
+                    <div class="input-wrapper">
+                        <div class="icon-badge">
+                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <rect x="7" y="2.5" width="10" height="19" rx="2" stroke="currentColor" stroke-width="1.8"/>
+                                <line x1="10" y1="18" x2="14" y2="18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                            </svg>
+                        </div>
+                        <input type="tel" id="signup-phone" placeholder="Enter your phone number" autocomplete="tel" required>
+                    </div>
+
+                    <div class="input-label">Staff code:</div>
+                    <div class="input-wrapper">
+                        <div class="icon-badge">
+                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <rect x="4" y="10.5" width="16" height="9.5" rx="2" stroke="currentColor" stroke-width="1.6"/>
+                                <path d="M7 10.5V7.5C7 5 9 3.5 12 3.5C15 3.5 17 5 17 7.5V10.5" stroke="currentColor" stroke-width="1.6"/>
+                            </svg>
+                        </div>
+                        <input type="text" id="signup-staffcode" placeholder="Enter the staff code" autocomplete="off" required>
                     </div>
 
                     <div class="input-label">Password:</div>
@@ -261,11 +293,38 @@
                     </p>
                 </form>
 
+                <!-- OTP VERIFICATION (shared by both signup forms) ==== -->
+                <form class="login-form" id="form-otp-verify" hidden>
+                    <p class="reset-password__email" id="otp-sent-to"></p>
+
+                    <div class="input-label">Enter the 6-digit code:</div>
+                    <div class="input-wrapper">
+                        <div class="icon-badge">
+                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <rect x="4" y="10.5" width="16" height="9.5" rx="2" stroke="currentColor" stroke-width="1.6"/>
+                                <path d="M7 10.5V7.5C7 5 9 3.5 12 3.5C15 3.5 17 5 17 7.5V10.5" stroke="currentColor" stroke-width="1.6"/>
+                            </svg>
+                        </div>
+                        <input type="text" id="otp-code-input" placeholder="000000" inputmode="numeric" maxlength="6" autocomplete="one-time-code" required>
+                    </div>
+
+                    <button type="submit" class="login-btn login-btn--top-gap" id="otp-verify-submit">
+                        <span class="login-btn__label">Verify & Create Account</span>
+                        <svg class="icon-chevron" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M9 5L15 12L9 19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+
+                    <p class="auth-switch">
+                        Didn't get a code?
+                        <button type="button" class="auth-switch__link" id="otp-resend-btn">Resend code</button>
+                    </p>
+                </form>
+
             </div>
         </div>
     </div>
 
-    <script type="module" src="firebase-config.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<script type="module" src="firebase-config.js"></script>
     <script type="module" src="Index.js"></script>
 </body>
 </html>

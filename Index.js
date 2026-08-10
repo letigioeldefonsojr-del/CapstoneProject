@@ -2,6 +2,9 @@ import { auth, db } from "./firebase-config.js";
 import { promptForgotPassword } from "./ForgotPassword.js";
 import { validatePasswordStrength } from "./PasswordStrength.js";
 import { checkLoginAllowed, recordFailedAttempt, resetAttempts } from "./LoginAttempts.js";
+import { verifyStaffCode } from "./StaffCode.js";
+import { sendOtpCode, verifyOtpCode } from "./OtpVerification.js";
+import { generateUniqueUsername } from "./UsernameGenerator.js";
 import {
   signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, onAuthStateChanged, signOut
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
@@ -97,6 +100,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const formAdminSignup = document.getElementById("form-admin-signup");
   const formEmployee = document.getElementById("form-employee");
   const formSignup   = document.getElementById("form-employee-signup");
+  const formOtpVerify = document.getElementById("form-otp-verify");
+
+  // Holds the not-yet-created account's data between "passed initial
+  // validation, OTP sent" and "OTP verified, actually create the
+  // account" — nothing is written to Firebase Auth or Firestore until
+  // the code is confirmed.
+  let pendingSignup = null;
 
   const toAdminSignupLink = document.getElementById("to-admin-signup");
   const toAdminLoginLink  = document.getElementById("to-admin-login");
@@ -119,6 +129,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     roleThumb.style.transform = isAdmin ? "translateX(0)" : "translateX(100%)";
 
+    hideOtpStep();
+    pendingSignup = null;
+
     if (isAdmin) {
       setAdminMode("login");
       formEmployee.hidden = true;
@@ -140,6 +153,8 @@ document.addEventListener("DOMContentLoaded", () => {
   // ------------------------------------------------------------------
   function setAdminMode(mode) {
     const isLogin = mode === "login";
+    hideOtpStep();
+    pendingSignup = null;
     formAdmin.hidden = !isLogin;
     formAdminSignup.hidden = isLogin;
     roleToggle.hidden = !isLogin;
@@ -155,6 +170,8 @@ document.addEventListener("DOMContentLoaded", () => {
   // ------------------------------------------------------------------
   function setEmployeeMode(mode) {
     const isLogin = mode === "login";
+    hideOtpStep();
+    pendingSignup = null;
     formEmployee.hidden = !isLogin;
     formSignup.hidden = isLogin;
     roleToggle.hidden = !isLogin;
@@ -164,6 +181,27 @@ document.addEventListener("DOMContentLoaded", () => {
 
   toSignupLink.addEventListener("click", () => setEmployeeMode("signup"));
   toLoginLink.addEventListener("click", () => setEmployeeMode("login"));
+
+  // ------------------------------------------------------------------
+  // CHUNK 3C — OTP VERIFICATION STEP (shared by both signup forms)
+  // ------------------------------------------------------------------
+  function showOtpStep(email) {
+    formAdmin.hidden = true;
+    formAdminSignup.hidden = true;
+    formEmployee.hidden = true;
+    formSignup.hidden = true;
+    roleToggle.hidden = true;
+    formOtpVerify.hidden = false;
+    cardTitle.textContent = "Verify Your Email";
+    document.getElementById("otp-sent-to").textContent = `We sent a 6-digit code to ${email}.`;
+    document.getElementById("otp-code-input").value = "";
+    hideStatus();
+    document.getElementById("otp-code-input").focus();
+  }
+
+  function hideOtpStep() {
+    formOtpVerify.hidden = true;
+  }
 
   // ------------------------------------------------------------------
   // CHUNK 4 — PASSWORD VISIBILITY TOGGLE
@@ -286,11 +324,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const name = document.getElementById("admin-signup-name").value.trim();
     const email = document.getElementById("admin-signup-email").value.trim();
+    const phone = document.getElementById("admin-signup-phone").value.trim();
+    const staffCode = document.getElementById("admin-signup-staffcode").value.trim();
     const password = document.getElementById("admin-signup-password").value;
     const confirmPassword = document.getElementById("admin-signup-confirm-password").value;
     const submitBtn = document.getElementById("admin-signup-submit");
 
-    if (!name || !email || !password || !confirmPassword) {
+    if (!name || !email || !phone || !staffCode || !password || !confirmPassword) {
       showStatus("Fill in every field to create an account.", "error");
       return;
     }
@@ -306,35 +346,23 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    setButtonLoading(submitBtn, true, "Create Account", "Creating account...");
+    setButtonLoading(submitBtn, true, "Create Account", "Verifying...");
 
     try {
-      const credential = await createUserWithEmailAndPassword(auth, email, password);
-      await updateProfile(credential.user, { displayName: name });
+      const staffCodeResult = await verifyStaffCode(staffCode);
+      if (!staffCodeResult.valid) {
+        showStatus(staffCodeResult.message, "error");
+        return;
+      }
 
-      await setDoc(doc(db, ADMIN_COLLECTION, credential.user.uid), {
-        name,
-        email,
-        role: "admin",
-        createdAt: serverTimestamp()
-      });
-
-      // Sign back out rather than auto-redirecting to the dashboard —
-      // account creation succeeding isn't the same as choosing to log
-      // in right now. This also closes a real gap: without an explicit
-      // signOut(), the person would stay secretly authenticated while
-      // looking at the login form, which could let them slip past the
-      // "bounce already signed-in users" guard on a later page load.
-      await signOut(auth);
-      sessionStorage.removeItem("almares_role");
-
-      showStatus("Account created. Please log in.", "success");
-      formAdminSignup.reset();
-      setAdminMode("login");
+      await sendOtpCode(email, name);
+      pendingSignup = { role: "admin", name, email, phone, password };
+      showOtpStep(email);
     } catch (error) {
-      showStatus(mapAuthError(error), "error");
+      console.error("Couldn't start admin signup:", error);
+      showStatus("Couldn't send a verification code right now. Please try again.", "error");
     } finally {
-      setButtonLoading(submitBtn, false, "Create Account", "Creating account...");
+      setButtonLoading(submitBtn, false, "Create Account", "Verifying...");
     }
   }
 
@@ -431,13 +459,14 @@ document.addEventListener("DOMContentLoaded", () => {
     hideStatus();
 
     const name = document.getElementById("signup-name").value.trim();
-    const username = document.getElementById("signup-username").value.trim();
     const email = document.getElementById("signup-email").value.trim();
+    const phone = document.getElementById("signup-phone").value.trim();
+    const staffCode = document.getElementById("signup-staffcode").value.trim();
     const password = document.getElementById("signup-password").value;
     const confirmPassword = document.getElementById("signup-confirm-password").value;
     const submitBtn = document.getElementById("signup-submit");
 
-    if (!name || !username || !email || !password || !confirmPassword) {
+    if (!name || !email || !phone || !staffCode || !password || !confirmPassword) {
       showStatus("Fill in every field to create an account.", "error");
       return;
     }
@@ -453,42 +482,131 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    setButtonLoading(submitBtn, true, "Create Account", "Creating account...");
+    setButtonLoading(submitBtn, true, "Create Account", "Verifying...");
 
     try {
-      const existing = await findEmployeeRecord(username);
-      if (existing) {
-        showStatus("That username is already taken.", "error");
+      const staffCodeResult = await verifyStaffCode(staffCode);
+      if (!staffCodeResult.valid) {
+        showStatus(staffCodeResult.message, "error");
         return;
       }
 
-      const credential = await createUserWithEmailAndPassword(auth, email, password);
-      await updateProfile(credential.user, { displayName: name });
+      await sendOtpCode(email, name);
+      pendingSignup = { role: "employee", name, email, phone, password };
+      showOtpStep(email);
+    } catch (error) {
+      console.error("Couldn't start employee signup:", error);
+      showStatus("Couldn't send a verification code right now. Please try again.", "error");
+    } finally {
+      setButtonLoading(submitBtn, false, "Create Account", "Verifying...");
+    }
+  }
 
+  // ------------------------------------------------------------------
+  // CHUNK 9B — OTP VERIFICATION (stage 2 of signup)
+  // ----------------------------------------------------------------
+  // Nothing was written to Firebase Auth or Firestore in stage 1 —
+  // this is where the account is actually created, only after the
+  // code checks out.
+  // ------------------------------------------------------------------
+  async function handleOtpVerifySubmit(event) {
+    event.preventDefault();
+    hideStatus();
+
+    if (!pendingSignup) {
+      showStatus("Something went wrong — please start over.", "error");
+      return;
+    }
+
+    const code = document.getElementById("otp-code-input").value.trim();
+    const submitBtn = document.getElementById("otp-verify-submit");
+
+    if (!code) {
+      showStatus("Enter the 6-digit code.", "error");
+      return;
+    }
+
+    setButtonLoading(submitBtn, true, "Verify & Create Account", "Verifying...");
+
+    try {
+      const result = await verifyOtpCode(pendingSignup.email, code);
+      if (!result.valid) {
+        showStatus(result.message, "error");
+        return;
+      }
+
+      await completeSignup();
+    } catch (error) {
+      console.error("Couldn't complete signup:", error);
+      showStatus(mapAuthError(error), "error");
+    } finally {
+      setButtonLoading(submitBtn, false, "Verify & Create Account", "Verifying...");
+    }
+  }
+
+  async function completeSignup() {
+    const { role, name, email, phone, password } = pendingSignup;
+    const username = await generateUniqueUsername(name);
+
+    const credential = await createUserWithEmailAndPassword(auth, email, password);
+    await updateProfile(credential.user, { displayName: name });
+
+    if (role === "admin") {
+      await setDoc(doc(db, ADMIN_COLLECTION, credential.user.uid), {
+        name,
+        email,
+        phone,
+        username,
+        role: "admin",
+        createdAt: serverTimestamp()
+      });
+    } else {
       await setDoc(doc(db, EMPLOYEE_COLLECTION, credential.user.uid), {
         [EMPLOYEE_NAME_FIELD]: name,
         [EMPLOYEE_USERNAME_FIELD]: username,
         [EMPLOYEE_EMAIL_FIELD]: email,
-        [EMPLOYEE_ACTIVE_FIELD]: false,
+        phone,
+        // Web signup's OTP step IS the activation — no separate
+        // mobile-app activation needed for accounts created here.
+        [EMPLOYEE_ACTIVE_FIELD]: true,
         role: "employee",
         createdAt: serverTimestamp()
       });
+    }
 
-      // Sign back out — createUserWithEmailAndPassword auto-authenticates,
-      // so without this the person would stay secretly signed in while
-      // looking at the login form (a real gap: it could let them slip
-      // past the "bounce already signed-in users" guard on a later
-      // page load, even with activated:false).
-      await signOut(auth);
+    // Sign back out — createUserWithEmailAndPassword auto-authenticates,
+    // so without this the person would stay secretly signed in while
+    // looking at the login form.
+    await signOut(auth);
+    sessionStorage.removeItem("almares_role");
 
-      showStatus("Account created. Verify your email to activate it before logging in.", "success");
+    const wasAdmin = role === "admin";
+    pendingSignup = null;
+    hideOtpStep();
+
+    showStatus(`Account created! Your username is "${username}" — please log in.`, "success");
+    if (wasAdmin) {
+      formAdminSignup.reset();
+      setAdminMode("login");
+    } else {
       formSignup.reset();
       setEmployeeMode("login");
+    }
+  }
+
+  async function handleOtpResend() {
+    if (!pendingSignup) return;
+    const resendBtn = document.getElementById("otp-resend-btn");
+    resendBtn.disabled = true;
+
+    try {
+      await sendOtpCode(pendingSignup.email, pendingSignup.name);
+      showStatus("A new code has been sent.", "success");
     } catch (error) {
-      console.error(error);
-      showStatus(mapAuthError(error), "error");
+      console.error("Couldn't resend code:", error);
+      showStatus("Couldn't resend the code right now. Please try again.", "error");
     } finally {
-      setButtonLoading(submitBtn, false, "Create Account", "Creating account...");
+      resendBtn.disabled = false;
     }
   }
 
@@ -512,4 +630,6 @@ document.addEventListener("DOMContentLoaded", () => {
   formAdminSignup.addEventListener("submit", handleAdminSignup);
   formEmployee.addEventListener("submit", handleEmployeeLogin);
   formSignup.addEventListener("submit", handleEmployeeSignup);
+  formOtpVerify.addEventListener("submit", handleOtpVerifySubmit);
+  document.getElementById("otp-resend-btn").addEventListener("click", handleOtpResend);
 });
