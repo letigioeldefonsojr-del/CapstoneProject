@@ -41,10 +41,10 @@ export function promptForgotPassword() {
         </button>
       </div>
       <div class="modal__body">
-        <p class="confirm-dialog__message" id="fp-intro">Enter your username, phone number, or name to find your account.</p>
+        <p class="confirm-dialog__message" id="fp-intro">Enter your email, username, phone number, or name to find your account.</p>
 
         <div class="form-field" id="fp-search-field" style="margin-top: 14px;">
-          <label for="fp-search-input">Username, phone number, or name</label>
+          <label for="fp-search-input">Email, username, phone number, or name</label>
           <input type="text" id="fp-search-input" autocomplete="off">
         </div>
 
@@ -222,10 +222,12 @@ async function searchAccounts(term) {
 
 function matchesSearch(data, nameValue, normalizedTerm, normalizedPhone) {
   const username = (data.username || "").toLowerCase();
+  const email = (data.email || "").toLowerCase();
   const phone = (data.phone || "").replace(/\D/g, "");
   const name = (nameValue || "").toLowerCase();
 
   if (username && username === normalizedTerm) return true;
+  if (email && email === normalizedTerm) return true;
   if (normalizedPhone && phone && phone === normalizedPhone) return true;
   if (name && normalizedTerm && name.includes(normalizedTerm)) return true;
   return false;
