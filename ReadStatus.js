@@ -1,77 +1,106 @@
+import { db } from "./firebase-config.js";
+import { doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+
 // ====================================================================
 // PER-USER READ / CLEARED TRACKING
 // ----------------------------------------------------------------
-// Two separate concepts, both scoped to the signed-in user's UID
-// (not just the browser) so testing Admin and Employee in the same
-// browser never bleeds state between them:
+// Two separate concepts, both scoped to the signed-in user's UID:
 //
 //   READ    — cosmetic only. Removes the bold/dot. Item still shows.
 //   CLEARED — the item is hidden from that user's view entirely.
 //
-// This is deliberately client-side (localStorage) rather than a
-// Firestore write, because employeeNotifications is a SHARED
-// collection — every employee (and now admin) reads the same docs.
-// If "Clear All" deleted the document, it would vanish for everyone,
-// not just the person who clicked it. Marking it cleared FOR THIS
-// UID only is what makes "I cleared mine, you still see yours" work.
+// Firestore-backed (moved off localStorage) so this survives a
+// domain change during techno-transfer — localStorage is tied to the
+// exact website address it was saved from, so switching domains
+// would've silently reset everyone's read/cleared state. Firestore
+// data follows the Firebase project, not the domain.
 //
-// Every function takes uid as its first argument on purpose — it's a
-// reminder at every call site that this state is per-account, not
-// global to the browser.
+// Stored per-uid, NOT in the shared employeeNotifications collection
+// itself — every employee/admin reads the same notification docs, so
+// "cleared" has to live somewhere private to each account, or
+// clearing it would hide it for everyone, not just the person who
+// clicked it.
+//
+// API SHAPE: getReadSet/isRead/getClearedSet/isCleared stay
+// SYNCHRONOUS on purpose, backed by an in-memory cache — so the many
+// existing call sites across Sidebar.js/Notifications.js/Dashboard.js
+// didn't all need to become async. The one thing every caller must do
+// is `await loadReadStatus(uid)` ONCE before using those getters
+// (typically right where they already resolve the signed-in uid).
+// mark* functions update the cache immediately and persist to
+// Firestore in the background.
 // ====================================================================
+const COLLECTION = "notificationStatus";
+const cache = new Map(); // uid -> { readIds: Set, clearedIds: Set }
 
-function readKey(uid) { return `almares_read_ids_${uid}`; }
-function clearedKey(uid) { return `almares_cleared_ids_${uid}`; }
+export async function loadReadStatus(uid) {
+  if (cache.has(uid)) return; // already loaded this session, don't re-fetch
 
-function getSet(key) {
   try {
-    const raw = localStorage.getItem(key);
-    return new Set(raw ? JSON.parse(raw) : []);
+    const snap = await getDoc(doc(db, COLLECTION, uid));
+    const data = snap.exists() ? snap.data() : {};
+    cache.set(uid, {
+      readIds: new Set(data.readIds || []),
+      clearedIds: new Set(data.clearedIds || [])
+    });
   } catch (error) {
-    return new Set();
+    console.error("Couldn't load notification read/cleared status:", error);
+    cache.set(uid, { readIds: new Set(), clearedIds: new Set() });
   }
 }
 
-function saveSet(key, set) {
-  try {
-    localStorage.setItem(key, JSON.stringify([...set]));
-  } catch (error) {
-    console.error("Couldn't save notification state:", error);
+function getEntry(uid) {
+  // Fail-safe: if a caller forgot to await loadReadStatus() first,
+  // this returns an empty (not-yet-persisted) entry rather than
+  // throwing — everything just behaves as "nothing read/cleared yet"
+  // until the real data loads.
+  if (!cache.has(uid)) {
+    cache.set(uid, { readIds: new Set(), clearedIds: new Set() });
   }
+  return cache.get(uid);
+}
+
+function persist(uid) {
+  const entry = getEntry(uid);
+  setDoc(doc(db, COLLECTION, uid), {
+    readIds: [...entry.readIds],
+    clearedIds: [...entry.clearedIds]
+  }).catch((error) => {
+    console.error("Couldn't save notification state:", error);
+  });
 }
 
 // ---- Read ----------------------------------------------------------
 export function getReadSet(uid) {
-  return getSet(readKey(uid));
+  return getEntry(uid).readIds;
 }
 
 export function isRead(uid, id) {
-  return getReadSet(uid).has(id);
+  return getEntry(uid).readIds.has(id);
 }
 
 export function markRead(uid, id) {
-  const set = getReadSet(uid);
-  set.add(id);
-  saveSet(readKey(uid), set);
+  getEntry(uid).readIds.add(id);
+  persist(uid);
 }
 
 export function markAllRead(uid, ids) {
-  const set = getReadSet(uid);
-  ids.forEach((id) => set.add(id));
-  saveSet(readKey(uid), set);
+  const entry = getEntry(uid);
+  ids.forEach((id) => entry.readIds.add(id));
+  persist(uid);
 }
 
 // ---- Cleared ---------------------------------------------------------
 export function getClearedSet(uid) {
-  return getSet(clearedKey(uid));
+  return getEntry(uid).clearedIds;
 }
 
 export function isCleared(uid, id) {
-  return getClearedSet(uid).has(id);
+  return getEntry(uid).clearedIds.has(id);
 }
 
 export function markAllCleared(uid, ids) {
-  const set = getClearedSet(uid);
-  ids.forEach((id) => set.add(id));
-  saveSet(clearedKey(uid), set);
+  const entry = getEntry(uid);
+  ids.forEach((id) => entry.clearedIds.add(id));
+  persist(uid);
 }

@@ -3,7 +3,7 @@ import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getProducts } from "./ProductCache.js";
 import { getNotifications } from "./NotificationCache.js";
-import { getReadSet, getClearedSet } from "./ReadStatus.js";
+import { getReadSet, getClearedSet, loadReadStatus } from "./ReadStatus.js";
 import { promptDeleteAccount } from "./DeleteAccount.js";
 import { confirmDialog } from "./ConfirmDialog.js";
 
@@ -202,6 +202,7 @@ async function loadNotifBadge(uid) {
   if (!badge) return;
 
   try {
+    await loadReadStatus(uid);
     const readSet = getReadSet(uid);
     const clearedSet = getClearedSet(uid);
     const isUnread = (id) => !readSet.has(id) && !clearedSet.has(id);

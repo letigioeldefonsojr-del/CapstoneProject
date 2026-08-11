@@ -1,6 +1,6 @@
 import { getProducts } from "./ProductCache.js";
 import { getNotifications } from "./NotificationCache.js";
-import { getReadSet, markRead, markAllRead, getClearedSet, markAllCleared } from "./ReadStatus.js";
+import { getReadSet, markRead, markAllRead, getClearedSet, markAllCleared, loadReadStatus } from "./ReadStatus.js";
 import { confirmDialog } from "./ConfirmDialog.js";
 
 // ====================================================================
@@ -29,8 +29,9 @@ let activeTab = "all";
 // ====================================================================
 // CHUNK 1 — WAIT FOR THE SHARED SIDEBAR (auth guard lives there)
 // ====================================================================
-document.addEventListener("sidebar:ready", (event) => {
+document.addEventListener("sidebar:ready", async (event) => {
   currentUid = event.detail.user.uid;
+  await loadReadStatus(currentUid);
   wireTabs();
   wireMarkAllRead();
   wireClearAll();

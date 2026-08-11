@@ -4,7 +4,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getProducts } from "./ProductCache.js";
 import { getNotifications } from "./NotificationCache.js";
-import { getClearedSet } from "./ReadStatus.js";
+import { getClearedSet, loadReadStatus } from "./ReadStatus.js";
 
 // ====================================================================
 // CHUNK 0 — CONFIG
@@ -132,6 +132,7 @@ async function loadRecentNotifications(uid) {
   const list = document.getElementById("notif-list");
 
   try {
+    await loadReadStatus(uid);
     const notifications = await getNotifications();
     const clearedSet = getClearedSet(uid);
     const visible = notifications.filter((n) => !clearedSet.has(n.id));
