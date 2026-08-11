@@ -1,6 +1,7 @@
 import { auth, db } from "./firebase-config.js";
 import { sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import { collection, getDocs } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { checkResetEmailAllowed, recordResetEmailSent } from "./ResetEmailLimiter.js";
 
 // ====================================================================
 // FORGOT PASSWORD — search first, then reset
@@ -92,7 +93,7 @@ export function promptForgotPassword() {
     resultsList.innerHTML = "";
 
     if (!term) {
-      showStatus("Enter a username, phone number, or name to search.", "error");
+      showStatus("Enter an email, username, phone number, or name to search.", "error");
       return;
     }
 
@@ -138,6 +139,25 @@ export function promptForgotPassword() {
       item.addEventListener("click", () => handleAccountSelected(account));
       resultsList.appendChild(item);
     });
+
+    const returnLink = document.createElement("button");
+    returnLink.type = "button";
+    returnLink.className = "fp-return-link";
+    returnLink.textContent = "Not your account? Return.";
+    returnLink.addEventListener("click", resetToSearchStep);
+    resultsList.appendChild(returnLink);
+
+    footerBtn.hidden = true;
+  }
+
+  function resetToSearchStep() {
+    hideStatus();
+    resultsList.innerHTML = "";
+    searchField.hidden = false;
+    footerBtn.hidden = false;
+    introEl.textContent = "Enter your email, username, phone number, or name to find your account.";
+    searchInput.value = "";
+    searchInput.focus();
   }
 
   async function handleAccountSelected(account) {
@@ -148,6 +168,12 @@ export function promptForgotPassword() {
       return;
     }
 
+    const rateStatus = await checkResetEmailAllowed(account.email);
+    if (!rateStatus.allowed) {
+      showStatus(rateStatus.message, "error");
+      return;
+    }
+
     resultsList.innerHTML = "";
     searchField.hidden = true;
     footerBtn.hidden = true;
@@ -155,6 +181,7 @@ export function promptForgotPassword() {
 
     try {
       await sendPasswordResetEmail(auth, account.email, actionCodeSettings);
+      await recordResetEmailSent(account.email);
       introEl.textContent = "Reset link sent!";
       showStatus(`Check the inbox for ${maskEmail(account.email)} — click the link there to set a new password.`, "success");
     } catch (error) {
