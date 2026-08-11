@@ -92,7 +92,7 @@ export async function recordFailedAttempt(identifier) {
       const remaining = FREE_ATTEMPTS - failedCount;
       return {
         message: remaining > 0
-          ? `Incorrect email or password. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining before a wait is required.`
+          ? `Incorrect email or password. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining.`
           : "Incorrect email or password."
       };
     }
