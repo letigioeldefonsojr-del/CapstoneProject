@@ -63,10 +63,10 @@ export function promptDeleteAccount(user, role) {
 
   overlay.querySelector(".password-field-toggle").addEventListener("click", () => {
     const toggle = overlay.querySelector(".password-field-toggle");
-    const isPass = passwordInput.type === "password";
-    passwordInput.type = isPass ? "text" : "password";
-    toggle.querySelector(".icon-eye").hidden = isPass;
-    toggle.querySelector(".icon-eye-slash").hidden = !isPass;
+    const willBeVisible = passwordInput.type === "password";
+    passwordInput.type = willBeVisible ? "text" : "password";
+    toggle.querySelector(".icon-eye").hidden = !willBeVisible;
+    toggle.querySelector(".icon-eye-slash").hidden = willBeVisible;
   });
 
   function close() {

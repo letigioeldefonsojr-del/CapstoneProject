@@ -6,25 +6,43 @@ import {
 // ====================================================================
 // AUTO-GENERATED USERNAMES
 // ----------------------------------------------------------------
-// Base username derived from the full name (lowercased, spaces and
-// non-alphanumeric characters stripped). If that's taken, tries
-// name+1, name+2, etc. Checked against BOTH admins and employees —
-// usernames are unique across the whole system, not just within one
-// role, so there's never a mix-up between an admin and employee
-// sharing a username.
+// Mixes different parts of the name (first name, last name, initials,
+// combinations) with a random number, instead of just incrementing a
+// number on the same base — so each regenerate genuinely looks
+// different (e.g. "eldefonso194" then "letigio8213"), not a
+// predictable "name1", "name2", "name3" sequence.
+//
+// variantIndex picks which name-part strategy to use (cycles through
+// the available ones) — pass a different index each time you want a
+// visibly different style of suggestion, e.g. incrementing it on
+// every "Regenerate" click.
+//
+// Checked against BOTH admins and employees — usernames are unique
+// across the whole system, not just within one role.
 // ====================================================================
-export async function generateUniqueUsername(fullName, startSuffix = 0) {
-  const base = fullName
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "")
-    .slice(0, 20) || "user";
+export async function generateUniqueUsername(fullName, variantIndex = 0) {
+  const bases = buildCandidateBases(fullName);
+  const base = bases[variantIndex % bases.length];
+  const digitCount = 2 + (variantIndex % 3); // varies the number length a bit too (2, 3, or 4 digits)
 
-  let suffix = startSuffix;
-  let candidate = suffix === 0 ? base : `${base}${suffix}`;
+  let candidate;
+  let attempts = 0;
 
-  while (await usernameExists(candidate)) {
-    suffix += 1;
-    candidate = `${base}${suffix}`;
+  do {
+    candidate = `${base}${randomNumber(digitCount)}`;
+    attempts += 1;
+  } while (await usernameExists(candidate) && attempts < 25);
+
+  // Extremely unlikely fallback if 25 random tries all somehow
+  // collided — guarantees termination with something still unique.
+  if (await usernameExists(candidate)) {
+    let suffix = 1;
+    let fallback = `${base}${suffix}`;
+    while (await usernameExists(fallback)) {
+      suffix += 1;
+      fallback = `${base}${suffix}`;
+    }
+    return fallback;
   }
 
   return candidate;
@@ -34,6 +52,39 @@ export async function generateUniqueUsername(fullName, startSuffix = 0) {
 // (not just an auto-generated one) for uniqueness before submitting.
 export async function isUsernameTaken(username) {
   return usernameExists(username);
+}
+
+function buildCandidateBases(fullName) {
+  const parts = fullName
+    .trim()
+    .split(/\s+/)
+    .map((part) => part.toLowerCase().replace(/[^a-z0-9]/g, ""))
+    .filter(Boolean);
+
+  if (parts.length === 0) return ["user"];
+
+  const first = parts[0];
+  const last = parts[parts.length - 1];
+  const initials = parts.map((p) => p[0]).join("");
+
+  const bases = [
+    first,
+    last,
+    first + (last[0] || ""),
+    last + (first[0] || ""),
+    initials,
+    (first.slice(0, 4) + last.slice(0, 3)) || first
+  ].filter(Boolean);
+
+  // De-duplicate while preserving order (short names can produce the
+  // same base via multiple strategies, e.g. a one-word "name").
+  return Array.from(new Set(bases));
+}
+
+function randomNumber(digitCount) {
+  const min = Math.pow(10, digitCount - 1);
+  const max = Math.pow(10, digitCount) - 1;
+  return Math.floor(min + Math.random() * (max - min + 1));
 }
 
 async function usernameExists(username) {

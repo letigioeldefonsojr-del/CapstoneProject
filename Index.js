@@ -256,10 +256,10 @@ document.addEventListener("DOMContentLoaded", () => {
     toggle.addEventListener("click", () => {
       const targetId = toggle.getAttribute("data-target");
       const input = document.getElementById(targetId);
-      const isPass = input.type === "password";
-      input.type = isPass ? "text" : "password";
-      toggle.querySelector(".icon-eye").hidden = isPass;
-      toggle.querySelector(".icon-eye-slash").hidden = !isPass;
+      const willBeVisible = input.type === "password";
+      input.type = willBeVisible ? "text" : "password";
+      toggle.querySelector(".icon-eye").hidden = !willBeVisible;
+      toggle.querySelector(".icon-eye-slash").hidden = willBeVisible;
     });
   });
 
