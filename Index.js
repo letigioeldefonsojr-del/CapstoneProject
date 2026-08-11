@@ -4,7 +4,7 @@ import { validatePasswordStrength } from "./PasswordStrength.js";
 import { checkLoginAllowed, recordFailedAttempt, resetAttempts } from "./LoginAttempts.js";
 import { verifyStaffCode } from "./StaffCode.js";
 import { sendOtpCode, verifyOtpCode } from "./OtpVerification.js";
-import { generateUniqueUsername } from "./UsernameGenerator.js";
+import { generateUniqueUsername, isUsernameTaken } from "./UsernameGenerator.js";
 import {
   signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, onAuthStateChanged, signOut
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
@@ -331,6 +331,50 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // ------------------------------------------------------------------
+  // CHUNK 6B — USERNAME AUTO-SUGGESTION (both signup forms)
+  // ----------------------------------------------------------------
+  // Auto-fills from the name once they leave that field (only if the
+  // username field is still empty, so it never overwrites something
+  // they've already typed/customized). "Regenerate" always overwrites
+  // with the next available suggestion, since that's an explicit ask.
+  // ------------------------------------------------------------------
+  function wireUsernameAutoGen(nameInputId, usernameInputId, regenerateBtnId) {
+    const nameInput = document.getElementById(nameInputId);
+    const usernameInput = document.getElementById(usernameInputId);
+    const regenerateBtn = document.getElementById(regenerateBtnId);
+    let suffixCounter = 0;
+
+    nameInput.addEventListener("blur", async () => {
+      const name = nameInput.value.trim();
+      if (!name || usernameInput.value.trim()) return;
+      suffixCounter = 0;
+      usernameInput.value = await generateUniqueUsername(name, suffixCounter);
+    });
+
+    regenerateBtn.addEventListener("click", async () => {
+      const name = nameInput.value.trim();
+      if (!name) {
+        nameInput.focus();
+        return;
+      }
+
+      regenerateBtn.disabled = true;
+      regenerateBtn.classList.add("is-spinning");
+      suffixCounter += 1;
+
+      try {
+        usernameInput.value = await generateUniqueUsername(name, suffixCounter);
+      } finally {
+        regenerateBtn.disabled = false;
+        setTimeout(() => regenerateBtn.classList.remove("is-spinning"), 350);
+      }
+    });
+  }
+
+  wireUsernameAutoGen("admin-signup-name", "admin-signup-username", "admin-username-regenerate");
+  wireUsernameAutoGen("signup-name", "signup-username", "employee-username-regenerate");
+
+  // ------------------------------------------------------------------
   // CHUNK 7 — ADMINISTRATOR LOGIN (Firebase Authentication)
   // ------------------------------------------------------------------
   async function handleAdminLogin(event) {
@@ -423,6 +467,7 @@ document.addEventListener("DOMContentLoaded", () => {
     hideStatus();
 
     const name = document.getElementById("admin-signup-name").value.trim();
+    const username = document.getElementById("admin-signup-username").value.trim();
     const email = document.getElementById("admin-signup-email").value.trim();
     const phone = document.getElementById("admin-signup-phone").value.trim();
     const staffCode = document.getElementById("admin-signup-staffcode").value.trim();
@@ -430,7 +475,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const confirmPassword = document.getElementById("admin-signup-confirm-password").value;
     const submitBtn = document.getElementById("admin-signup-submit");
 
-    if (!name || !email || !phone || !staffCode || !password || !confirmPassword) {
+    if (!name || !username || !email || !phone || !staffCode || !password || !confirmPassword) {
       showStatus("Fill in every field to create an account.", "error");
       return;
     }
@@ -455,8 +500,13 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
+      if (await isUsernameTaken(username)) {
+        showStatus("That username is already taken. Try regenerating or pick another.", "error");
+        return;
+      }
+
       await sendOtpCode(email, name);
-      pendingSignup = { role: "admin", name, email, phone, password };
+      pendingSignup = { role: "admin", name, username, email, phone, password };
       showOtpStep(email);
     } catch (error) {
       console.error("Couldn't start admin signup:", error);
@@ -606,6 +656,7 @@ document.addEventListener("DOMContentLoaded", () => {
     hideStatus();
 
     const name = document.getElementById("signup-name").value.trim();
+    const username = document.getElementById("signup-username").value.trim();
     const email = document.getElementById("signup-email").value.trim();
     const phone = document.getElementById("signup-phone").value.trim();
     const staffCode = document.getElementById("signup-staffcode").value.trim();
@@ -613,7 +664,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const confirmPassword = document.getElementById("signup-confirm-password").value;
     const submitBtn = document.getElementById("signup-submit");
 
-    if (!name || !email || !phone || !staffCode || !password || !confirmPassword) {
+    if (!name || !username || !email || !phone || !staffCode || !password || !confirmPassword) {
       showStatus("Fill in every field to create an account.", "error");
       return;
     }
@@ -638,8 +689,13 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
+      if (await isUsernameTaken(username)) {
+        showStatus("That username is already taken. Try regenerating or pick another.", "error");
+        return;
+      }
+
       await sendOtpCode(email, name);
-      pendingSignup = { role: "employee", name, email, phone, password };
+      pendingSignup = { role: "employee", name, username, email, phone, password };
       showOtpStep(email);
     } catch (error) {
       console.error("Couldn't start employee signup:", error);
@@ -692,8 +748,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function completeSignup() {
-    const { role, name, email, phone, password } = pendingSignup;
-    const username = await generateUniqueUsername(name);
+    const { role, name, username, email, phone, password } = pendingSignup;
 
     const credential = await createUserWithEmailAndPassword(auth, email, password);
     await updateProfile(credential.user, { displayName: name });

@@ -773,3 +773,43 @@ input:focus-visible {
     border-color: #ffffff;
     background: #ffffff;
 }
+
+/* ===========================
+   USERNAME FIELD + REGENERATE BUTTON
+   =========================== */
+.username-wrapper input {
+    padding-right: 44px;
+}
+
+.username-regenerate-btn {
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: none;
+    background: none;
+    color: var(--brand-green);
+    cursor: pointer;
+    display: flex;
+    padding: 4px;
+    z-index: 2;
+    transition: transform 0.3s ease;
+}
+
+.username-regenerate-btn:hover {
+    color: var(--brand-green-dark);
+}
+
+.username-regenerate-btn.is-spinning svg {
+    animation: username-regen-spin 0.5s ease;
+}
+
+.username-regenerate-btn svg {
+    width: 18px;
+    height: 18px;
+}
+
+@keyframes username-regen-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(180deg); }
+}

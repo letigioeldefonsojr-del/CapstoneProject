@@ -13,14 +13,14 @@ import {
 // role, so there's never a mix-up between an admin and employee
 // sharing a username.
 // ====================================================================
-export async function generateUniqueUsername(fullName) {
+export async function generateUniqueUsername(fullName, startSuffix = 0) {
   const base = fullName
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "")
     .slice(0, 20) || "user";
 
-  let candidate = base;
-  let suffix = 0;
+  let suffix = startSuffix;
+  let candidate = suffix === 0 ? base : `${base}${suffix}`;
 
   while (await usernameExists(candidate)) {
     suffix += 1;
@@ -28,6 +28,12 @@ export async function generateUniqueUsername(fullName) {
   }
 
   return candidate;
+}
+
+// Exposed so the signup form can validate a MANUALLY EDITED username
+// (not just an auto-generated one) for uniqueness before submitting.
+export async function isUsernameTaken(username) {
+  return usernameExists(username);
 }
 
 async function usernameExists(username) {
