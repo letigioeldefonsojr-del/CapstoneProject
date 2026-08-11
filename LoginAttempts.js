@@ -25,8 +25,9 @@ import {
 // against THIS app, which is the realistic threat model here.
 // ====================================================================
 const COLLECTION = "loginAttempts";
+const FREE_ATTEMPTS = 6; // first N failures show a plain error, no lockout at all
 const BASE_LOCKOUT_SECONDS = 30;
-const PERMANENT_LOCK_THRESHOLD = 15; // more than this many failures = locked until admin clears it
+const PERMANENT_LOCK_THRESHOLD = 15; // more than this many TOTAL failures = locked until admin clears it
 
 function normalizeKey(identifier) {
   return identifier.trim().toLowerCase();
@@ -55,6 +56,7 @@ export async function checkLoginAllowed(identifier) {
       const secondsLeft = Math.ceil((lockedUntilMillis - Date.now()) / 1000);
       return {
         allowed: false,
+        secondsLeft,
         message: `Too many failed attempts. Try again in ${formatWait(secondsLeft)}.`
       };
     }
@@ -75,7 +77,29 @@ export async function recordFailedAttempt(identifier) {
     const previousCount = snap.exists() ? (snap.data().failedCount || 0) : 0;
     const failedCount = previousCount + 1;
     const permanentlyLocked = failedCount > PERMANENT_LOCK_THRESHOLD;
-    const lockoutSeconds = BASE_LOCKOUT_SECONDS * Math.pow(2, failedCount - 1);
+
+    // Still within the free grace period — track the count, but no
+    // lockout yet at all.
+    if (failedCount <= FREE_ATTEMPTS && !permanentlyLocked) {
+      await setDoc(ref, {
+        identifier: normalizeKey(identifier),
+        failedCount,
+        lockedUntil: null,
+        permanentlyLocked: false,
+        lastAttemptAt: serverTimestamp()
+      });
+
+      const remaining = FREE_ATTEMPTS - failedCount;
+      return {
+        message: remaining > 0
+          ? `Incorrect email or password. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining before a wait is required.`
+          : "Incorrect email or password."
+      };
+    }
+
+    // Past the grace period — escalating lockout starts counting from
+    // the first failure AFTER the free attempts, not from failure #1.
+    const lockoutSeconds = BASE_LOCKOUT_SECONDS * Math.pow(2, failedCount - FREE_ATTEMPTS - 1);
 
     await setDoc(ref, {
       identifier: normalizeKey(identifier),
@@ -86,12 +110,15 @@ export async function recordFailedAttempt(identifier) {
     });
 
     if (permanentlyLocked) {
-      return "This account has been locked after too many failed attempts. Contact an administrator to unlock it.";
+      return { message: "This account has been locked after too many failed attempts. Contact an administrator to unlock it." };
     }
-    return `Incorrect email or password. Try again in ${formatWait(lockoutSeconds)}.`;
+    return {
+      secondsLeft: lockoutSeconds,
+      message: `Incorrect email or password. Try again in ${formatWait(lockoutSeconds)}.`
+    };
   } catch (error) {
     console.error("Couldn't record failed login attempt:", error);
-    return "Incorrect email or password.";
+    return { message: "Incorrect email or password." };
   }
 }
 

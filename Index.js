@@ -241,6 +241,43 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // ------------------------------------------------------------------
+  // CHUNK 5B — LIVE LOCKOUT COUNTDOWN
+  // ----------------------------------------------------------------
+  // Only one countdown runs at a time — starting a new one (e.g. the
+  // other form's login attempt) clears any previous timer first.
+  // ------------------------------------------------------------------
+  let activeCountdownInterval = null;
+
+  function showLockoutCountdown(submitBtn, secondsLeft) {
+    if (activeCountdownInterval) clearInterval(activeCountdownInterval);
+
+    let remaining = secondsLeft;
+    submitBtn.disabled = true;
+
+    const tick = () => {
+      if (remaining <= 0) {
+        clearInterval(activeCountdownInterval);
+        activeCountdownInterval = null;
+        submitBtn.disabled = false;
+        showStatus("You can try again now.", "success");
+        return;
+      }
+      showStatus(`Too many failed attempts. Try again in ${formatSecondsLeft(remaining)}.`, "error");
+      remaining -= 1;
+    };
+
+    tick();
+    activeCountdownInterval = setInterval(tick, 1000);
+  }
+
+  function formatSecondsLeft(seconds) {
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    const remainderSeconds = seconds % 60;
+    return `${minutes}m ${remainderSeconds}s`;
+  }
+
+  // ------------------------------------------------------------------
   // CHUNK 6 — BUTTON LOADING STATE
   // ------------------------------------------------------------------
   function setButtonLoading(button, isLoading, idleLabel, loadingLabel) {
@@ -267,7 +304,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const lockStatus = await checkLoginAllowed(rawInput);
     if (!lockStatus.allowed) {
-      showStatus(lockStatus.message, "error");
+      if (lockStatus.secondsLeft) {
+        showLockoutCountdown(submitBtn, lockStatus.secondsLeft);
+      } else {
+        showStatus(lockStatus.message, "error");
+      }
       return;
     }
 
@@ -276,8 +317,12 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const email = await resolveLoginEmail(ADMIN_COLLECTION, rawInput);
       if (!email) {
-        const message = await recordFailedAttempt(rawInput);
-        showStatus(message, "error");
+        const result = await recordFailedAttempt(rawInput);
+        if (result.secondsLeft) {
+          showLockoutCountdown(submitBtn, result.secondsLeft);
+        } else {
+          showStatus(result.message, "error");
+        }
         return;
       }
 
@@ -288,8 +333,12 @@ document.addEventListener("DOMContentLoaded", () => {
       window.location.replace(ADMIN_REDIRECT_URL);
     } catch (error) {
       if (isWrongCredentialError(error)) {
-        const message = await recordFailedAttempt(rawInput);
-        showStatus(message, "error");
+        const result = await recordFailedAttempt(rawInput);
+        if (result.secondsLeft) {
+          showLockoutCountdown(submitBtn, result.secondsLeft);
+        } else {
+          showStatus(result.message, "error");
+        }
       } else {
         showStatus(mapAuthError(error), "error");
       }
@@ -397,7 +446,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const lockStatus = await checkLoginAllowed(rawInput);
     if (!lockStatus.allowed) {
-      showStatus(lockStatus.message, "error");
+      if (lockStatus.secondsLeft) {
+        showLockoutCountdown(submitBtn, lockStatus.secondsLeft);
+      } else {
+        showStatus(lockStatus.message, "error");
+      }
       return;
     }
 
@@ -407,8 +460,12 @@ document.addEventListener("DOMContentLoaded", () => {
       const employeeDoc = await findEmployeeRecordByIdentifier(rawInput);
 
       if (!employeeDoc) {
-        const message = await recordFailedAttempt(rawInput);
-        showStatus(message, "error");
+        const result = await recordFailedAttempt(rawInput);
+        if (result.secondsLeft) {
+          showLockoutCountdown(submitBtn, result.secondsLeft);
+        } else {
+          showStatus(result.message, "error");
+        }
         return;
       }
 
@@ -436,8 +493,12 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (error) {
       console.error(error);
       if (isWrongCredentialError(error)) {
-        const message = await recordFailedAttempt(rawInput);
-        showStatus(message, "error");
+        const result = await recordFailedAttempt(rawInput);
+        if (result.secondsLeft) {
+          showLockoutCountdown(submitBtn, result.secondsLeft);
+        } else {
+          showStatus(result.message, "error");
+        }
       } else {
         showStatus(mapAuthError(error), "error");
       }
