@@ -1,87 +1,31 @@
-import { auth } from "./firebase-config.js";
+import { auth, db } from "./firebase-config.js";
 import { sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
+import { collection, getDocs } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 
 // ====================================================================
-// FORGOT PASSWORD
+// FORGOT PASSWORD — search first, then reset
 // ----------------------------------------------------------------
-// Uses Firebase's built-in password reset flow — sendPasswordResetEmail
-// sends a real email with a reset link; the person sets a new password
-// on our own custom ResetPassword.html page (see ActionCodeSettings
-// below), not Firebase's default hosted page — that's what lets
-// PasswordStrength.js's real rules actually apply to a reset, not
-// just to signup.
+// Step 1: search by username, phone number, or (partial) name — both
+// admins and employees collections are checked. Step 2: shows
+// matching accounts with the email masked (e.g. "jo***@gm***.com")
+// so the real owner can recognize their own account without fully
+// exposing it to anyone just guessing. Clicking an account sends the
+// actual reset email to its real (unmasked) address.
 //
-// The Console's "Action URL" template field got locked down by a
-// recent Firebase security change — it can no longer be edited
-// directly (confirmed by Firebase support; they now have to set it
-// manually on request). Working around that entirely by specifying
-// the redirect URL programmatically instead, via ActionCodeSettings —
-// a legitimate, fully-supported parameter of sendPasswordResetEmail()
-// itself, independent of that broken Console setting. Still requires
-// this exact domain to be listed under Authentication → Settings →
-// Authorized domains (a separate, still-working setting).
+// Honest privacy note: letting people search accounts by name has a
+// real tradeoff — it lets someone probe for who has an account here,
+// even with masking. That's a deliberate choice matching what was
+// asked for; worth knowing it's not zero-risk.
 //
-// Deliberately shows the same success message whether or not an
-// account actually exists for that email (standard security practice
-// — doesn't let someone probe which emails are registered).
+// Reset link still uses the same custom ResetPassword.html page (see
+// ActionCodeSettings below) — same as before, still requires this
+// domain listed under Authentication → Settings → Authorized domains.
 // ====================================================================
 const RESET_PASSWORD_URL = "https://capstoneproject-403.pages.dev/ResetPassword.html";
 const actionCodeSettings = {
   url: RESET_PASSWORD_URL,
-  // This is the flag that actually matters here — true tells Firebase
-  // to send the person straight to OUR page with the reset code
-  // attached, instead of handling everything on Firebase's own
-  // default hosted widget. Previously set to false, which was wrong —
-  // that's why the link kept opening Firebase's page regardless of
-  // the url above.
   handleCodeInApp: true
 };
-
-const POPULAR_EMAIL_DOMAINS = [
-  "gmail.com", "yahoo.com", "yahoo.com.ph", "hotmail.com", "outlook.com",
-  "icloud.com", "aol.com", "live.com", "msn.com", "protonmail.com"
-];
-
-function isValidEmailFormat(email) {
-  // Structural check only (has an @, a domain with a dot, no spaces).
-  // Can't catch a real typo in an otherwise well-formed domain (e.g.
-  // "gmai.com" instead of "gmail.com") — no client-side check can,
-  // since that's still a syntactically valid email address. This
-  // catches genuinely malformed input: missing @, no domain, spaces,
-  // etc. See suggestDomainCorrection() for the typo case.
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
-// Catches close-but-wrong domains a pure format check can't — e.g.
-// "gmai.com" or "gmail.co" are each one character off from
-// "gmail.com". Compares against a short list of popular providers
-// using edit distance; a small distance (1-2) that ISN'T an exact
-// match is almost certainly a typo, not a real alternate domain.
-function suggestDomainCorrection(email) {
-  const atIndex = email.lastIndexOf("@");
-  if (atIndex === -1) return null;
-  const domain = email.slice(atIndex + 1).toLowerCase();
-
-  for (const popular of POPULAR_EMAIL_DOMAINS) {
-    if (domain === popular) return null; // exact match — nothing to suggest
-    if (levenshteinDistance(domain, popular) <= 2) return popular;
-  }
-  return null;
-}
-
-function levenshteinDistance(a, b) {
-  const rows = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
-  for (let i = 0; i <= a.length; i++) rows[i][0] = i;
-  for (let j = 0; j <= b.length; j++) rows[0][j] = j;
-  for (let i = 1; i <= a.length; i++) {
-    for (let j = 1; j <= b.length; j++) {
-      rows[i][j] = a[i - 1] === b[j - 1]
-        ? rows[i - 1][j - 1]
-        : 1 + Math.min(rows[i - 1][j], rows[i][j - 1], rows[i - 1][j - 1]);
-    }
-  }
-  return rows[a.length][b.length];
-}
 
 export function promptForgotPassword() {
   const overlay = document.createElement("div");
@@ -89,7 +33,7 @@ export function promptForgotPassword() {
   overlay.innerHTML = `
     <div class="modal">
       <div class="modal__header">
-        <h3>Reset your password</h3>
+        <h3>Find your account</h3>
         <button type="button" class="modal__close" aria-label="Close">
           <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
             <path d="M6 6L18 18M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
@@ -97,23 +41,30 @@ export function promptForgotPassword() {
         </button>
       </div>
       <div class="modal__body">
-        <p class="confirm-dialog__message">Enter your account email and we'll send you a link to reset your password.</p>
-        <div class="form-field" style="margin-top: 14px;">
-          <label for="forgot-password-email">Email</label>
-          <input type="email" id="forgot-password-email" autocomplete="email">
+        <p class="confirm-dialog__message" id="fp-intro">Enter your username, phone number, or name to find your account.</p>
+
+        <div class="form-field" id="fp-search-field" style="margin-top: 14px;">
+          <label for="fp-search-input">Username, phone number, or name</label>
+          <input type="text" id="fp-search-input" autocomplete="off">
         </div>
-        <p class="form-status" id="forgot-password-status" hidden></p>
+
+        <div id="fp-results-list" style="margin-top: 14px;"></div>
+
+        <p class="form-status" id="fp-status" hidden></p>
       </div>
       <div class="modal__footer">
         <button type="button" class="btn-outline" data-action="cancel">Cancel</button>
-        <button type="button" class="btn-primary" data-action="send">Send Reset Link</button>
+        <button type="button" class="btn-primary" data-action="search">Search</button>
       </div>
     </div>
   `;
 
-  const emailInput = overlay.querySelector("#forgot-password-email");
-  const statusEl = overlay.querySelector("#forgot-password-status");
-  const sendBtn = overlay.querySelector('[data-action="send"]');
+  const searchInput = overlay.querySelector("#fp-search-input");
+  const resultsList = overlay.querySelector("#fp-results-list");
+  const statusEl = overlay.querySelector("#fp-status");
+  const introEl = overlay.querySelector("#fp-intro");
+  const searchField = overlay.querySelector("#fp-search-field");
+  const footerBtn = overlay.querySelector('[data-action="search"]');
 
   function close() {
     overlay.remove();
@@ -125,56 +76,178 @@ export function promptForgotPassword() {
     statusEl.hidden = false;
   }
 
+  function hideStatus() {
+    statusEl.hidden = true;
+  }
+
   overlay.querySelector(".modal__close").addEventListener("click", close);
   overlay.querySelector('[data-action="cancel"]').addEventListener("click", close);
   overlay.addEventListener("click", (event) => {
     if (event.target === overlay) close();
   });
 
-  let domainWarningShown = false;
-  emailInput.addEventListener("input", () => {
-    domainWarningShown = false; // re-check from scratch if they edit after seeing a warning
-  });
+  async function handleSearch() {
+    const term = searchInput.value.trim();
+    hideStatus();
+    resultsList.innerHTML = "";
 
-  sendBtn.addEventListener("click", async () => {
-    const email = emailInput.value.trim();
-    if (!email) {
-      showStatus("Enter your email address.", "error");
-      return;
-    }
-    if (!isValidEmailFormat(email)) {
-      showStatus("Enter a valid email address (e.g. name@example.com).", "error");
+    if (!term) {
+      showStatus("Enter a username, phone number, or name to search.", "error");
       return;
     }
 
-    if (!domainWarningShown) {
-      const suggestion = suggestDomainCorrection(email);
-      if (suggestion) {
-        const localPart = email.slice(0, email.lastIndexOf("@"));
-        showStatus(`Did you mean ${localPart}@${suggestion}? Click "Send Reset Link" again to use this email as typed.`, "error");
-        domainWarningShown = true;
-        return;
-      }
-    }
-
-    sendBtn.disabled = true;
-    sendBtn.textContent = "Sending...";
+    footerBtn.disabled = true;
+    footerBtn.textContent = "Searching...";
 
     try {
-      await sendPasswordResetEmail(auth, email, actionCodeSettings);
-      showStatus("If an account exists for that email, a reset link has been sent. Check your inbox.", "success");
-      sendBtn.textContent = "Sent";
+      const results = await searchAccounts(term);
+
+      if (results.length === 0) {
+        showStatus("No matching account found. Check your spelling and try again.", "error");
+        return;
+      }
+
+      renderResults(results);
+    } catch (error) {
+      console.error("Couldn't search accounts:", error);
+      showStatus("Something went wrong searching. Please try again.", "error");
+    } finally {
+      footerBtn.disabled = false;
+      footerBtn.textContent = "Search";
+    }
+  }
+
+  function renderResults(results) {
+    introEl.textContent = `Found ${results.length} matching account${results.length === 1 ? "" : "s"}. Click yours to send a reset link.`;
+
+    results.forEach((account) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "fp-account-result";
+      item.innerHTML = `
+        <span class="fp-account-result__role"></span>
+        <span class="fp-account-result__info">
+          <strong class="fp-account-result__name"></strong>
+          <span class="fp-account-result__email"></span>
+        </span>
+      `;
+      item.querySelector(".fp-account-result__role").textContent = account.role === "admin" ? "Admin" : "Employee";
+      item.querySelector(".fp-account-result__name").textContent = account.name || "(no name on file)";
+      item.querySelector(".fp-account-result__email").textContent = account.email ? maskEmail(account.email) : "No email on file";
+
+      item.addEventListener("click", () => handleAccountSelected(account));
+      resultsList.appendChild(item);
+    });
+  }
+
+  async function handleAccountSelected(account) {
+    hideStatus();
+
+    if (!account.email) {
+      showStatus("This account has no email on file. Contact an administrator.", "error");
+      return;
+    }
+
+    resultsList.innerHTML = "";
+    searchField.hidden = true;
+    footerBtn.hidden = true;
+    introEl.textContent = `Sending a reset link to ${maskEmail(account.email)}...`;
+
+    try {
+      await sendPasswordResetEmail(auth, account.email, actionCodeSettings);
+      introEl.textContent = "Reset link sent!";
+      showStatus(`Check the inbox for ${maskEmail(account.email)} — click the link there to set a new password.`, "success");
     } catch (error) {
       console.error("Couldn't send reset email:", error);
-      const message = error.code === "auth/invalid-email"
-        ? "That email address doesn't look right."
-        : "Something went wrong. Please try again.";
-      showStatus(message, "error");
-      sendBtn.disabled = false;
-      sendBtn.textContent = "Send Reset Link";
+      showStatus("Something went wrong sending the reset link. Please try again.", "error");
+      searchField.hidden = false;
+      footerBtn.hidden = false;
+    }
+  }
+
+  footerBtn.addEventListener("click", handleSearch);
+  searchInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      handleSearch();
     }
   });
 
   document.body.appendChild(overlay);
-  emailInput.focus();
+  searchInput.focus();
+}
+
+// ---- Account search (client-side filter — both collections are
+// small enough that fetching all docs and filtering here is simpler
+// and more flexible than Firestore's limited query capabilities,
+// especially for a "name contains" search, which Firestore can't do
+// natively at all) -----------------------------------------------
+async function searchAccounts(term) {
+  const normalizedTerm = term.trim().toLowerCase();
+  const normalizedPhone = term.replace(/\D/g, "");
+
+  const [adminsSnap, employeesSnap] = await Promise.all([
+    getDocs(collection(db, "admins")),
+    getDocs(collection(db, "employees"))
+  ]);
+
+  const results = [];
+
+  adminsSnap.forEach((docSnap) => {
+    const data = docSnap.data();
+    if (matchesSearch(data, data.name, normalizedTerm, normalizedPhone)) {
+      results.push({
+        id: docSnap.id,
+        role: "admin",
+        name: data.name,
+        email: data.email
+      });
+    }
+  });
+
+  employeesSnap.forEach((docSnap) => {
+    const data = docSnap.data();
+    if (matchesSearch(data, data.firstName, normalizedTerm, normalizedPhone)) {
+      results.push({
+        id: docSnap.id,
+        role: "employee",
+        name: data.firstName,
+        email: data.email
+      });
+    }
+  });
+
+  return results;
+}
+
+function matchesSearch(data, nameValue, normalizedTerm, normalizedPhone) {
+  const username = (data.username || "").toLowerCase();
+  const phone = (data.phone || "").replace(/\D/g, "");
+  const name = (nameValue || "").toLowerCase();
+
+  if (username && username === normalizedTerm) return true;
+  if (normalizedPhone && phone && phone === normalizedPhone) return true;
+  if (name && normalizedTerm && name.includes(normalizedTerm)) return true;
+  return false;
+}
+
+function maskEmail(email) {
+  const atIndex = email.indexOf("@");
+  if (atIndex === -1) return email;
+
+  const local = email.slice(0, atIndex);
+  const domain = email.slice(atIndex + 1);
+
+  const maskedLocal = local.length <= 2
+    ? local[0] + "*"
+    : local.slice(0, 2) + "*".repeat(Math.max(local.length - 2, 1));
+
+  const dotIndex = domain.indexOf(".");
+  const domainName = dotIndex === -1 ? domain : domain.slice(0, dotIndex);
+  const domainRest = dotIndex === -1 ? "" : domain.slice(dotIndex);
+  const maskedDomainName = domainName.length <= 2
+    ? domainName[0] + "*"
+    : domainName.slice(0, 2) + "*".repeat(Math.max(domainName.length - 2, 1));
+
+  return `${maskedLocal}@${maskedDomainName}${domainRest}`;
 }

@@ -256,16 +256,16 @@ document.addEventListener("DOMContentLoaded", () => {
     event.preventDefault();
     hideStatus();
 
-    const email = document.getElementById("admin-email").value.trim();
+    const rawInput = document.getElementById("admin-email").value.trim();
     const password = document.getElementById("admin-password").value;
     const submitBtn = document.getElementById("admin-submit");
 
-    if (!email || !password) {
-      showStatus("Enter both email and password.", "error");
+    if (!rawInput || !password) {
+      showStatus("Enter both email/username and password.", "error");
       return;
     }
 
-    const lockStatus = await checkLoginAllowed(email);
+    const lockStatus = await checkLoginAllowed(rawInput);
     if (!lockStatus.allowed) {
       showStatus(lockStatus.message, "error");
       return;
@@ -274,14 +274,21 @@ document.addEventListener("DOMContentLoaded", () => {
     setButtonLoading(submitBtn, true, "Login", "Signing in...");
 
     try {
+      const email = await resolveLoginEmail(ADMIN_COLLECTION, rawInput);
+      if (!email) {
+        const message = await recordFailedAttempt(rawInput);
+        showStatus(message, "error");
+        return;
+      }
+
       await signInWithEmailAndPassword(auth, email, password);
-      await resetAttempts(email);
+      await resetAttempts(rawInput);
       sessionStorage.setItem("almares_role", "admin");
       showStatus("Signed in. Redirecting...", "success");
       window.location.replace(ADMIN_REDIRECT_URL);
     } catch (error) {
       if (isWrongCredentialError(error)) {
-        const message = await recordFailedAttempt(email);
+        const message = await recordFailedAttempt(rawInput);
         showStatus(message, "error");
       } else {
         showStatus(mapAuthError(error), "error");
@@ -379,16 +386,16 @@ document.addEventListener("DOMContentLoaded", () => {
     event.preventDefault();
     hideStatus();
 
-    const usernameInput = document.getElementById("employee-username").value.trim();
+    const rawInput = document.getElementById("employee-username").value.trim();
     const password = document.getElementById("employee-password").value;
     const submitBtn = document.getElementById("employee-submit");
 
-    if (!usernameInput || !password) {
-      showStatus("Enter both your username and password.", "error");
+    if (!rawInput || !password) {
+      showStatus("Enter both your email/username and password.", "error");
       return;
     }
 
-    const lockStatus = await checkLoginAllowed(usernameInput);
+    const lockStatus = await checkLoginAllowed(rawInput);
     if (!lockStatus.allowed) {
       showStatus(lockStatus.message, "error");
       return;
@@ -397,10 +404,10 @@ document.addEventListener("DOMContentLoaded", () => {
     setButtonLoading(submitBtn, true, "Login", "Signing in...");
 
     try {
-      const employeeDoc = await findEmployeeRecord(usernameInput);
+      const employeeDoc = await findEmployeeRecordByIdentifier(rawInput);
 
       if (!employeeDoc) {
-        const message = await recordFailedAttempt(usernameInput);
+        const message = await recordFailedAttempt(rawInput);
         showStatus(message, "error");
         return;
       }
@@ -419,7 +426,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       await signInWithEmailAndPassword(auth, email, password);
-      await resetAttempts(usernameInput);
+      await resetAttempts(rawInput);
 
       sessionStorage.setItem("almares_role", "employee");
       sessionStorage.setItem("almares_employee_doc_id", employeeDoc.id);
@@ -429,7 +436,7 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (error) {
       console.error(error);
       if (isWrongCredentialError(error)) {
-        const message = await recordFailedAttempt(usernameInput);
+        const message = await recordFailedAttempt(rawInput);
         showStatus(message, "error");
       } else {
         showStatus(mapAuthError(error), "error");
@@ -439,11 +446,46 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  // ------------------------------------------------------------------
+  // CHUNK 8B — EMAIL/USERNAME LOGIN HELPERS (shared by both roles)
+  // ------------------------------------------------------------------
+  function looksLikeEmail(value) {
+    return value.includes("@");
+  }
+
+  // Admin: username → email resolution. If the input already looks
+  // like an email, use it as-is — no lookup needed.
+  async function resolveLoginEmail(collectionName, identifier) {
+    if (looksLikeEmail(identifier)) return identifier;
+
+    const ref = collection(db, collectionName);
+    const byUsername = query(ref, where("username", "==", identifier), limit(1));
+    const snapshot = await getDocs(byUsername);
+    if (snapshot.empty) return null;
+    return snapshot.docs[0].data().email || null;
+  }
+
   async function findEmployeeRecord(usernameValue) {
     const employeesRef = collection(db, EMPLOYEE_COLLECTION);
     const byUsername = query(employeesRef, where(EMPLOYEE_USERNAME_FIELD, "==", usernameValue), limit(1));
     const snapshot = await getDocs(byUsername);
     return snapshot.empty ? null : snapshot.docs[0];
+  }
+
+  async function findEmployeeRecordByEmail(emailValue) {
+    const employeesRef = collection(db, EMPLOYEE_COLLECTION);
+    const byEmail = query(employeesRef, where(EMPLOYEE_EMAIL_FIELD, "==", emailValue), limit(1));
+    const snapshot = await getDocs(byEmail);
+    return snapshot.empty ? null : snapshot.docs[0];
+  }
+
+  // Employee: accepts either — checks which the input looks like and
+  // looks up the matching record either way, so the activated-status
+  // check downstream still works regardless of which path was used.
+  async function findEmployeeRecordByIdentifier(identifier) {
+    return looksLikeEmail(identifier)
+      ? findEmployeeRecordByEmail(identifier)
+      : findEmployeeRecord(identifier);
   }
 
   // ------------------------------------------------------------------
