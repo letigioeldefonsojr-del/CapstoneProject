@@ -194,14 +194,58 @@ document.addEventListener("DOMContentLoaded", () => {
     formOtpVerify.hidden = false;
     cardTitle.textContent = "Verify Your Email";
     document.getElementById("otp-sent-to").textContent = `We sent a 6-digit code to ${email}.`;
-    document.getElementById("otp-code-input").value = "";
+    clearOtpDigitInputs();
     hideStatus();
-    document.getElementById("otp-code-input").focus();
+    document.querySelector('.otp-digit-input[data-index="0"]').focus();
   }
 
   function hideOtpStep() {
     formOtpVerify.hidden = true;
   }
+
+  // ------------------------------------------------------------------
+  // CHUNK 3D — 6-DIGIT OTP BOXES (auto-advance, backspace, paste)
+  // ------------------------------------------------------------------
+  const otpDigitInputs = Array.from(document.querySelectorAll(".otp-digit-input"));
+
+  function clearOtpDigitInputs() {
+    otpDigitInputs.forEach((input) => { input.value = ""; });
+  }
+
+  function getOtpCode() {
+    return otpDigitInputs.map((input) => input.value).join("");
+  }
+
+  otpDigitInputs.forEach((input, index) => {
+    input.addEventListener("input", () => {
+      // Only keep a single digit — strips anything non-numeric a user
+      // might type or a stray extra character from autofill.
+      input.value = input.value.replace(/\D/g, "").slice(0, 1);
+
+      if (input.value && index < otpDigitInputs.length - 1) {
+        otpDigitInputs[index + 1].focus();
+      }
+    });
+
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Backspace" && !input.value && index > 0) {
+        otpDigitInputs[index - 1].focus();
+      }
+    });
+
+    input.addEventListener("paste", (event) => {
+      const pasted = (event.clipboardData || window.clipboardData).getData("text").replace(/\D/g, "");
+      if (!pasted) return;
+      event.preventDefault();
+
+      otpDigitInputs.forEach((box, boxIndex) => {
+        box.value = pasted[boxIndex] || "";
+      });
+
+      const lastFilledIndex = Math.min(pasted.length, otpDigitInputs.length) - 1;
+      if (lastFilledIndex >= 0) otpDigitInputs[lastFilledIndex].focus();
+    });
+  });
 
   // ------------------------------------------------------------------
   // CHUNK 4 — PASSWORD VISIBILITY TOGGLE
@@ -621,11 +665,11 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    const code = document.getElementById("otp-code-input").value.trim();
+    const code = getOtpCode();
     const submitBtn = document.getElementById("otp-verify-submit");
 
-    if (!code) {
-      showStatus("Enter the 6-digit code.", "error");
+    if (code.length < 6) {
+      showStatus("Enter all 6 digits of the code.", "error");
       return;
     }
 
@@ -704,12 +748,30 @@ document.addEventListener("DOMContentLoaded", () => {
 
     try {
       await sendOtpCode(pendingSignup.email, pendingSignup.name);
+      clearOtpDigitInputs();
+      otpDigitInputs[0].focus();
       showStatus("A new code has been sent.", "success");
     } catch (error) {
       console.error("Couldn't resend code:", error);
       showStatus("Couldn't resend the code right now. Please try again.", "error");
     } finally {
       resendBtn.disabled = false;
+    }
+  }
+
+  // Abandons the in-progress signup entirely — nothing was ever
+  // written to Firebase Auth or Firestore for it in the first place,
+  // so there's nothing to undo, just clear the pending state and
+  // return to that role's login screen.
+  function handleOtpCancel() {
+    const wasAdmin = pendingSignup?.role === "admin";
+    pendingSignup = null;
+    clearOtpDigitInputs();
+
+    if (wasAdmin) {
+      setAdminMode("login");
+    } else {
+      setEmployeeMode("login");
     }
   }
 
@@ -735,4 +797,5 @@ document.addEventListener("DOMContentLoaded", () => {
   formSignup.addEventListener("submit", handleEmployeeSignup);
   formOtpVerify.addEventListener("submit", handleOtpVerifySubmit);
   document.getElementById("otp-resend-btn").addEventListener("click", handleOtpResend);
+  document.getElementById("otp-cancel-btn").addEventListener("click", handleOtpCancel);
 });

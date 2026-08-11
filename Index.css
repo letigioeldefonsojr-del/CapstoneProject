@@ -744,3 +744,32 @@ input:focus-visible {
 .fp-return-link:hover {
     color: var(--brand-green-mid);
 }
+
+/* ===========================
+   OTP DIGIT INPUT BOXES
+   =========================== */
+.otp-digit-group {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 18px;
+}
+
+.otp-digit-input {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    text-align: center;
+    font-size: 22px;
+    font-weight: 700;
+    border: 1.5px solid rgba(255, 255, 255, 0.3);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.94);
+    color: var(--brand-green-dark);
+    outline: none;
+    transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.otp-digit-input:focus {
+    border-color: #ffffff;
+    background: #ffffff;
+}

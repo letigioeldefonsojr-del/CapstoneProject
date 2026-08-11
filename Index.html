@@ -298,14 +298,13 @@
                     <p class="reset-password__email" id="otp-sent-to"></p>
 
                     <div class="input-label">Enter the 6-digit code:</div>
-                    <div class="input-wrapper">
-                        <div class="icon-badge">
-                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                                <rect x="4" y="10.5" width="16" height="9.5" rx="2" stroke="currentColor" stroke-width="1.6"/>
-                                <path d="M7 10.5V7.5C7 5 9 3.5 12 3.5C15 3.5 17 5 17 7.5V10.5" stroke="currentColor" stroke-width="1.6"/>
-                            </svg>
-                        </div>
-                        <input type="text" id="otp-code-input" placeholder="000000" inputmode="numeric" maxlength="6" autocomplete="one-time-code" required>
+                    <div class="otp-digit-group" id="otp-digit-group">
+                        <input type="text" class="otp-digit-input" inputmode="numeric" maxlength="1" autocomplete="one-time-code" data-index="0">
+                        <input type="text" class="otp-digit-input" inputmode="numeric" maxlength="1" autocomplete="off" data-index="1">
+                        <input type="text" class="otp-digit-input" inputmode="numeric" maxlength="1" autocomplete="off" data-index="2">
+                        <input type="text" class="otp-digit-input" inputmode="numeric" maxlength="1" autocomplete="off" data-index="3">
+                        <input type="text" class="otp-digit-input" inputmode="numeric" maxlength="1" autocomplete="off" data-index="4">
+                        <input type="text" class="otp-digit-input" inputmode="numeric" maxlength="1" autocomplete="off" data-index="5">
                     </div>
 
                     <button type="submit" class="login-btn login-btn--top-gap" id="otp-verify-submit">
@@ -316,6 +315,9 @@
                     <p class="auth-switch">
                         Didn't get a code?
                         <button type="button" class="auth-switch__link" id="otp-resend-btn">Resend code</button>
+                    </p>
+                    <p class="auth-switch">
+                        <button type="button" class="auth-switch__link" id="otp-cancel-btn">Cancel</button>
                     </p>
                 </form>
 
