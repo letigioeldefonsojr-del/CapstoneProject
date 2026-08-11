@@ -12,11 +12,11 @@ import {
 // Keys are meant for server-side use only and should never be
 // embedded in client JS, since anyone can view page source.
 //
-// TEMPLATE VARIABLE NAMES: confirmed from your actual EmailJS
-// template — {{passcode}} and {{time}} are used in the message body.
-// If the recipient ("To Email") field in your EmailJS template
-// settings uses a variable name other than to_email, update that key
-// in sendOtpCode() below to match.
+// TEMPLATE VARIABLE NAMES: confirmed directly from the EmailJS
+// template's actual settings — {{passcode}} and {{time}} in the
+// message body, and the "To Email" field is {{email}} (not
+// {{to_email}} — that mismatch was the cause of an earlier 422 error
+// from EmailJS, since it had no way to resolve a recipient).
 //
 // Codes expire after 10 minutes and are single-use (deleted from
 // Firestore once successfully verified).
@@ -60,13 +60,12 @@ export async function sendOtpCode(email, name) {
   });
 
   // Matches your real EmailJS template exactly: {{passcode}} and
-  // {{time}} are the only variables the message body actually uses.
-  // to_email/to_name are still included in case your template's
-  // recipient ("To Email") field in the EmailJS dashboard references
-  // them — if your "To" field uses a different variable name than
-  // to_email, update that key below to match.
+  // {{time}} in the body, {{email}} for the "To Email" field.
+  // to_name is included in case your template uses it elsewhere
+  // (e.g. a greeting), even though it's not shown in the body you
+  // shared.
   const templateParams = {
-    to_email: email,
+    email: email,
     to_name: name || "",
     passcode: code,
     time: expiresAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
