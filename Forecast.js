@@ -10,28 +10,39 @@ import { kMeansCluster, normalizeFeatures } from "./KMeans.js";
 // ----------------------------------------------------------------
 // NOT traditional sales-history forecasting — this store has no
 // dedicated point-of-sale transaction log. What it uses instead is
-// real data you already have: the Stock Movement Log (stockMovements
-// collection), specifically every entry logged with type: "sale" —
-// which is written every time a barcode scan records a real sale
-// (see performScanAction() in Inventory.js). Every one of those is a
-// genuine, timestamped depletion event.
+// real data already collected, from TWO sources, merged together:
+//
+//   1. Stock Movement Log — every "sale" entry, written when a
+//      barcode scan records a real in-store sale (see
+//      performScanAction() in Inventory.js).
+//   2. Online Orders — every item inside an order with
+//      status === "delivered" (not pending/cancelled/rejected —
+//      only orders that actually resulted in stock leaving the
+//      store count as a real completed sale).
+//
+// Both are genuine, timestamped depletion events, just from two
+// different parts of the business (in-store vs. online). Combining
+// them gives a truer picture of real demand than either alone would.
 //
 // From that, this computes a real per-product SELLING VELOCITY
 // (units/day) and feeds it into K-MEANS CLUSTERING (see KMeans.js) —
 // genuine unsupervised machine learning — which automatically groups
 // products into Fast-Moving / Moderate / Slow-Moving, discovering the
 // natural breakpoints from the actual data rather than a hardcoded
-// "fast = 5/day" rule. This improves automatically as more real scan
-// data accumulates — no retraining step, no manual tuning.
+// "fast = 5/day" rule. This improves automatically as more real sales
+// data (from either source) accumulates — no retraining step needed.
 //
-// HONEST LIMITATION: a product with zero recorded "sale" movements
-// (never scanned as sold) has no velocity to compute — it's shown
-// separately as "No Sales Data Yet," not guessed at or hidden.
-// Products edited only via Add/Edit Product or CSV import (never
-// scanned) will stay in that bucket until they're actually sold
-// through the scanner at least once.
+// HONEST LIMITATION: a product with zero recorded sales from EITHER
+// source has no velocity to compute — it's shown separately as
+// "No Sales Data Yet," not guessed at or hidden.
+//
+// HONEST APPROXIMATION: online order timestamps use the order's
+// createdAt (creation time), not a separate delivery-confirmation
+// timestamp — the schema doesn't currently track the latter
+// separately, so creation time is used as a reasonable stand-in.
 // ====================================================================
 const STOCK_MOVEMENTS_COLLECTION = "stockMovements";
+const ORDERS_COLLECTION = "orders";
 const CLUSTER_COUNT = 3; // Fast-Moving / Moderate / Slow-Moving
 
 // UPDATE THIS after deploying the Worker (see gemini-worker.js) — it'll
@@ -50,13 +61,14 @@ async function loadForecast() {
   showLoadingState();
 
   try {
-    const [products, saleMovements] = await Promise.all([
+    const [products, saleMovements, deliveredOrderItems] = await Promise.all([
       getProducts(),
-      fetchSaleMovements()
+      fetchSaleMovements(),
+      fetchDeliveredOrderItems()
     ]);
 
     allProducts = products;
-    velocityByProductId = computeVelocities(saleMovements);
+    velocityByProductId = computeVelocities([...saleMovements, ...deliveredOrderItems]);
 
     const productsWithData = [];
     const productsWithoutData = [];
@@ -90,7 +102,40 @@ async function loadForecast() {
 async function fetchSaleMovements() {
   const q = query(collection(db, STOCK_MOVEMENTS_COLLECTION), where("type", "==", "sale"));
   const snap = await getDocs(q);
-  return snap.docs.map((docSnap) => docSnap.data());
+
+  return snap.docs
+    .map((docSnap) => {
+      const data = docSnap.data();
+      const unitsSold = (data.previousStock ?? 0) - (data.newStock ?? 0);
+      const timestampMillis = data.createdAt?.toMillis?.();
+      return { productId: data.productId, unitsSold, timestampMillis };
+    })
+    .filter((entry) => entry.productId && entry.unitsSold > 0 && entry.timestampMillis);
+}
+
+// Only "delivered" orders count — pending/approved/on_the_way haven't
+// actually resulted in stock leaving yet, and cancelled/rejected/
+// undelivered explicitly didn't. Flattens each order's items[] array
+// into individual depletion events, one per line item.
+async function fetchDeliveredOrderItems() {
+  const q = query(collection(db, ORDERS_COLLECTION), where("status", "==", "delivered"));
+  const snap = await getDocs(q);
+
+  const events = [];
+  snap.forEach((docSnap) => {
+    const order = docSnap.data();
+    const timestampMillis = order.createdAt?.toMillis?.();
+    if (!timestampMillis || !Array.isArray(order.items)) return;
+
+    order.items.forEach((item) => {
+      const unitsSold = typeof item.amount === "number" ? item.amount : 0;
+      if (item.productId && unitsSold > 0) {
+        events.push({ productId: item.productId, unitsSold, timestampMillis });
+      }
+    });
+  });
+
+  return events;
 }
 
 // ---- Velocity computation ---------------------------------------------
@@ -99,17 +144,11 @@ async function fetchSaleMovements() {
 // parent product's total — a deliberate simplification; a future
 // version could track per-variant velocity separately if that level
 // of detail becomes worth the added complexity.
-function computeVelocities(saleMovements) {
+function computeVelocities(depletionEvents) {
   const byProduct = new Map();
 
-  saleMovements.forEach((movement) => {
-    const unitsSold = (movement.previousStock ?? 0) - (movement.newStock ?? 0);
-    if (unitsSold <= 0) return; // ignore anything that isn't a genuine decrease
-
-    const timestampMillis = movement.createdAt?.toMillis?.();
-    if (!timestampMillis) return;
-
-    const existing = byProduct.get(movement.productId) || {
+  depletionEvents.forEach(({ productId, unitsSold, timestampMillis }) => {
+    const existing = byProduct.get(productId) || {
       totalUnitsSold: 0,
       firstSaleMillis: timestampMillis,
       lastSaleMillis: timestampMillis
@@ -119,7 +158,7 @@ function computeVelocities(saleMovements) {
     existing.firstSaleMillis = Math.min(existing.firstSaleMillis, timestampMillis);
     existing.lastSaleMillis = Math.max(existing.lastSaleMillis, timestampMillis);
 
-    byProduct.set(movement.productId, existing);
+    byProduct.set(productId, existing);
   });
 
   const result = new Map();
