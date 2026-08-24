@@ -2209,3 +2209,12 @@ button {
     color: var(--muted);
     font-style: italic;
 }
+
+.orders-table__cancel-reason {
+    display: block;
+    font-size: 11.5px;
+    color: var(--muted);
+    font-style: italic;
+    max-width: 180px;
+    line-height: 1.4;
+}

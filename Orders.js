@@ -292,13 +292,6 @@ function buildOrderDetailRow(order) {
     wrap.appendChild(reasonLine);
   }
 
-  if (order.cancelReason) {
-    const cancelLine = document.createElement("p");
-    cancelLine.className = "order-detail__reason";
-    cancelLine.textContent = `Cancellation reason: ${order.cancelReason}`;
-    wrap.appendChild(cancelLine);
-  }
-
   cell.appendChild(wrap);
   row.appendChild(cell);
   return row;
@@ -323,8 +316,17 @@ function buildActionsForOrder(order) {
   } else if (order.status === "on_the_way" && !order.awaitingCustomerConfirmation) {
     wrap.appendChild(buildActionButton("Mark Delivered", "btn-primary", () => handleMarkDelivered(order)));
     wrap.appendChild(buildActionButton("Undeliverable", "btn-danger-outline", () => openUndeliverableModal(order)));
+  } else if (order.status === "cancelled" && order.cancelReason) {
+    // Cancelled orders have no actions left to take — this column
+    // would otherwise sit empty, so the customer's own cancellation
+    // reason goes here instead, visible immediately without needing
+    // to expand the row.
+    const reasonNote = document.createElement("span");
+    reasonNote.className = "orders-table__cancel-reason";
+    reasonNote.textContent = order.cancelReason;
+    wrap.appendChild(reasonNote);
   }
-  // delivered / cancelled / rejected / undelivered / awaiting-confirmation: no actions, view-only.
+  // delivered / rejected / undelivered / awaiting-confirmation: no actions, view-only.
 
   return wrap;
 }
