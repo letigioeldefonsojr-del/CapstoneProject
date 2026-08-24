@@ -292,6 +292,13 @@ function buildOrderDetailRow(order) {
     wrap.appendChild(reasonLine);
   }
 
+  if (order.cancelReason) {
+    const cancelLine = document.createElement("p");
+    cancelLine.className = "order-detail__reason";
+    cancelLine.textContent = `Cancellation reason: ${order.cancelReason}`;
+    wrap.appendChild(cancelLine);
+  }
+
   cell.appendChild(wrap);
   row.appendChild(cell);
   return row;

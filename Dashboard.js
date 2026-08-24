@@ -1,6 +1,6 @@
 import { db } from "./firebase-config.js";
 import {
-  collection, getDocs, query, where
+  collection, getDocs, query, where, doc, getDoc, setDoc, deleteDoc, serverTimestamp, Timestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getProducts } from "./ProductCache.js";
 import { getNotifications } from "./NotificationCache.js";
@@ -31,6 +31,8 @@ document.addEventListener("sidebar:ready", (event) => {
   applyRoleVisibility(role);
   loadStats();
   loadRecentNotifications(user.uid);
+  loadBannerPanel();
+  wireBannerForm();
 });
 
 // ====================================================================
@@ -166,4 +168,178 @@ async function loadRecentNotifications(uid) {
     console.error("Couldn't load notifications:", error);
     list.innerHTML = `<li class="notif-list__empty">Couldn't load notifications right now.</li>`;
   }
+}
+
+// ====================================================================
+// CHUNK — STORE BANNER
+// ----------------------------------------------------------------
+// Writes to settings/storeBanner — schema confirmed directly from the
+// mobile app's lib/core/banner_helpers.dart: {offer, description,
+// imageUrl, scheduleStart, scheduleEnd, updatedAt}. The customer app
+// reads this same document live via a Firestore stream, so a save
+// here shows up on their home screen immediately, no separate sync
+// step needed. Available to both Admin and Employee (matches the
+// existing settings write rule).
+// ====================================================================
+const BANNER_CLOUDINARY_CLOUD_NAME = "h5291fss";
+const BANNER_CLOUDINARY_UPLOAD_PRESET = "productsweb";
+const BANNER_CLOUDINARY_FOLDER = "banners";
+
+let currentBannerImageUrl = null;
+
+async function loadBannerPanel() {
+  try {
+    const snap = await getDoc(doc(db, "settings", "storeBanner"));
+    if (!snap.exists()) {
+      document.getElementById("banner-preview").hidden = true;
+      return;
+    }
+
+    const data = snap.data();
+    document.getElementById("banner-offer").value = data.offer || "";
+    document.getElementById("banner-description").value = data.description || "";
+    currentBannerImageUrl = data.imageUrl || null;
+
+    if (data.scheduleStart?.toDate) {
+      document.getElementById("banner-schedule-start").value = toDatetimeLocalValue(data.scheduleStart.toDate());
+    }
+    if (data.scheduleEnd?.toDate) {
+      document.getElementById("banner-schedule-end").value = toDatetimeLocalValue(data.scheduleEnd.toDate());
+    }
+
+    renderBannerPreview(data);
+  } catch (error) {
+    console.error("Couldn't load store banner:", error);
+  }
+}
+
+function renderBannerPreview(data) {
+  const preview = document.getElementById("banner-preview");
+  const imageEl = document.getElementById("banner-preview-image");
+
+  if (!data.offer && !data.description) {
+    preview.hidden = true;
+    return;
+  }
+
+  preview.hidden = false;
+  document.getElementById("banner-preview-offer").textContent = data.offer || "";
+  document.getElementById("banner-preview-description").textContent = data.description || "";
+
+  if (data.imageUrl) {
+    imageEl.src = data.imageUrl;
+    imageEl.hidden = false;
+  } else {
+    imageEl.hidden = true;
+  }
+
+  const scheduleEl = document.getElementById("banner-preview-schedule");
+  const startDate = data.scheduleStart?.toDate?.();
+  const endDate = data.scheduleEnd?.toDate?.();
+  if (startDate || endDate) {
+    const startText = startDate ? startDate.toLocaleDateString() : "now";
+    const endText = endDate ? endDate.toLocaleDateString() : "no end date";
+    scheduleEl.textContent = `Active ${startText} → ${endText}`;
+  } else {
+    scheduleEl.textContent = "Active always (no schedule set)";
+  }
+}
+
+function toDatetimeLocalValue(dateObj) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${dateObj.getFullYear()}-${pad(dateObj.getMonth() + 1)}-${pad(dateObj.getDate())}T${pad(dateObj.getHours())}:${pad(dateObj.getMinutes())}`;
+}
+
+function wireBannerForm() {
+  const form = document.getElementById("banner-form");
+  const removeBtn = document.getElementById("banner-remove-btn");
+
+  form.addEventListener("submit", handleBannerSave);
+  removeBtn.addEventListener("click", handleBannerRemove);
+}
+
+function showBannerStatus(message, kind) {
+  const el = document.getElementById("banner-status");
+  el.textContent = message;
+  el.dataset.kind = kind;
+  el.hidden = false;
+}
+
+async function handleBannerSave(event) {
+  event.preventDefault();
+  const saveBtn = document.getElementById("banner-save-btn");
+  const offer = document.getElementById("banner-offer").value.trim();
+  const description = document.getElementById("banner-description").value.trim();
+  const imageFile = document.getElementById("banner-image").files[0];
+  const startValue = document.getElementById("banner-schedule-start").value;
+  const endValue = document.getElementById("banner-schedule-end").value;
+
+  if (!offer && !description) {
+    showBannerStatus("Add at least an offer or a description.", "error");
+    return;
+  }
+
+  saveBtn.disabled = true;
+  saveBtn.textContent = "Saving...";
+
+  try {
+    let imageUrl = currentBannerImageUrl;
+    if (imageFile) {
+      imageUrl = await uploadBannerImage(imageFile);
+    }
+
+    await setDoc(doc(db, "settings", "storeBanner"), {
+      offer,
+      description,
+      imageUrl: imageUrl || null,
+      scheduleStart: startValue ? Timestamp.fromDate(new Date(startValue)) : null,
+      scheduleEnd: endValue ? Timestamp.fromDate(new Date(endValue)) : null,
+      updatedAt: serverTimestamp()
+    });
+
+    currentBannerImageUrl = imageUrl;
+    showBannerStatus("Banner saved — now live on the customer app.", "success");
+    await loadBannerPanel();
+  } catch (error) {
+    console.error("Couldn't save banner:", error);
+    showBannerStatus("Couldn't save the banner. Please try again.", "error");
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = "Save Banner";
+  }
+}
+
+async function handleBannerRemove() {
+  const confirmed = window.confirm("Remove the current banner? Customers will stop seeing it immediately.");
+  if (!confirmed) return;
+
+  try {
+    await deleteDoc(doc(db, "settings", "storeBanner"));
+    document.getElementById("banner-form").reset();
+    currentBannerImageUrl = null;
+    document.getElementById("banner-preview").hidden = true;
+    showBannerStatus("Banner removed.", "success");
+  } catch (error) {
+    console.error("Couldn't remove banner:", error);
+    showBannerStatus("Couldn't remove the banner. Please try again.", "error");
+  }
+}
+
+async function uploadBannerImage(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("upload_preset", BANNER_CLOUDINARY_UPLOAD_PRESET);
+  formData.append("folder", BANNER_CLOUDINARY_FOLDER);
+
+  const response = await fetch(
+    `https://api.cloudinary.com/v1_1/${BANNER_CLOUDINARY_CLOUD_NAME}/image/upload`,
+    { method: "POST", body: formData }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Cloudinary upload failed with status ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.secure_url;
 }

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Almares 328 | Orders</title>
+    <title>Almares 328 | Feedback</title>
     <link rel="icon" type="image/png" href="Logo.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -108,98 +108,15 @@
             <h1 class="topbar__greeting" id="greeting">Hello</h1>
         </header>
 
-        <!-- ================================================================
-             ORDERS (Employee only — see note in Orders.js. Admin sees a
-             short explanatory message instead, matching your rules, which
-             only grant order read/write to isEmployee()).
-             ================================================================ -->
-        <div class="order-status-grid" id="order-status-grid">
-            <button type="button" class="order-status-card is-active" data-status="all">
-                <span class="order-status-card__value" id="count-all">—</span>
-                <span class="order-status-card__label">All Orders</span>
-            </button>
-            <button type="button" class="order-status-card" data-status="pending">
-                <span class="order-status-card__value" id="count-pending">—</span>
-                <span class="order-status-card__label">Pending</span>
-            </button>
-            <button type="button" class="order-status-card" data-status="approved">
-                <span class="order-status-card__value" id="count-approved">—</span>
-                <span class="order-status-card__label">Approved</span>
-            </button>
-            <button type="button" class="order-status-card" data-status="on_the_way">
-                <span class="order-status-card__value" id="count-on_the_way">—</span>
-                <span class="order-status-card__label">On Its Way</span>
-            </button>
-            <button type="button" class="order-status-card" data-status="delivered">
-                <span class="order-status-card__value" id="count-delivered">—</span>
-                <span class="order-status-card__label">Delivered</span>
-            </button>
-            <button type="button" class="order-status-card" data-status="cancelled">
-                <span class="order-status-card__value" id="count-cancelled">—</span>
-                <span class="order-status-card__label">Cancelled / Rejected</span>
-            </button>
-            <button type="button" class="order-status-card" data-status="undelivered">
-                <span class="order-status-card__value" id="count-undelivered">—</span>
-                <span class="order-status-card__label">Undelivered</span>
-            </button>
-        </div>
-
-        <div class="tab-row" id="cancelled-subtabs" hidden>
-            <button type="button" class="tab-row__btn is-active" data-substatus="cancelled">Cancelled</button>
-            <button type="button" class="tab-row__btn" data-substatus="rejected">Rejected</button>
-        </div>
-
-        <div class="panel orders-panel">
-            <table class="inventory-table orders-table">
-                <thead>
-                    <tr>
-                        <th>Order #</th>
-                        <th>Customer</th>
-                        <th>Items</th>
-                        <th>Total</th>
-                        <th>Date</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="orders-tbody">
-                    <tr><td colspan="7" class="inventory-empty">Loading orders...</td></tr>
-                </tbody>
-            </table>
+        <div id="feedback-content">
+            <p class="forecast-loading">Loading...</p>
         </div>
 
     </main>
 </div>
 
-<!-- ================================================================
-     MARK UNDELIVERABLE MODAL (asks for a reason, matching mobile)
-     ================================================================ -->
-<div class="modal-overlay" id="undeliverable-modal-overlay" hidden>
-    <div class="modal">
-        <div class="modal__header">
-            <h3>Mark as Undeliverable</h3>
-            <button type="button" class="modal__close" id="undeliverable-modal-close" aria-label="Close">
-                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                    <path d="M6 6L18 18M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-                </svg>
-            </button>
-        </div>
-        <div class="modal__body">
-            <div class="form-field">
-                <label for="undeliverable-reason">Reason</label>
-                <textarea id="undeliverable-reason" rows="3" placeholder="e.g. Customer not available, wrong address..."></textarea>
-            </div>
-            <p class="form-status" id="undeliverable-status" hidden></p>
-        </div>
-        <div class="modal__footer">
-            <button type="button" class="btn-outline" id="undeliverable-cancel">Cancel</button>
-            <button type="button" class="btn-danger-outline" id="undeliverable-confirm">Confirm</button>
-        </div>
-    </div>
-</div>
-
 <script type="module" src="firebase-config.js"></script>
 <script type="module" src="Sidebar.js"></script>
-<script type="module" src="Orders.js"></script>
+<script type="module" src="Feedback.js"></script>
 </body>
 </html>
