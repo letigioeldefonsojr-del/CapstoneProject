@@ -185,8 +185,9 @@ function buildStockListItem(item, alreadyRead) {
   `;
   el.querySelector(".notif-list__message").textContent = item.message;
 
-  el.addEventListener("click", () => {
-    markRead(currentUid, item.id);
+  el.addEventListener("click", async (event) => {
+    event.preventDefault();
+    await markRead(currentUid, item.id);
     window.location.href = `Inventory.html?filter=${item.filterValue}`;
   });
 
@@ -209,8 +210,9 @@ function buildOrderListItem(item, alreadyRead) {
   el.querySelector(".notif-list__message").textContent = item.message;
   el.querySelector(".notif-list__time").textContent = item.timeLabel;
 
-  el.addEventListener("click", () => {
-    markRead(currentUid, item.id);
+  el.addEventListener("click", async (event) => {
+    event.preventDefault();
+    await markRead(currentUid, item.id);
     window.location.href = "Orders.html";
   });
 

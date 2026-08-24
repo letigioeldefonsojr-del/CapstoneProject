@@ -62,7 +62,7 @@ function getEntry(uid) {
 
 function persist(uid) {
   const entry = getEntry(uid);
-  setDoc(doc(db, COLLECTION, uid), {
+  return setDoc(doc(db, COLLECTION, uid), {
     readIds: [...entry.readIds],
     clearedIds: [...entry.clearedIds]
   }).catch((error) => {
@@ -81,13 +81,13 @@ export function isRead(uid, id) {
 
 export function markRead(uid, id) {
   getEntry(uid).readIds.add(id);
-  persist(uid);
+  return persist(uid);
 }
 
 export function markAllRead(uid, ids) {
   const entry = getEntry(uid);
   ids.forEach((id) => entry.readIds.add(id));
-  persist(uid);
+  return persist(uid);
 }
 
 // ---- Cleared ---------------------------------------------------------
@@ -102,5 +102,5 @@ export function isCleared(uid, id) {
 export function markAllCleared(uid, ids) {
   const entry = getEntry(uid);
   ids.forEach((id) => entry.clearedIds.add(id));
-  persist(uid);
+  return persist(uid);
 }
