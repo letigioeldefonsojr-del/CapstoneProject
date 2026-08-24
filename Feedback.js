@@ -1,6 +1,6 @@
 import { db } from "./firebase-config.js";
 import {
-  collection, getDocs, query, where
+  collection, query, where, onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 
 // ====================================================================
@@ -20,36 +20,49 @@ let allRatedOrders = [];
 let currentView = "month"; // "month" | "all"
 let sortOrder = "newest"; // "newest" | "oldest"
 
-document.addEventListener("sidebar:ready", () => {
+document.addEventListener("sidebar:ready", (event) => {
+  // Admin-only page. The nav link is already hidden for employees
+  // (see Sidebar.js), but that alone doesn't stop someone from typing
+  // the URL directly — this is the actual enforcement.
+  if (event.detail.role !== "admin") {
+    window.location.replace("Dashboard.html");
+    return;
+  }
   loadFeedback();
 });
 
-async function loadFeedback() {
+function loadFeedback() {
   const container = document.getElementById("feedback-content");
   container.innerHTML = `<p class="forecast-loading">Loading feedback...</p>`;
 
-  try {
-    const q = query(collection(db, ORDERS_COLLECTION), where("rating", ">=", 1));
-    const snap = await getDocs(q);
+  const q = query(collection(db, ORDERS_COLLECTION), where("rating", ">=", 1));
 
-    allRatedOrders = snap.docs
-      .map((docSnap) => {
-        const data = docSnap.data();
-        return {
-          id: docSnap.id,
-          rating: data.rating,
-          feedback: (data.feedback || "").trim(),
-          customerName: data.customerName || "A customer",
-          ratedAtMillis: data.ratedAt?.toMillis?.() || data.createdAt?.toMillis?.() || 0
-        };
-      })
-      .sort((a, b) => b.ratedAtMillis - a.ratedAtMillis);
+  // Real-time: fires immediately with current data, then again
+  // automatically whenever a customer submits a new rating — no
+  // manual reload needed on this end.
+  onSnapshot(
+    q,
+    (snap) => {
+      allRatedOrders = snap.docs
+        .map((docSnap) => {
+          const data = docSnap.data();
+          return {
+            id: docSnap.id,
+            rating: data.rating,
+            feedback: (data.feedback || "").trim(),
+            customerName: data.customerName || "A customer",
+            ratedAtMillis: data.ratedAt?.toMillis?.() || data.createdAt?.toMillis?.() || 0
+          };
+        })
+        .sort((a, b) => b.ratedAtMillis - a.ratedAtMillis);
 
-    render();
-  } catch (error) {
-    console.error("Couldn't load feedback:", error);
-    container.innerHTML = `<p class="forecast-loading">Couldn't load feedback right now.</p>`;
-  }
+      render();
+    },
+    (error) => {
+      console.error("Couldn't load feedback:", error);
+      container.innerHTML = `<p class="forecast-loading">Couldn't load feedback right now.</p>`;
+    }
+  );
 }
 
 function render() {

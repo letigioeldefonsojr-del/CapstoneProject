@@ -46,11 +46,21 @@ async function initSidebar(user) {
   wireCollapse();
   wireLogout();
   wireDeleteAccount(user, role);
+  applyRoleRestrictedNavItems(role);
 
   // Let the page's own script (Dashboard.js, Inventory.js, etc.) know
   // the sidebar is ready and what role is logged in, in case it needs
   // to adjust its own content (e.g. hiding an admin-only button).
   document.dispatchEvent(new CustomEvent("sidebar:ready", { detail: { role, user } }));
+}
+
+// Feedback is admin-only — hidden from the nav for employees. This
+// lives here (not in each page's own script) so it applies
+// consistently everywhere the shared sidebar renders, in one place.
+function applyRoleRestrictedNavItems(role) {
+  if (role === "admin") return;
+  const feedbackLink = document.querySelector('a[href="Feedback.html"]');
+  if (feedbackLink) feedbackLink.hidden = true;
 }
 
 // ====================================================================

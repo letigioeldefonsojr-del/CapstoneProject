@@ -1,6 +1,6 @@
 import { db } from "./firebase-config.js";
 import {
-  collection, getDocs, doc, updateDoc
+  collection, doc, updateDoc, onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { confirmDialog } from "./ConfirmDialog.js";
 
@@ -73,25 +73,37 @@ document.addEventListener("sidebar:ready", (event) => {
 // ====================================================================
 // CHUNK 2 — LOAD ORDERS
 // ====================================================================
-async function loadOrders() {
-  try {
-    const snap = await getDocs(collection(db, ORDERS_COLLECTION));
-    allOrders = snap.docs
-      .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
-      .sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+function loadOrders() {
+  // Real-time: set up ONCE. Fires immediately with current data, then
+  // again automatically whenever anything in this collection changes
+  // — a staff action here (Approve, Mark Delivered, etc.) OR a
+  // customer-side update from the mobile app (confirming they
+  // received their order, submitting a rating, cancelling). No manual
+  // reload needed on either side.
+  onSnapshot(
+    collection(db, ORDERS_COLLECTION),
+    (snap) => {
+      allOrders = snap.docs
+        .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+        .sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
 
-    updateCounts();
-    render();
-  } catch (error) {
-    console.error("Couldn't load orders:", error);
-    document.getElementById("orders-tbody").innerHTML =
-      `<tr><td colspan="7" class="inventory-empty">Couldn't load orders right now.</td></tr>`;
-  }
+      updateCounts();
+      render();
+    },
+    (error) => {
+      console.error("Couldn't load orders:", error);
+      document.getElementById("orders-tbody").innerHTML =
+        `<tr><td colspan="7" class="inventory-empty">Couldn't load orders right now.</td></tr>`;
+    }
+  );
 }
 
-async function reloadAfterAction() {
-  await loadOrders();
-}
+// No longer needed for its own sake — the onSnapshot listener above
+// already catches every change (including the ones this function used
+// to be called after) automatically and near-instantly. Kept as a
+// harmless no-op rather than removing every call site, so nothing
+// breaks if it's called from somewhere.
+async function reloadAfterAction() {}
 
 // ====================================================================
 // CHUNK 3 — STATUS COUNT / TAB CARDS
@@ -164,6 +176,11 @@ function ordersForActiveTab() {
 // ====================================================================
 function render() {
   document.getElementById("cancelled-subtabs").hidden = activeTab !== "cancelled";
+
+  // Remember which order was expanded before rebuilding the table, so
+  // a live update elsewhere doesn't silently collapse whatever the
+  // admin is currently looking at.
+  const previouslyExpandedOrderId = expandedOrderMainRow?.dataset.orderId || null;
   expandedOrderDetail = null;
   expandedOrderMainRow = null;
 
@@ -179,6 +196,7 @@ function render() {
   tbody.innerHTML = "";
   orders.forEach((order) => {
     const mainRow = buildOrderRow(order);
+    mainRow.dataset.orderId = order.id;
     tbody.appendChild(mainRow);
 
     const detailRow = buildOrderDetailRow(order);
@@ -200,6 +218,13 @@ function render() {
       expandedOrderDetail = expanding ? detailRow : null;
       expandedOrderMainRow = expanding ? mainRow : null;
     });
+
+    if (order.id === previouslyExpandedOrderId) {
+      detailRow.hidden = false;
+      mainRow.classList.add("is-expanded");
+      expandedOrderDetail = detailRow;
+      expandedOrderMainRow = mainRow;
+    }
   });
 }
 
