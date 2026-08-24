@@ -2218,3 +2218,32 @@ button {
     max-width: 180px;
     line-height: 1.4;
 }
+
+/* ===========================
+   AVERAGE RATING — PROPORTIONAL STAR FILL
+   =========================== */
+.rating-stars {
+    position: relative;
+    display: inline-block;
+    font-size: 18px;
+    line-height: 1;
+    letter-spacing: 2px;
+    margin-top: 6px;
+}
+
+.rating-stars__track {
+    color: #e2e2e2;
+    white-space: nowrap;
+}
+
+.rating-stars__fill {
+    position: absolute;
+    top: 0;
+    left: 0;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.rating-stars--low .rating-stars__fill { color: #e2574c; }
+.rating-stars--mid .rating-stars__fill { color: #f5a623; }
+.rating-stars--high .rating-stars__fill { color: #2e9e4f; }

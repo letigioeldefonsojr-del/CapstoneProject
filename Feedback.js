@@ -86,22 +86,47 @@ function buildSummary(monthOrders, allOrders, monthLabel) {
   const allAvg = average(allOrders.map((o) => o.rating));
 
   const cards = [
-    { value: monthOrders.length ? monthAvg.toFixed(1) : "—", label: `Average Rating (${monthLabel})` },
+    { value: monthOrders.length ? monthAvg.toFixed(1) : "—", label: `Average Rating (${monthLabel})`, avgForStars: monthOrders.length ? monthAvg : null },
     { value: monthOrders.length, label: `Ratings This Month` },
-    { value: allOrders.length ? allAvg.toFixed(1) : "—", label: "Average Rating (All Time)" },
+    { value: allOrders.length ? allAvg.toFixed(1) : "—", label: "Average Rating (All Time)", avgForStars: allOrders.length ? allAvg : null },
     { value: allOrders.length, label: "Total Ratings" }
   ];
 
   cards.forEach((card) => {
     const el = document.createElement("div");
     el.className = "panel forecast-stat-card";
-    el.innerHTML = `<span class="forecast-stat-card__value"></span><span class="forecast-stat-card__label"></span>`;
+    el.innerHTML = `
+      <span class="forecast-stat-card__value"></span>
+      <span class="forecast-stat-card__label"></span>
+    `;
     el.querySelector(".forecast-stat-card__value").textContent = card.value;
     el.querySelector(".forecast-stat-card__label").textContent = card.label;
+
+    if (card.avgForStars != null) {
+      el.insertAdjacentHTML("beforeend", buildAverageStarsHtml(card.avgForStars));
+    }
+
     wrap.appendChild(el);
   });
 
   return wrap;
+}
+
+// Proportional-fill star row: the filled portion's WIDTH reflects the
+// decimal average exactly (e.g. 4.3/5 fills 86% of the 5th star, not
+// just rounding to 4 whole stars) — built with an empty "track" row
+// underneath and a colored, clipped "fill" row on top. Color tier
+// reflects how good the average actually is, not just a fixed color.
+function buildAverageStarsHtml(average) {
+  const fillPercent = Math.max(0, Math.min(100, (average / 5) * 100));
+  const tierClass = average >= 4 ? "rating-stars--high" : average >= 2.5 ? "rating-stars--mid" : "rating-stars--low";
+
+  return `
+    <div class="rating-stars ${tierClass}">
+      <div class="rating-stars__track">★★★★★</div>
+      <div class="rating-stars__fill" style="width:${fillPercent}%">★★★★★</div>
+    </div>
+  `;
 }
 
 function buildFeedbackList(orders, monthLabel) {
