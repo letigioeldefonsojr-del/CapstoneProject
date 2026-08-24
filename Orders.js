@@ -50,6 +50,7 @@ const STATUS_META = {
 };
 
 let allOrders = [];
+let searchQuery = "";
 let activeTab = "all";
 let cancelledSubStatus = "cancelled"; // when activeTab === "cancelled": "cancelled" or "rejected"
 let expandedOrderDetail = null;   // accordion: only one order's detail row open at a time
@@ -64,6 +65,7 @@ document.addEventListener("sidebar:ready", (event) => {
   currentRole = event.detail.role;
 
   wireTabs();
+  wireSearch();
   wireUndeliverableModal();
   loadOrders();
 });
@@ -130,13 +132,31 @@ function wireTabs() {
   });
 }
 
+function wireSearch() {
+  document.getElementById("orders-search-input").addEventListener("input", (event) => {
+    searchQuery = event.target.value;
+    render();
+  });
+}
+
 function ordersForActiveTab() {
+  let orders;
   if (activeTab === "cancelled") {
-    return allOrders.filter((o) => o.status === cancelledSubStatus);
+    orders = allOrders.filter((o) => o.status === cancelledSubStatus);
+  } else {
+    const statuses = TAB_STATUS_MAP[activeTab];
+    orders = !statuses ? allOrders : allOrders.filter((o) => statuses.includes(o.status));
   }
-  const statuses = TAB_STATUS_MAP[activeTab];
-  if (!statuses) return allOrders;
-  return allOrders.filter((o) => statuses.includes(o.status));
+
+  if (!searchQuery.trim()) return orders;
+
+  const q = searchQuery.trim().toLowerCase();
+  return orders.filter((order) => {
+    const idMatch = shortOrderId(order.id).toLowerCase().includes(q);
+    const nameMatch = (order.customerName || "").toLowerCase().includes(q);
+    const dateMatch = formatOrderDate(order).toLowerCase().includes(q);
+    return idMatch || nameMatch || dateMatch;
+  });
 }
 
 // ====================================================================
@@ -151,7 +171,8 @@ function render() {
   const orders = ordersForActiveTab();
 
   if (orders.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" class="inventory-empty">No orders here.</td></tr>`;
+    const message = searchQuery.trim() ? "No orders match your search." : "No orders here.";
+    tbody.innerHTML = `<tr><td colspan="7" class="inventory-empty">${message}</td></tr>`;
     return;
   }
 

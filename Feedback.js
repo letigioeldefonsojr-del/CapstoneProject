@@ -18,6 +18,7 @@ const ORDERS_COLLECTION = "orders";
 
 let allRatedOrders = [];
 let currentView = "month"; // "month" | "all"
+let sortOrder = "newest"; // "newest" | "oldest"
 
 document.addEventListener("sidebar:ready", () => {
   loadFeedback();
@@ -138,20 +139,30 @@ function buildFeedbackList(orders, monthLabel) {
         <h3 class="forecast-section__title-text" style="margin:0;"></h3>
         <p class="forecast-section__subtitle" style="margin:4px 0 0;"></p>
       </div>
-      <div class="feedback-view-toggle">
-        <button type="button" class="feedback-view-toggle__btn" data-view="month">This Month</button>
-        <button type="button" class="feedback-view-toggle__btn" data-view="all">All Time</button>
+      <div class="feedback-list__controls">
+        <select class="feedback-sort-select" id="feedback-sort-select">
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+        </select>
+        <div class="feedback-view-toggle">
+          <button type="button" class="feedback-view-toggle__btn" data-view="month">This Month</button>
+          <button type="button" class="feedback-view-toggle__btn" data-view="all">All Time</button>
+        </div>
       </div>
     </div>
     <div class="forecast-list" id="feedback-list"></div>
   `;
 
+  const sortedOrders = [...orders].sort((a, b) =>
+    sortOrder === "newest" ? b.ratedAtMillis - a.ratedAtMillis : a.ratedAtMillis - b.ratedAtMillis
+  );
+
   section.querySelector(".forecast-section__title-text").textContent =
     currentView === "month" ? `Feedback — ${monthLabel}` : "Feedback — All Time";
   section.querySelector(".forecast-section__subtitle").textContent =
-    orders.length === 0
+    sortedOrders.length === 0
       ? "No comments left for this period."
-      : `${orders.length} rating${orders.length === 1 ? "" : "s"} shown, newest first.`;
+      : `${sortedOrders.length} rating${sortedOrders.length === 1 ? "" : "s"} shown, ${sortOrder === "newest" ? "newest" : "oldest"} first.`;
 
   section.querySelectorAll(".feedback-view-toggle__btn").forEach((btn) => {
     btn.classList.toggle("is-active", btn.dataset.view === currentView);
@@ -161,8 +172,15 @@ function buildFeedbackList(orders, monthLabel) {
     });
   });
 
+  const sortSelect = section.querySelector("#feedback-sort-select");
+  sortSelect.value = sortOrder;
+  sortSelect.addEventListener("change", (event) => {
+    sortOrder = event.target.value;
+    render();
+  });
+
   const list = section.querySelector("#feedback-list");
-  orders.forEach((order) => list.appendChild(buildFeedbackRow(order)));
+  sortedOrders.forEach((order) => list.appendChild(buildFeedbackRow(order)));
 
   return section;
 }
