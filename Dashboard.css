@@ -2225,23 +2225,28 @@ button {
 .rating-stars {
     position: relative;
     display: inline-block;
-    font-size: 18px;
-    line-height: 1;
-    letter-spacing: 2px;
+    width: 94px;  /* 5 stars (18px) + 4 gaps (1px) = fixed, so % clipping below has a reliable reference */
+    height: 18px;
     margin-top: 6px;
+}
+
+.rating-stars__track,
+.rating-stars__fill {
+    display: flex;
+    gap: 1px;
+    width: 94px;
 }
 
 .rating-stars__track {
     color: #e2e2e2;
-    white-space: nowrap;
 }
 
-.rating-stars__fill {
+.rating-stars__fill-clip {
     position: absolute;
     top: 0;
     left: 0;
+    height: 18px;
     overflow: hidden;
-    white-space: nowrap;
 }
 
 .rating-stars--low .rating-stars__fill { color: #e2574c; }

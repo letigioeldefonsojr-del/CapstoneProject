@@ -128,20 +128,27 @@ function buildSummary(monthOrders, allOrders, monthLabel) {
 
 // Proportional-fill star row: the filled portion's WIDTH reflects the
 // decimal average exactly (e.g. 4.3/5 fills 86% of the 5th star, not
-// just rounding to 4 whole stars) — built with an empty "track" row
-// underneath and a colored, clipped "fill" row on top. Color tier
-// reflects how good the average actually is, not just a fixed color.
+// just rounding to 4 whole stars) — built as two overlapping SVG star
+// rows: a gray "track" row underneath, and a colored "fill" row on
+// top, clipped to the exact percentage via a wrapping div with
+// overflow:hidden. SVG (not text characters) so the clipping edge is
+// crisp and consistent regardless of font/browser rendering.
 function buildAverageStarsHtml(average) {
   const fillPercent = Math.max(0, Math.min(100, (average / 5) * 100));
   const tierClass = average >= 4 ? "rating-stars--high" : average >= 2.5 ? "rating-stars--mid" : "rating-stars--low";
+  const starsSvgRow = Array(5).fill(STAR_SVG_FILLED).join("");
 
   return `
     <div class="rating-stars ${tierClass}">
-      <div class="rating-stars__track">★★★★★</div>
-      <div class="rating-stars__fill" style="width:${fillPercent}%">★★★★★</div>
+      <div class="rating-stars__track">${starsSvgRow}</div>
+      <div class="rating-stars__fill-clip" style="width:${fillPercent}%">
+        <div class="rating-stars__fill">${starsSvgRow}</div>
+      </div>
     </div>
   `;
 }
+
+const STAR_SVG_FILLED = `<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 2.5L14.8 8.9L21.8 9.6L16.5 14.2L18 21.1L12 17.4L6 21.1L7.5 14.2L2.2 9.6L9.2 8.9L12 2.5Z"/></svg>`;
 
 function buildFeedbackList(orders, monthLabel) {
   const section = document.createElement("div");
