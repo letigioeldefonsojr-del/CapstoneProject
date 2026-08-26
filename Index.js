@@ -291,14 +291,19 @@ document.addEventListener("DOMContentLoaded", () => {
   // (kept from the original Index.js, extended to work on both forms
   // via data-target instead of assuming a single password field)
   // ------------------------------------------------------------------
+  const EYE_OPEN_INNER = '<path d="M2 12C4 7.5 7.8 5 12 5C16.2 5 20 7.5 22 12C20 16.5 16.2 19 12 19C7.8 19 4 16.5 2 12Z" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/>';
+  const EYE_SLASH_INNER = EYE_OPEN_INNER + '<line x1="3.5" y1="20.5" x2="20.5" y2="3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>';
+
   document.querySelectorAll(".password-toggle").forEach((toggle) => {
     toggle.addEventListener("click", () => {
       const targetId = toggle.getAttribute("data-target");
       const input = document.getElementById(targetId);
       const willBeVisible = input.type === "password";
       input.type = willBeVisible ? "text" : "password";
-      toggle.querySelector(".icon-eye").hidden = !willBeVisible;
-      toggle.querySelector(".icon-eye-slash").hidden = willBeVisible;
+      // Single icon, content swapped directly — visible password shows
+      // the open eye, hidden password shows the slashed eye. No
+      // separate elements to keep in sync with each other.
+      toggle.querySelector(".toggle-icon").innerHTML = willBeVisible ? EYE_OPEN_INNER : EYE_SLASH_INNER;
     });
   });
 
