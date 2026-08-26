@@ -52,6 +52,7 @@ const STATUS_META = {
 let allOrders = [];
 let searchQuery = "";
 let sortOrder = "newest"; // "newest" | "oldest"
+let groupBy = "none"; // "none" | "week" | "month" | "year"
 let activeTab = "all";
 let cancelledSubStatus = "cancelled"; // when activeTab === "cancelled": "cancelled" or "rejected"
 let expandedOrderDetail = null;   // accordion: only one order's detail row open at a time
@@ -179,9 +180,43 @@ function ordersForActiveTab() {
   });
 }
 
+function buildGroupHeaderRow(label) {
+  const row = document.createElement("tr");
+  row.className = "orders-group-header-row";
+  row.innerHTML = `<td colspan="7">${label}</td>`;
+  return row;
+}
+
+// Computes which time-period bucket an order belongs to, based on the
+// current groupBy setting — used to insert section headers ("August
+// 2026", "Week of Aug 18, 2026", etc.) between orders in the table.
+function getGroupLabel(order) {
+  const millis = order.createdAt?.toMillis?.();
+  if (!millis) return "Unknown date";
+
+  const date = new Date(millis);
+
+  if (groupBy === "year") {
+    return String(date.getFullYear());
+  }
+  if (groupBy === "month") {
+    return date.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  }
+  if (groupBy === "week") {
+    const weekStart = new Date(date);
+    weekStart.setDate(date.getDate() - date.getDay()); // back up to that week's Sunday
+    return `Week of ${weekStart.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
+  }
+  return null; // "none" — no grouping
+}
+
 function wireSort() {
   document.getElementById("orders-sort-select").addEventListener("change", (event) => {
     sortOrder = event.target.value;
+    render();
+  });
+  document.getElementById("orders-group-select").addEventListener("change", (event) => {
+    groupBy = event.target.value;
     render();
   });
 }
@@ -209,7 +244,16 @@ function render() {
   }
 
   tbody.innerHTML = "";
+  let lastGroupLabel = undefined; // undefined (not null) so the very first order always triggers a header when grouping is on
   orders.forEach((order) => {
+    if (groupBy !== "none") {
+      const label = getGroupLabel(order);
+      if (label !== lastGroupLabel) {
+        tbody.appendChild(buildGroupHeaderRow(label));
+        lastGroupLabel = label;
+      }
+    }
+
     const mainRow = buildOrderRow(order);
     mainRow.dataset.orderId = order.id;
     tbody.appendChild(mainRow);

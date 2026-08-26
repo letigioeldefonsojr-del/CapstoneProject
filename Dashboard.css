@@ -2282,3 +2282,14 @@ button {
     background: var(--bg);
     cursor: pointer;
 }
+
+.orders-group-header-row td {
+    background: var(--bg);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 16px;
+    border-top: 1px solid var(--border);
+}
