@@ -8,7 +8,7 @@ import { generateUniqueUsername, isUsernameTaken } from "./UsernameGenerator.js"
 import {
   signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, onAuthStateChanged, signOut,
   setPersistence, browserLocalPersistence, browserSessionPersistence,
-  GoogleAuthProvider, FacebookAuthProvider, signInWithPopup
+  GoogleAuthProvider, signInWithPopup
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import {
   collection, query, where, getDocs, limit, serverTimestamp, doc, setDoc, getDoc
@@ -112,7 +112,6 @@ document.addEventListener("DOMContentLoaded", () => {
   let pendingSignup = null;
   let pendingOAuthSignup = null;
   const googleProvider = new GoogleAuthProvider();
-  const facebookProvider = new FacebookAuthProvider();
 
   const toAdminSignupLink = document.getElementById("to-admin-signup");
   const toAdminLoginLink  = document.getElementById("to-admin-login");
@@ -923,10 +922,8 @@ document.addEventListener("DOMContentLoaded", () => {
         role,
         uid: user.uid,
         name: user.displayName || "",
-        // Facebook doesn't always return an email (depends on the
-        // person's Facebook privacy settings/permissions) — Google
-        // always does. The Complete Profile step below asks for it
-        // directly whenever it's missing, rather than assuming it.
+        // Google always provides an email — this fallback just guards
+        // against an unexpected missing value from the provider.
         email: user.email || "",
         providerName
       };
@@ -1081,12 +1078,6 @@ document.addEventListener("DOMContentLoaded", () => {
   );
   document.getElementById("employee-google-btn").addEventListener("click", () =>
     handleOAuthSignIn("employee", googleProvider, "Google", "employee-google-btn")
-  );
-  document.getElementById("admin-facebook-btn").addEventListener("click", () =>
-    handleOAuthSignIn("admin", facebookProvider, "Facebook", "admin-facebook-btn")
-  );
-  document.getElementById("employee-facebook-btn").addEventListener("click", () =>
-    handleOAuthSignIn("employee", facebookProvider, "Facebook", "employee-facebook-btn")
   );
   formGoogleComplete.addEventListener("submit", handleGoogleCompleteProfileSubmit);
   document.getElementById("google-username-regenerate").addEventListener("click", handleGoogleUsernameRegenerate);
