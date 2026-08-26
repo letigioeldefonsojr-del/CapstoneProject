@@ -27,7 +27,7 @@ export function fuzzyMatch(searchTerm, text) {
   // individually — catches "Agentina" matching the word "Argentina"
   // inside a longer product name like "Argentina Corned Beef".
   const words = target.split(/\s+/);
-  return words.some((word) => isCloseEnough(term, word));
+  return words.some((word) => isCloseEnough(term, word) || isPartialTypedMatch(term, word));
 }
 
 function isCloseEnough(term, word) {
@@ -39,6 +39,27 @@ function isCloseEnough(term, word) {
   const distance = levenshteinDistance(term, word);
   const threshold = Math.max(1, Math.floor(Math.max(term.length, word.length) / 4));
   return distance <= threshold;
+}
+
+// Handles a DIFFERENT case than typo-correction: someone typing only
+// part of a word (e.g. "argn" for "Argentina") rather than
+// misspelling it. Checks whether every letter they typed appears, IN
+// ORDER, somewhere within the word — even with gaps between them.
+// Same core idea as the fuzzy-finder in tools like VS Code's command
+// palette. Requires at least 60% of the word's letters to actually be
+// "hit" (not just any 1-2 stray letters matching by coincidence) —
+// keeps this from matching almost everything for very short searches.
+function isPartialTypedMatch(term, word) {
+  if (term.length < 3 || word.length < 3) return false;
+  if (term.length > word.length) return false; // can't be a partial typing of a shorter word
+
+  let termIndex = 0;
+  for (let i = 0; i < word.length && termIndex < term.length; i++) {
+    if (word[i] === term[termIndex]) termIndex++;
+  }
+
+  const matchedFraction = termIndex / term.length;
+  return matchedFraction === 1 && term.length / word.length >= 0.35;
 }
 
 // Classic dynamic-programming edit distance calculation.
