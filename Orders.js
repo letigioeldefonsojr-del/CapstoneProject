@@ -51,6 +51,7 @@ const STATUS_META = {
 
 let allOrders = [];
 let searchQuery = "";
+let sortOrder = "newest"; // "newest" | "oldest"
 let activeTab = "all";
 let cancelledSubStatus = "cancelled"; // when activeTab === "cancelled": "cancelled" or "rejected"
 let expandedOrderDetail = null;   // accordion: only one order's detail row open at a time
@@ -66,6 +67,7 @@ document.addEventListener("sidebar:ready", (event) => {
 
   wireTabs();
   wireSearch();
+  wireSort();
   wireUndeliverableModal();
   loadOrders();
 });
@@ -160,14 +162,27 @@ function ordersForActiveTab() {
     orders = !statuses ? allOrders : allOrders.filter((o) => statuses.includes(o.status));
   }
 
-  if (!searchQuery.trim()) return orders;
+  if (searchQuery.trim()) {
+    const q = searchQuery.trim().toLowerCase();
+    orders = orders.filter((order) => {
+      const idMatch = shortOrderId(order.id).toLowerCase().includes(q);
+      const nameMatch = (order.customerName || "").toLowerCase().includes(q);
+      const dateMatch = formatOrderDate(order).toLowerCase().includes(q);
+      return idMatch || nameMatch || dateMatch;
+    });
+  }
 
-  const q = searchQuery.trim().toLowerCase();
-  return orders.filter((order) => {
-    const idMatch = shortOrderId(order.id).toLowerCase().includes(q);
-    const nameMatch = (order.customerName || "").toLowerCase().includes(q);
-    const dateMatch = formatOrderDate(order).toLowerCase().includes(q);
-    return idMatch || nameMatch || dateMatch;
+  return [...orders].sort((a, b) => {
+    const aMillis = a.createdAt?.toMillis?.() || 0;
+    const bMillis = b.createdAt?.toMillis?.() || 0;
+    return sortOrder === "newest" ? bMillis - aMillis : aMillis - bMillis;
+  });
+}
+
+function wireSort() {
+  document.getElementById("orders-sort-select").addEventListener("change", (event) => {
+    sortOrder = event.target.value;
+    render();
   });
 }
 

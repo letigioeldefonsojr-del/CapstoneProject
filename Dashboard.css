@@ -2254,8 +2254,15 @@ button {
 .rating-stars--high .rating-stars__fill { color: #2e9e4f; }
 
 .orders-search-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     margin-bottom: 14px;
+}
+
+.orders-search-bar .search-field {
     max-width: 420px;
+    flex: 1;
 }
 
 .feedback-list__controls {
