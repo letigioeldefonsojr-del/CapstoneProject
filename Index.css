@@ -887,3 +887,12 @@ input:focus-visible {
     opacity: 0.6;
     cursor: not-allowed;
 }
+
+.facebook-btn {
+    margin-top: 10px;
+}
+
+.facebook-btn:hover {
+    background: #f0f6ff;
+    border-color: #1877F2;
+}

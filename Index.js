@@ -8,7 +8,7 @@ import { generateUniqueUsername, isUsernameTaken } from "./UsernameGenerator.js"
 import {
   signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, onAuthStateChanged, signOut,
   setPersistence, browserLocalPersistence, browserSessionPersistence,
-  GoogleAuthProvider, signInWithPopup
+  GoogleAuthProvider, FacebookAuthProvider, signInWithPopup
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import {
   collection, query, where, getDocs, limit, serverTimestamp, doc, setDoc, getDoc
@@ -110,8 +110,9 @@ document.addEventListener("DOMContentLoaded", () => {
   // account" — nothing is written to Firebase Auth or Firestore until
   // the code is confirmed.
   let pendingSignup = null;
-  let pendingGoogleSignup = null;
+  let pendingOAuthSignup = null;
   const googleProvider = new GoogleAuthProvider();
+  const facebookProvider = new FacebookAuthProvider();
 
   const toAdminSignupLink = document.getElementById("to-admin-signup");
   const toAdminLoginLink  = document.getElementById("to-admin-login");
@@ -136,7 +137,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     hideOtpStep();
     hideGoogleCompleteProfileStep();
-    pendingGoogleSignup = null;
+    pendingOAuthSignup = null;
     pendingSignup = null;
 
     if (isAdmin) {
@@ -162,7 +163,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const isLogin = mode === "login";
     hideOtpStep();
     hideGoogleCompleteProfileStep();
-    pendingGoogleSignup = null;
+    pendingOAuthSignup = null;
     pendingSignup = null;
     formAdmin.hidden = !isLogin;
     formAdminSignup.hidden = isLogin;
@@ -181,7 +182,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const isLogin = mode === "login";
     hideOtpStep();
     hideGoogleCompleteProfileStep();
-    pendingGoogleSignup = null;
+    pendingOAuthSignup = null;
     pendingSignup = null;
     formEmployee.hidden = !isLogin;
     formSignup.hidden = isLogin;
@@ -226,11 +227,14 @@ document.addEventListener("DOMContentLoaded", () => {
     hideOtpStep();
     formGoogleComplete.hidden = false;
     cardTitle.textContent = "Complete Your Profile";
+    document.getElementById("google-complete-intro").textContent =
+      `Signed in with ${pendingOAuthSignup?.providerName || "your account"} — just a few more details to finish setting up your account.`;
+    document.getElementById("google-complete-email").value = pendingOAuthSignup?.email || "";
     document.getElementById("google-complete-phone").value = "";
     document.getElementById("google-complete-staffcode").value = "";
     hideStatus();
 
-    generateUniqueUsername(pendingGoogleSignup?.name || "", 0).then((suggested) => {
+    generateUniqueUsername(pendingOAuthSignup?.name || "", 0).then((suggested) => {
       document.getElementById("google-complete-username").value = suggested;
     });
   }
@@ -882,14 +886,14 @@ document.addEventListener("DOMContentLoaded", () => {
   // Existing accounts (already have a Firestore doc) just sign
   // straight in, no extra steps.
   // ------------------------------------------------------------------
-  async function handleGoogleSignIn(role) {
-    const btn = document.getElementById(role === "admin" ? "admin-google-btn" : "employee-google-btn");
+  async function handleOAuthSignIn(role, provider, providerName, btnId) {
+    const btn = document.getElementById(btnId);
     btn.disabled = true;
     hideStatus();
 
     try {
       const collectionName = role === "admin" ? ADMIN_COLLECTION : EMPLOYEE_COLLECTION;
-      const result = await signInWithPopup(auth, googleProvider);
+      const result = await signInWithPopup(auth, provider);
       const user = result.user;
 
       const existingDoc = await getDoc(doc(db, collectionName, user.uid));
@@ -911,23 +915,28 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
-      // First time signing in with this Google account for this role
-      // — no Firestore profile yet. They stay authenticated (Google's
-      // popup already did that part) but get no app access until they
+      // First time signing in with this account for this role — no
+      // Firestore profile yet. They stay authenticated (the popup
+      // already did that part) but get no app access until they
       // finish this step and a real profile doc gets created.
-      pendingGoogleSignup = {
+      pendingOAuthSignup = {
         role,
         uid: user.uid,
         name: user.displayName || "",
-        email: user.email || ""
+        // Facebook doesn't always return an email (depends on the
+        // person's Facebook privacy settings/permissions) — Google
+        // always does. The Complete Profile step below asks for it
+        // directly whenever it's missing, rather than assuming it.
+        email: user.email || "",
+        providerName
       };
       showGoogleCompleteProfileStep();
     } catch (error) {
       if (error.code === "auth/popup-closed-by-user" || error.code === "auth/cancelled-popup-request") {
         // They just closed the popup — not a real error, nothing to show.
       } else {
-        console.error("Google sign-in failed:", error);
-        showStatus("Google sign-in failed. Please try again.", "error");
+        console.error(`${providerName} sign-in failed:`, error);
+        showStatus(`${providerName} sign-in failed. Please try again.`, "error");
       }
     } finally {
       btn.disabled = false;
@@ -938,17 +947,18 @@ document.addEventListener("DOMContentLoaded", () => {
     event.preventDefault();
     hideStatus();
 
-    if (!pendingGoogleSignup) {
+    if (!pendingOAuthSignup) {
       showStatus("Something went wrong — please start over.", "error");
       return;
     }
 
+    const email = document.getElementById("google-complete-email").value.trim();
     const username = document.getElementById("google-complete-username").value.trim();
     const phone = document.getElementById("google-complete-phone").value.trim();
     const staffCode = document.getElementById("google-complete-staffcode").value.trim();
     const submitBtn = document.getElementById("google-complete-submit");
 
-    if (!username || !phone || !staffCode) {
+    if (!email || !username || !phone || !staffCode) {
       showStatus("Fill in every field to finish setting up your account.", "error");
       return;
     }
@@ -967,7 +977,7 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
-      const { role, uid, name, email } = pendingGoogleSignup;
+      const { role, uid, name } = pendingOAuthSignup;
 
       if (role === "admin") {
         await setDoc(doc(db, ADMIN_COLLECTION, uid), {
@@ -995,7 +1005,7 @@ document.addEventListener("DOMContentLoaded", () => {
       sessionStorage.setItem("almares_role", role);
       if (role === "employee") sessionStorage.setItem("almares_employee_doc_id", uid);
 
-      pendingGoogleSignup = null;
+      pendingOAuthSignup = null;
       showStatus("Account created! Redirecting...", "success");
       window.location.replace(role === "admin" ? ADMIN_REDIRECT_URL : EMPLOYEE_REDIRECT_URL);
     } catch (error) {
@@ -1010,8 +1020,8 @@ document.addEventListener("DOMContentLoaded", () => {
   // Firestore profile — sign them back out so they're not left in that
   // half-finished state.
   async function handleGoogleCompleteCancel() {
-    const wasAdmin = pendingGoogleSignup?.role === "admin";
-    pendingGoogleSignup = null;
+    const wasAdmin = pendingOAuthSignup?.role === "admin";
+    pendingOAuthSignup = null;
 
     try {
       await signOut(auth);
@@ -1034,7 +1044,7 @@ document.addEventListener("DOMContentLoaded", () => {
     googleCompleteUsernameSuffix += 1;
 
     try {
-      const suggested = await generateUniqueUsername(pendingGoogleSignup?.name || "", googleCompleteUsernameSuffix);
+      const suggested = await generateUniqueUsername(pendingOAuthSignup?.name || "", googleCompleteUsernameSuffix);
       document.getElementById("google-complete-username").value = suggested;
     } finally {
       btn.disabled = false;
@@ -1066,8 +1076,18 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("otp-resend-btn").addEventListener("click", handleOtpResend);
   document.getElementById("otp-cancel-btn").addEventListener("click", handleOtpCancel);
 
-  document.getElementById("admin-google-btn").addEventListener("click", () => handleGoogleSignIn("admin"));
-  document.getElementById("employee-google-btn").addEventListener("click", () => handleGoogleSignIn("employee"));
+  document.getElementById("admin-google-btn").addEventListener("click", () =>
+    handleOAuthSignIn("admin", googleProvider, "Google", "admin-google-btn")
+  );
+  document.getElementById("employee-google-btn").addEventListener("click", () =>
+    handleOAuthSignIn("employee", googleProvider, "Google", "employee-google-btn")
+  );
+  document.getElementById("admin-facebook-btn").addEventListener("click", () =>
+    handleOAuthSignIn("admin", facebookProvider, "Facebook", "admin-facebook-btn")
+  );
+  document.getElementById("employee-facebook-btn").addEventListener("click", () =>
+    handleOAuthSignIn("employee", facebookProvider, "Facebook", "employee-facebook-btn")
+  );
   formGoogleComplete.addEventListener("submit", handleGoogleCompleteProfileSubmit);
   document.getElementById("google-username-regenerate").addEventListener("click", handleGoogleUsernameRegenerate);
   document.getElementById("google-complete-cancel-btn").addEventListener("click", handleGoogleCompleteCancel);
