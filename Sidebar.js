@@ -38,6 +38,7 @@ onAuthStateChanged(auth, (user) => {
 
 async function initSidebar(user) {
   const role = await resolveRole(user.uid);
+  if (!role) return; // resolveRole already signed out and is redirecting — nothing more to do here
 
   renderIdentity(role, user);
   startClock();
@@ -54,13 +55,14 @@ async function initSidebar(user) {
   document.dispatchEvent(new CustomEvent("sidebar:ready", { detail: { role, user } }));
 }
 
-// Feedback is admin-only — hidden from the nav for employees. This
-// lives here (not in each page's own script) so it applies
-// consistently everywhere the shared sidebar renders, in one place.
+// Feedback is admin-only — hidden by default directly in the HTML
+// (not just hidden via JS after the fact) so there's no flash of it
+// being visible before role resolution finishes. This just reveals it
+// once confirmed admin.
 function applyRoleRestrictedNavItems(role) {
-  if (role === "admin") return;
-  const feedbackLink = document.querySelector('a[href="Feedback.html"]');
-  if (feedbackLink) feedbackLink.hidden = true;
+  if (role !== "admin") return;
+  const feedbackLink = document.getElementById("feedback-nav-link");
+  if (feedbackLink) feedbackLink.hidden = false;
 }
 
 // ====================================================================
@@ -80,32 +82,32 @@ async function resolveRole(uid) {
   const cached = sessionStorage.getItem("almares_role");
   if (cached) return cached;
 
-  try {
-    const adminSnap = await getDoc(doc(db, ADMIN_COLLECTION, uid));
-    if (adminSnap.exists()) {
-      sessionStorage.setItem("almares_role", "admin");
-      return "admin";
-    }
-  } catch (error) {
-    console.error("Couldn't check admin status:", error);
+  const [adminSnap, employeeSnap] = await Promise.allSettled([
+    getDoc(doc(db, ADMIN_COLLECTION, uid)),
+    getDoc(doc(db, EMPLOYEE_COLLECTION, uid))
+  ]);
+
+  if (adminSnap.status === "fulfilled" && adminSnap.value.exists()) {
+    sessionStorage.setItem("almares_role", "admin");
+    return "admin";
   }
 
-  try {
-    const employeeSnap = await getDoc(doc(db, EMPLOYEE_COLLECTION, uid));
-    if (employeeSnap.exists()) {
-      sessionStorage.setItem("almares_role", "employee");
-      return "employee";
-    }
-  } catch (error) {
-    console.error("Couldn't check employee status:", error);
+  if (employeeSnap.status === "fulfilled" && employeeSnap.value.exists()) {
+    sessionStorage.setItem("almares_role", "employee");
+    return "employee";
   }
 
-  // Signed in, but no matching doc in either collection — shouldn't
-  // normally happen for an account created through this app's own
-  // signup flows. Defaulting to "employee" here as before, but this
-  // is now a genuine edge case worth investigating if it ever fires.
-  console.warn(`Signed-in user ${uid} has no matching admins or employees document.`);
-  return "employee";
+  // Signed in via Firebase Auth, but no matching Firestore document —
+  // this is exactly the state of someone who authenticated via
+  // Google/started signup but never actually finished (e.g. abandoned
+  // the "Complete Your Profile" step, or pressed back mid-flow).
+  // Previously this defaulted to "employee" and let them straight
+  // into the app — a real gap, since it completely bypassed the
+  // Staff Code check. Sign them out and send them back instead.
+  console.warn(`Signed-in user ${uid} has no matching admins or employees document — signing out.`);
+  await signOut(auth);
+  window.location.href = LOGIN_PAGE_URL;
+  return null;
 }
 
 // ====================================================================
