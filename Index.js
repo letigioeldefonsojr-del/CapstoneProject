@@ -6,10 +6,12 @@ import { verifyStaffCode } from "./StaffCode.js";
 import { sendOtpCode, verifyOtpCode } from "./OtpVerification.js";
 import { generateUniqueUsername, isUsernameTaken } from "./UsernameGenerator.js";
 import {
-  signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, onAuthStateChanged, signOut
+  signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, onAuthStateChanged, signOut,
+  setPersistence, browserLocalPersistence, browserSessionPersistence,
+  GoogleAuthProvider, signInWithPopup
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import {
-  collection, query, where, getDocs, limit, serverTimestamp, doc, setDoc
+  collection, query, where, getDocs, limit, serverTimestamp, doc, setDoc, getDoc
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 
 // ====================================================================
@@ -101,12 +103,15 @@ document.addEventListener("DOMContentLoaded", () => {
   const formEmployee = document.getElementById("form-employee");
   const formSignup   = document.getElementById("form-employee-signup");
   const formOtpVerify = document.getElementById("form-otp-verify");
+  const formGoogleComplete = document.getElementById("form-google-complete-profile");
 
   // Holds the not-yet-created account's data between "passed initial
   // validation, OTP sent" and "OTP verified, actually create the
   // account" — nothing is written to Firebase Auth or Firestore until
   // the code is confirmed.
   let pendingSignup = null;
+  let pendingGoogleSignup = null;
+  const googleProvider = new GoogleAuthProvider();
 
   const toAdminSignupLink = document.getElementById("to-admin-signup");
   const toAdminLoginLink  = document.getElementById("to-admin-login");
@@ -130,6 +135,8 @@ document.addEventListener("DOMContentLoaded", () => {
     roleThumb.style.transform = isAdmin ? "translateX(0)" : "translateX(100%)";
 
     hideOtpStep();
+    hideGoogleCompleteProfileStep();
+    pendingGoogleSignup = null;
     pendingSignup = null;
 
     if (isAdmin) {
@@ -154,6 +161,8 @@ document.addEventListener("DOMContentLoaded", () => {
   function setAdminMode(mode) {
     const isLogin = mode === "login";
     hideOtpStep();
+    hideGoogleCompleteProfileStep();
+    pendingGoogleSignup = null;
     pendingSignup = null;
     formAdmin.hidden = !isLogin;
     formAdminSignup.hidden = isLogin;
@@ -171,6 +180,8 @@ document.addEventListener("DOMContentLoaded", () => {
   function setEmployeeMode(mode) {
     const isLogin = mode === "login";
     hideOtpStep();
+    hideGoogleCompleteProfileStep();
+    pendingGoogleSignup = null;
     pendingSignup = null;
     formEmployee.hidden = !isLogin;
     formSignup.hidden = isLogin;
@@ -201,6 +212,31 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function hideOtpStep() {
     formOtpVerify.hidden = true;
+  }
+
+  // ------------------------------------------------------------------
+  // CHUNK 3E — GOOGLE COMPLETE-PROFILE STEP (first-time Google sign-in)
+  // ------------------------------------------------------------------
+  function showGoogleCompleteProfileStep() {
+    formAdmin.hidden = true;
+    formAdminSignup.hidden = true;
+    formEmployee.hidden = true;
+    formSignup.hidden = true;
+    roleToggle.hidden = true;
+    hideOtpStep();
+    formGoogleComplete.hidden = false;
+    cardTitle.textContent = "Complete Your Profile";
+    document.getElementById("google-complete-phone").value = "";
+    document.getElementById("google-complete-staffcode").value = "";
+    hideStatus();
+
+    generateUniqueUsername(pendingGoogleSignup?.name || "", 0).then((suggested) => {
+      document.getElementById("google-complete-username").value = suggested;
+    });
+  }
+
+  function hideGoogleCompleteProfileStep() {
+    formGoogleComplete.hidden = true;
   }
 
   // ------------------------------------------------------------------
@@ -414,6 +450,9 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
+      const rememberMe = document.getElementById("admin-remember-me").checked;
+      await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
+
       await signInWithEmailAndPassword(auth, email, password);
       await resetAttempts(rawInput);
       sessionStorage.setItem("almares_role", "admin");
@@ -575,6 +614,9 @@ document.addEventListener("DOMContentLoaded", () => {
         showStatus("This account has no email on file. Contact your administrator.", "error");
         return;
       }
+
+      const rememberMe = document.getElementById("employee-remember-me").checked;
+      await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
 
       await signInWithEmailAndPassword(auth, email, password);
       await resetAttempts(rawInput);
@@ -831,6 +873,176 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // ------------------------------------------------------------------
+  // CHUNK 9C — GOOGLE SIGN-IN
+  // ----------------------------------------------------------------
+  // Google already verifies email ownership, so a new Google sign-up
+  // skips the OTP step entirely (there's nothing left to prove) — but
+  // it still has to pass the Staff Code gate, same as any other new
+  // account, so Google alone can't be used to sidestep that.
+  // Existing accounts (already have a Firestore doc) just sign
+  // straight in, no extra steps.
+  // ------------------------------------------------------------------
+  async function handleGoogleSignIn(role) {
+    const btn = document.getElementById(role === "admin" ? "admin-google-btn" : "employee-google-btn");
+    btn.disabled = true;
+    hideStatus();
+
+    try {
+      const collectionName = role === "admin" ? ADMIN_COLLECTION : EMPLOYEE_COLLECTION;
+      const result = await signInWithPopup(auth, googleProvider);
+      const user = result.user;
+
+      const existingDoc = await getDoc(doc(db, collectionName, user.uid));
+
+      if (existingDoc.exists()) {
+        const data = existingDoc.data();
+
+        if (role === "employee" && data[EMPLOYEE_ACTIVE_FIELD] !== true) {
+          await signOut(auth);
+          showStatus("Your account isn't activated yet. Please verify your email first.", "error");
+          return;
+        }
+
+        sessionStorage.setItem("almares_role", role);
+        if (role === "employee") sessionStorage.setItem("almares_employee_doc_id", user.uid);
+
+        showStatus("Signed in. Redirecting...", "success");
+        window.location.replace(role === "admin" ? ADMIN_REDIRECT_URL : EMPLOYEE_REDIRECT_URL);
+        return;
+      }
+
+      // First time signing in with this Google account for this role
+      // — no Firestore profile yet. They stay authenticated (Google's
+      // popup already did that part) but get no app access until they
+      // finish this step and a real profile doc gets created.
+      pendingGoogleSignup = {
+        role,
+        uid: user.uid,
+        name: user.displayName || "",
+        email: user.email || ""
+      };
+      showGoogleCompleteProfileStep();
+    } catch (error) {
+      if (error.code === "auth/popup-closed-by-user" || error.code === "auth/cancelled-popup-request") {
+        // They just closed the popup — not a real error, nothing to show.
+      } else {
+        console.error("Google sign-in failed:", error);
+        showStatus("Google sign-in failed. Please try again.", "error");
+      }
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function handleGoogleCompleteProfileSubmit(event) {
+    event.preventDefault();
+    hideStatus();
+
+    if (!pendingGoogleSignup) {
+      showStatus("Something went wrong — please start over.", "error");
+      return;
+    }
+
+    const username = document.getElementById("google-complete-username").value.trim();
+    const phone = document.getElementById("google-complete-phone").value.trim();
+    const staffCode = document.getElementById("google-complete-staffcode").value.trim();
+    const submitBtn = document.getElementById("google-complete-submit");
+
+    if (!username || !phone || !staffCode) {
+      showStatus("Fill in every field to finish setting up your account.", "error");
+      return;
+    }
+
+    setButtonLoading(submitBtn, true, "Finish Setting Up", "Verifying...");
+
+    try {
+      const staffCodeResult = await verifyStaffCode(staffCode);
+      if (!staffCodeResult.valid) {
+        showStatus(staffCodeResult.message, "error");
+        return;
+      }
+
+      if (await isUsernameTaken(username)) {
+        showStatus("That username is already taken. Try regenerating or pick another.", "error");
+        return;
+      }
+
+      const { role, uid, name, email } = pendingGoogleSignup;
+
+      if (role === "admin") {
+        await setDoc(doc(db, ADMIN_COLLECTION, uid), {
+          name,
+          email,
+          phone,
+          username,
+          role: "admin",
+          createdAt: serverTimestamp()
+        });
+      } else {
+        await setDoc(doc(db, EMPLOYEE_COLLECTION, uid), {
+          [EMPLOYEE_NAME_FIELD]: name,
+          [EMPLOYEE_USERNAME_FIELD]: username,
+          [EMPLOYEE_EMAIL_FIELD]: email,
+          phone,
+          // Google already verified this email — same trust level our
+          // own OTP step provides, so this counts as activated too.
+          [EMPLOYEE_ACTIVE_FIELD]: true,
+          role: "employee",
+          createdAt: serverTimestamp()
+        });
+      }
+
+      sessionStorage.setItem("almares_role", role);
+      if (role === "employee") sessionStorage.setItem("almares_employee_doc_id", uid);
+
+      pendingGoogleSignup = null;
+      showStatus("Account created! Redirecting...", "success");
+      window.location.replace(role === "admin" ? ADMIN_REDIRECT_URL : EMPLOYEE_REDIRECT_URL);
+    } catch (error) {
+      console.error("Couldn't complete Google signup:", error);
+      showStatus("Something went wrong. Please try again.", "error");
+    } finally {
+      setButtonLoading(submitBtn, false, "Finish Setting Up", "Verifying...");
+    }
+  }
+
+  // Abandoning this step leaves a signed-in Firebase Auth user with no
+  // Firestore profile — sign them back out so they're not left in that
+  // half-finished state.
+  async function handleGoogleCompleteCancel() {
+    const wasAdmin = pendingGoogleSignup?.role === "admin";
+    pendingGoogleSignup = null;
+
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error("Couldn't sign out:", error);
+    }
+
+    if (wasAdmin) {
+      setAdminMode("login");
+    } else {
+      setEmployeeMode("login");
+    }
+  }
+
+  let googleCompleteUsernameSuffix = 0;
+  async function handleGoogleUsernameRegenerate() {
+    const btn = document.getElementById("google-username-regenerate");
+    btn.disabled = true;
+    btn.classList.add("is-spinning");
+    googleCompleteUsernameSuffix += 1;
+
+    try {
+      const suggested = await generateUniqueUsername(pendingGoogleSignup?.name || "", googleCompleteUsernameSuffix);
+      document.getElementById("google-complete-username").value = suggested;
+    } finally {
+      btn.disabled = false;
+      setTimeout(() => btn.classList.remove("is-spinning"), 350);
+    }
+  }
+
+  // ------------------------------------------------------------------
   // CHUNK 10 — DISCOURAGE LOGO DOWNLOADS
   // ----------------------------------------------------------------
   // Blocks the right-click "Save image as" menu and drag-to-save on
@@ -853,4 +1065,10 @@ document.addEventListener("DOMContentLoaded", () => {
   formOtpVerify.addEventListener("submit", handleOtpVerifySubmit);
   document.getElementById("otp-resend-btn").addEventListener("click", handleOtpResend);
   document.getElementById("otp-cancel-btn").addEventListener("click", handleOtpCancel);
+
+  document.getElementById("admin-google-btn").addEventListener("click", () => handleGoogleSignIn("admin"));
+  document.getElementById("employee-google-btn").addEventListener("click", () => handleGoogleSignIn("employee"));
+  formGoogleComplete.addEventListener("submit", handleGoogleCompleteProfileSubmit);
+  document.getElementById("google-username-regenerate").addEventListener("click", handleGoogleUsernameRegenerate);
+  document.getElementById("google-complete-cancel-btn").addEventListener("click", handleGoogleCompleteCancel);
 });
