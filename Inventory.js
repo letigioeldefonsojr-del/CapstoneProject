@@ -6,6 +6,7 @@ import {
 import { getProducts, invalidateProductsCache } from "./ProductCache.js";
 import { confirmDialog } from "./ConfirmDialog.js";
 import { promptPasswordConfirm } from "./PasswordConfirm.js";
+import { fuzzyMatch } from "./FuzzySearch.js";
 
 // ====================================================================
 // CHUNK 0 — CONFIG
@@ -243,8 +244,8 @@ function applyFiltersAndRender() {
   const sortBy = document.getElementById("inventory-sort").value;
 
   let filtered = allProducts.filter((product) => {
-    const name = (product[PRODUCT_NAME_FIELD] || "").toLowerCase();
-    const matchesSearch = name.includes(term);
+    const name = product[PRODUCT_NAME_FIELD] || "";
+    const matchesSearch = fuzzyMatch(term, name);
     const matchesCategory = category === "all" || product[PRODUCT_CATEGORY_FIELD] === category;
     const matchesStock = productMatchesStockFilter(product, stockFilter);
     return matchesSearch && matchesCategory && matchesStock;
