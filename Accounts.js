@@ -281,7 +281,7 @@ function handleSuspend(account) {
       </div>
       <div class="modal__body">
         <p class="confirm-dialog__message">${account.role === "customer"
-          ? "Honest limitation: this only sets a flag on their profile — the mobile app doesn't currently check it, so it won't actually block their mobile login. It would need a small update on the mobile app's side to actually enforce this."
+          ? "They won't be able to log in on the mobile app (any sign-in method) until the suspension ends."
           : "They won't be able to log in until the suspension ends."}</p>
         <div class="form-field" style="margin-top: 14px;">
           <label for="suspend-days-input">Number of days</label>
