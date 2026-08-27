@@ -26,6 +26,11 @@ import { confirmDialog } from "./ConfirmDialog.js";
 // ====================================================================
 const ORDERS_COLLECTION = "orders";
 
+// UPDATE THIS after deploying onesignal-worker.js — shown in the
+// Cloudflare dashboard right after deployment, same pattern as the
+// Gemini Worker URL.
+const NOTIFICATION_WORKER_URL = "onesignal-notify.eldefonsojrletigio.workers.dev";
+
 // "Rejected" folds into the Cancelled tab (both mean the order never
 // proceeded); "Undelivered" gets its own tab since it's a distinct
 // state your staff need to follow up on.
@@ -291,6 +296,34 @@ function shortOrderId(id) {
   return id.slice(0, 8).toUpperCase();
 }
 
+// Fire-and-forget — a failed push notification shouldn't block or
+// undo the actual order status change, which already succeeded in
+// Firestore by the time this runs. Requires the Flutter app to have
+// called OneSignal.login(firebaseUid) after the customer signed in —
+// without that link on the mobile side, this will run without error
+// but the notification won't reach anyone yet.
+async function sendOrderNotification(order, title, message) {
+  if (!order.userId) {
+    console.warn("Order has no userId on file — skipping push notification.");
+    return;
+  }
+
+  try {
+    const response = await fetch(NOTIFICATION_WORKER_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetUid: order.userId, title, message })
+    });
+
+    if (!response.ok) {
+      const detail = await response.json().catch(() => null);
+      console.error("Push notification failed:", detail);
+    }
+  } catch (error) {
+    console.error("Couldn't send push notification:", error);
+  }
+}
+
 function formatOrderDate(order) {
   const millis = order.createdAt?.toMillis?.();
   if (!millis) return "—";
@@ -456,6 +489,7 @@ async function handleApprove(order) {
   if (!confirmed) return;
 
   await updateDoc(doc(db, ORDERS_COLLECTION, order.id), { status: "approved" });
+  sendOrderNotification(order, "Order Approved", `Your order #${shortOrderId(order.id)} has been approved!`);
   await reloadAfterAction();
 }
 
@@ -467,6 +501,7 @@ async function handleReject(order) {
   if (!confirmed) return;
 
   await updateDoc(doc(db, ORDERS_COLLECTION, order.id), { status: "rejected" });
+  sendOrderNotification(order, "Order Rejected", `Your order #${shortOrderId(order.id)} was rejected.`);
   await reloadAfterAction();
 }
 
@@ -481,6 +516,7 @@ async function handleMarkOnTheWay(order) {
     status: "on_the_way",
     awaitingCustomerConfirmation: false
   });
+  sendOrderNotification(order, "Order On The Way", `Your order #${shortOrderId(order.id)} is on its way!`);
   await reloadAfterAction();
 }
 
@@ -501,6 +537,7 @@ async function handleMarkDelivered(order) {
     isPaid: true,
     confirmDeadline
   });
+  sendOrderNotification(order, "Order Delivered", `Your order #${shortOrderId(order.id)} has been delivered — please confirm receipt in the app.`);
   await reloadAfterAction();
 }
 
@@ -547,6 +584,10 @@ async function handleConfirmUndeliverable() {
       deliveryIssueReason: reason,
       awaitingCustomerConfirmation: false
     });
+    const affectedOrder = allOrders.find((o) => o.id === pendingUndeliverableOrderId);
+    if (affectedOrder) {
+      sendOrderNotification(affectedOrder, "Delivery Issue", `There was a delivery issue with your order #${shortOrderId(affectedOrder.id)}: ${reason}`);
+    }
     closeUndeliverableModal();
     await reloadAfterAction();
   } catch (error) {
