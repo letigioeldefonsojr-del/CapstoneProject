@@ -1,9 +1,8 @@
 import { db } from "./firebase-config.js";
 import {
-  collection, getDocs, query, where, doc, getDoc, setDoc, deleteDoc, serverTimestamp, Timestamp
+  collection, getDocs, onSnapshot, query, where, doc, getDoc, setDoc, deleteDoc, serverTimestamp, Timestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
-import { getProducts } from "./ProductCache.js";
-import { getNotifications } from "./NotificationCache.js";
+import { isProductInAlertState, getWorstAlertDetail } from "./StockAlerts.js";
 import { getClearedSet, loadReadStatus } from "./ReadStatus.js";
 
 // ====================================================================
@@ -11,11 +10,6 @@ import { getClearedSet, loadReadStatus } from "./ReadStatus.js";
 // This page's own data needs only. Sidebar/auth/identity/clock/logout
 // all live in Sidebar.js now and are shared by every page.
 // ====================================================================
-const STOCK_FIELD = "stockCount";
-const PRODUCT_AVAILABLE_FIELD = "available";
-const LOW_STOCK_THRESHOLD = 99;
-const CRITICAL_STOCK_THRESHOLD = 49;
-
 const ORDERS_COLLECTION = "orders";
 const ORDER_DATE_FIELD = "createdAt";
 
@@ -63,39 +57,38 @@ function applyRoleVisibility(role) {
 // ====================================================================
 // CHUNK 2 — LIVE STATS (Total Products, Low Stock, Orders Today)
 // ====================================================================
-async function loadStats() {
-  await Promise.all([loadProductStats(), loadOrdersTodayStat()]);
+function loadStats() {
+  loadProductStats();
+  loadOrdersTodayStat();
 }
 
-async function loadProductStats() {
-  try {
-    const products = await getProducts();
-    document.getElementById("stat-products-value").textContent = products.length;
+function loadProductStats() {
+  onSnapshot(
+    collection(db, "products"),
+    (snap) => {
+      const products = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      document.getElementById("stat-products-value").textContent = products.length;
 
-    const lowStockCount = products.filter((product) => {
-      const stock = product[STOCK_FIELD];
-      const outOfStock = product[PRODUCT_AVAILABLE_FIELD] === false || stock === 0;
-      return outOfStock || (typeof stock === "number" && stock <= LOW_STOCK_THRESHOLD);
-    }).length;
+      const lowStockCount = products.filter((product) => isProductInAlertState(product)).length;
 
-    // The banner is specifically titled "Critically Low Stock Items
-    // Warning" — so it only counts items actually in the critical
-    // tier (not merely "low", and not "out of stock" either, since
-    // an item at zero isn't "critically low", it's already gone).
-    const criticalCount = products.filter((product) => {
-      const stock = product[STOCK_FIELD];
-      const isAvailable = product[PRODUCT_AVAILABLE_FIELD];
-      return isAvailable !== false && typeof stock === "number" &&
-        stock > 0 && stock <= CRITICAL_STOCK_THRESHOLD;
-    }).length;
+      // The banner is specifically titled "Critically Low Stock Items
+      // Warning" — so it only counts items actually in the critical
+      // tier (not merely "low", and not "out of stock" either, since
+      // an item at zero isn't "critically low", it's already gone).
+      const criticalCount = products.filter((product) => {
+        const detail = getWorstAlertDetail(product);
+        return detail?.status === "critical";
+      }).length;
 
-    document.getElementById("stat-lowstock-value").textContent = lowStockCount;
-    updateLowStockBanner(criticalCount);
-  } catch (error) {
-    console.error("Couldn't load product stats:", error);
-    document.getElementById("stat-products-value").textContent = "—";
-    document.getElementById("stat-lowstock-value").textContent = "—";
-  }
+      document.getElementById("stat-lowstock-value").textContent = lowStockCount;
+      updateLowStockBanner(criticalCount);
+    },
+    (error) => {
+      console.error("Couldn't load product stats:", error);
+      document.getElementById("stat-products-value").textContent = "—";
+      document.getElementById("stat-lowstock-value").textContent = "—";
+    }
+  );
 }
 
 function updateLowStockBanner(count) {
@@ -130,44 +123,62 @@ async function loadOrdersTodayStat() {
 // ====================================================================
 // CHUNK 3 — RECENT NOTIFICATIONS FEED
 // ====================================================================
-async function loadRecentNotifications(uid) {
+function loadRecentNotifications(uid) {
   const list = document.getElementById("notif-list");
 
-  try {
-    await loadReadStatus(uid);
-    const notifications = await getNotifications();
-    const clearedSet = getClearedSet(uid);
-    const visible = notifications.filter((n) => !clearedSet.has(n.id));
+  loadReadStatus(uid)
+    .then(() => {
+      onSnapshot(
+        collection(db, "employeeNotifications"),
+        (snap) => {
+          const clearedSet = getClearedSet(uid);
+          const visible = snap.docs
+            .map((d) => {
+              const data = d.data();
+              return {
+                id: d.id,
+                message: data.message || "New notification",
+                createdAtMillis: data.createdAt?.toMillis?.() || null
+              };
+            })
+            .filter((n) => !clearedSet.has(n.id));
 
-    if (visible.length === 0) {
-      list.innerHTML = `<li class="notif-list__empty">No recent notifications.</li>`;
-      return;
-    }
+          if (visible.length === 0) {
+            list.innerHTML = `<li class="notif-list__empty">No recent notifications.</li>`;
+            return;
+          }
 
-    const recent = [...visible]
-      .sort((a, b) => (b.createdAtMillis || 0) - (a.createdAtMillis || 0))
-      .slice(0, 5);
+          const recent = [...visible]
+            .sort((a, b) => (b.createdAtMillis || 0) - (a.createdAtMillis || 0))
+            .slice(0, 5);
 
-    list.innerHTML = "";
-    recent.forEach((n) => {
-      const timeLabel = n.createdAtMillis
-        ? new Date(n.createdAtMillis).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
-        : "";
+          list.innerHTML = "";
+          recent.forEach((n) => {
+            const timeLabel = n.createdAtMillis
+              ? new Date(n.createdAtMillis).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
+              : "";
 
-      const item = document.createElement("li");
-      item.className = "notif-list__item";
-      item.innerHTML = `
-        <span class="notif-list__message"></span>
-        <span class="notif-list__time"></span>
-      `;
-      item.querySelector(".notif-list__message").textContent = n.message;
-      item.querySelector(".notif-list__time").textContent = timeLabel;
-      list.appendChild(item);
+            const item = document.createElement("li");
+            item.className = "notif-list__item";
+            item.innerHTML = `
+              <span class="notif-list__message"></span>
+              <span class="notif-list__time"></span>
+            `;
+            item.querySelector(".notif-list__message").textContent = n.message;
+            item.querySelector(".notif-list__time").textContent = timeLabel;
+            list.appendChild(item);
+          });
+        },
+        (error) => {
+          console.error("Couldn't load notifications:", error);
+          list.innerHTML = `<li class="notif-list__empty">Couldn't load notifications right now.</li>`;
+        }
+      );
+    })
+    .catch((error) => {
+      console.error("Couldn't load read status for notifications:", error);
+      list.innerHTML = `<li class="notif-list__empty">Couldn't load notifications right now.</li>`;
     });
-  } catch (error) {
-    console.error("Couldn't load notifications:", error);
-    list.innerHTML = `<li class="notif-list__empty">Couldn't load notifications right now.</li>`;
-  }
 }
 
 // ====================================================================

@@ -1,5 +1,6 @@
-import { getProducts } from "./ProductCache.js";
-import { getNotifications } from "./NotificationCache.js";
+import { db } from "./firebase-config.js";
+import { collection, onSnapshot } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { getWorstAlertDetail } from "./StockAlerts.js";
 import { getReadSet, markRead, markAllRead, getClearedSet, markAllCleared, loadReadStatus } from "./ReadStatus.js";
 import { confirmDialog } from "./ConfirmDialog.js";
 
@@ -15,11 +16,7 @@ import { confirmDialog } from "./ConfirmDialog.js";
 // browser — so clearing as one account never affects what another
 // account sees, even when testing both in the same browser.
 // ====================================================================
-const STOCK_FIELD = "stockCount";
-const PRODUCT_AVAILABLE_FIELD = "available";
 const PRODUCT_NAME_FIELD = "name";
-const LOW_STOCK_THRESHOLD = 99;
-const CRITICAL_STOCK_THRESHOLD = 49;
 
 let currentUid = null;
 let orderItems = [];  // [{ id, type:"order", message, timeLabel }]
@@ -39,80 +36,79 @@ document.addEventListener("sidebar:ready", async (event) => {
 });
 
 // ====================================================================
-// CHUNK 2 — LOAD BOTH SOURCES
+// CHUNK 2 — LOAD BOTH SOURCES (real-time)
 // ----------------------------------------------------------------
 // Cleared items are filtered out right here, at load time — once
 // cleared, they're just gone for this account until the underlying
 // thing changes (a new order notification is a new doc ID; a stock
 // alert only reappears if it goes back to "in" and then drops again).
+//
+// Both listeners are set up once and stay live for the rest of the
+// page's life — a stock level or new order notification changing
+// anywhere re-renders this page immediately, no reload needed.
 // ====================================================================
-async function loadEverything() {
-  await Promise.all([loadStockAlerts(), loadOrderNotifications()]);
-  render();
+function loadEverything() {
+  onSnapshot(
+    collection(db, "products"),
+    (snap) => {
+      const products = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const clearedSet = getClearedSet(currentUid);
+
+      stockItems = products
+        .map((product) => {
+          const detail = getWorstAlertDetail(product);
+          if (!detail) return null;
+          const id = `stock-${product.id}`;
+          if (clearedSet.has(id)) return null;
+          return {
+            id,
+            type: "stock",
+            message: buildStockMessage(product, detail),
+            filterValue: detail.status
+          };
+        })
+        .filter(Boolean);
+
+      render();
+    },
+    (error) => console.error("Couldn't load stock alerts:", error)
+  );
+
+  onSnapshot(
+    collection(db, "employeeNotifications"),
+    (snap) => {
+      const clearedSet = getClearedSet(currentUid);
+
+      orderItems = snap.docs
+        .map((d) => {
+          const data = d.data();
+          const millis = data.createdAt?.toMillis?.() || null;
+          return {
+            id: d.id,
+            type: "order",
+            message: data.message || "New notification",
+            createdAtMillis: millis,
+            timeLabel: millis
+              ? new Date(millis).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
+              : ""
+          };
+        })
+        .filter((n) => !clearedSet.has(n.id))
+        .sort((a, b) => (b.createdAtMillis || 0) - (a.createdAtMillis || 0));
+
+      render();
+    },
+    (error) => console.error("Couldn't load order notifications:", error)
+  );
 }
 
-async function loadStockAlerts() {
-  try {
-    const products = await getProducts();
-    const clearedSet = getClearedSet(currentUid);
-
-    stockItems = products
-      .map((product) => {
-        const status = getStockStatus(product[STOCK_FIELD], product[PRODUCT_AVAILABLE_FIELD]);
-        if (status === "in") return null;
-        const id = `stock-${product.id}`;
-        if (clearedSet.has(id)) return null;
-        return {
-          id,
-          type: "stock",
-          message: buildStockMessage(product, status),
-          filterValue: status
-        };
-      })
-      .filter(Boolean);
-  } catch (error) {
-    console.error("Couldn't load stock alerts:", error);
-    stockItems = [];
-  }
-}
-
-function getStockStatus(stock, isAvailable) {
-  if (isAvailable === false || stock === 0) return "out";
-  if (typeof stock !== "number") return "unknown";
-  if (stock <= CRITICAL_STOCK_THRESHOLD) return "critical";
-  if (stock <= LOW_STOCK_THRESHOLD) return "low";
-  return "in";
-}
-
-function buildStockMessage(product, status) {
+function buildStockMessage(product, detail) {
   const name = product[PRODUCT_NAME_FIELD] || "A product";
-  const stock = product[STOCK_FIELD];
-  if (status === "out") return `${name} is out of stock.`;
-  if (status === "critical") return `${name} is critically low — only ${stock} left.`;
-  if (status === "unknown") return `${name} has no stock count set.`;
-  return `${name} is running low — ${stock} left.`;
-}
-
-async function loadOrderNotifications() {
-  try {
-    const notifications = await getNotifications();
-    const clearedSet = getClearedSet(currentUid);
-
-    orderItems = notifications
-      .filter((n) => !clearedSet.has(n.id))
-      .sort((a, b) => (b.createdAtMillis || 0) - (a.createdAtMillis || 0))
-      .map((n) => ({
-        id: n.id,
-        type: "order",
-        message: n.message,
-        timeLabel: n.createdAtMillis
-          ? new Date(n.createdAtMillis).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
-          : ""
-      }));
-  } catch (error) {
-    console.error("Couldn't load order notifications:", error);
-    orderItems = [];
-  }
+  const label = detail.variantLabel ? `${name} (${detail.variantLabel})` : name;
+  if (detail.status === "out") return `${label} is out of stock.`;
+  if (detail.status === "critical") return `${label} is critically low — only ${detail.stock} left.`;
+  if (detail.status === "unknown") return `${label} has no stock count set.`;
+  return `${label} is running low — ${detail.stock} left.`;
 }
 
 // ====================================================================

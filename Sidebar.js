@@ -1,8 +1,7 @@
 import { auth, db } from "./firebase-config.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
-import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
-import { getProducts } from "./ProductCache.js";
-import { getNotifications } from "./NotificationCache.js";
+import { doc, getDoc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { isProductInAlertState } from "./StockAlerts.js";
 import { getReadSet, getClearedSet, loadReadStatus } from "./ReadStatus.js";
 import { promptDeleteAccount } from "./DeleteAccount.js";
 import { confirmDialog } from "./ConfirmDialog.js";
@@ -17,10 +16,6 @@ const LOGIN_PAGE_URL = "Index.html";
 const EMPLOYEE_COLLECTION = "employees";
 const EMPLOYEE_NAME_FIELD = "firstName";
 const ADMIN_COLLECTION = "admins";
-
-const STOCK_FIELD = "stockCount";
-const PRODUCT_AVAILABLE_FIELD = "available";
-const LOW_STOCK_THRESHOLD = 99;
 
 // ====================================================================
 // CHUNK 1 — ROUTE GUARD
@@ -280,21 +275,19 @@ async function loadNotifBadge(uid) {
 
   try {
     await loadReadStatus(uid);
-    const readSet = getReadSet(uid);
-    const clearedSet = getClearedSet(uid);
-    const isUnread = (id) => !readSet.has(id) && !clearedSet.has(id);
+  } catch (error) {
+    console.error("Couldn't load read status for notification badge:", error);
+    return;
+  }
 
-    const products = await getProducts();
-    const unreadStockAlerts = products.filter((product) => {
-      const stock = product[STOCK_FIELD];
-      const outOfStock = product[PRODUCT_AVAILABLE_FIELD] === false || stock === 0;
-      const isAlert = outOfStock || (typeof stock === "number" && stock <= LOW_STOCK_THRESHOLD);
-      return isAlert && isUnread(`stock-${product.id}`);
-    }).length;
+  const readSet = getReadSet(uid);
+  const clearedSet = getClearedSet(uid);
+  const isUnread = (id) => !readSet.has(id) && !clearedSet.has(id);
 
-    const notifications = await getNotifications();
-    const unreadOrders = notifications.filter((n) => isUnread(n.id)).length;
+  let unreadStockAlerts = 0;
+  let unreadOrders = 0;
 
+  function renderBadge() {
     const total = unreadStockAlerts + unreadOrders;
     if (total > 0) {
       badge.textContent = total;
@@ -302,9 +295,35 @@ async function loadNotifBadge(uid) {
     } else {
       badge.hidden = true;
     }
-  } catch (error) {
-    console.error("Couldn't load notification badge count:", error);
   }
+
+  // Real-time: recomputes the moment ANY product's stock changes, not
+  // just on page load / after a cache expires. Uses the shared,
+  // variant-aware check — a variant-only product's stock going to 0
+  // now correctly triggers this, which the old per-page duplicated
+  // logic (checking only the flat parent stock field) silently missed.
+  onSnapshot(
+    collection(db, "products"),
+    (snap) => {
+      const products = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      unreadStockAlerts = products.filter((product) =>
+        isProductInAlertState(product) && isUnread(`stock-${product.id}`)
+      ).length;
+      renderBadge();
+    },
+    (error) => console.error("Couldn't load products for notification badge:", error)
+  );
+
+  // Real-time: recomputes the instant a new order notification is
+  // written, instead of waiting for a stale cache to expire.
+  onSnapshot(
+    collection(db, "employeeNotifications"),
+    (snap) => {
+      unreadOrders = snap.docs.filter((d) => isUnread(d.id)).length;
+      renderBadge();
+    },
+    (error) => console.error("Couldn't load notifications for badge:", error)
+  );
 }
 
 // ====================================================================
