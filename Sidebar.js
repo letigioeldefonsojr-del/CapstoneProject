@@ -82,7 +82,17 @@ function applyRoleRestrictedNavItems(role) {
 // ====================================================================
 async function resolveRole(uid) {
   const cached = sessionStorage.getItem("almares_role");
-  if (cached) return cached;
+
+  if (cached) {
+    // Role itself is safe to cache (it essentially never changes for
+    // an account) — but suspension/termination status can change at
+    // ANY moment during an active session, so that part has to be
+    // re-checked fresh on every page load, not just once at initial
+    // login. Without this, someone suspended mid-session would keep
+    // full access until they happened to log out and back in.
+    const stillValid = await checkAccountStillValid(uid, cached);
+    return stillValid ? cached : null;
+  }
 
   const [adminSnap, employeeSnap] = await Promise.allSettled([
     getDoc(doc(db, ADMIN_COLLECTION, uid)),
@@ -90,11 +100,19 @@ async function resolveRole(uid) {
   ]);
 
   if (adminSnap.status === "fulfilled" && adminSnap.value.exists()) {
+    if (isSuspended(adminSnap.value.data())) {
+      await signOutSuspended(adminSnap.value.data().suspendedUntil);
+      return null;
+    }
     sessionStorage.setItem("almares_role", "admin");
     return "admin";
   }
 
   if (employeeSnap.status === "fulfilled" && employeeSnap.value.exists()) {
+    if (isSuspended(employeeSnap.value.data())) {
+      await signOutSuspended(employeeSnap.value.data().suspendedUntil);
+      return null;
+    }
     sessionStorage.setItem("almares_role", "employee");
     return "employee";
   }
@@ -110,6 +128,50 @@ async function resolveRole(uid) {
   await signOut(auth);
   window.location.href = LOGIN_PAGE_URL;
   return null;
+}
+
+// Re-checked on every page load once role is already cached — catches
+// both suspension and termination happening mid-session, not just at
+// the next fresh login.
+async function checkAccountStillValid(uid, role) {
+  const collectionName = role === "admin" ? ADMIN_COLLECTION : EMPLOYEE_COLLECTION;
+
+  try {
+    const snap = await getDoc(doc(db, collectionName, uid));
+
+    if (!snap.exists()) {
+      console.warn(`User ${uid} (${role}) no longer has a matching document — signing out.`);
+      await signOut(auth);
+      sessionStorage.clear();
+      window.location.href = LOGIN_PAGE_URL;
+      return false;
+    }
+
+    if (isSuspended(snap.data())) {
+      await signOutSuspended(snap.data().suspendedUntil);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    // Fail open — a network blip checking this shouldn't lock out a
+    // legitimate, currently-valid session.
+    console.error("Couldn't verify account status:", error);
+    return true;
+  }
+}
+
+function isSuspended(data) {
+  const millis = data?.suspendedUntil?.toMillis?.();
+  return millis != null && millis > Date.now();
+}
+
+async function signOutSuspended(suspendedUntil) {
+  const untilDate = suspendedUntil.toDate().toLocaleDateString();
+  console.warn(`User is suspended until ${untilDate} — signing out.`);
+  await signOut(auth);
+  sessionStorage.clear();
+  window.location.href = `${LOGIN_PAGE_URL}?suspended=${encodeURIComponent(untilDate)}`;
 }
 
 // ====================================================================

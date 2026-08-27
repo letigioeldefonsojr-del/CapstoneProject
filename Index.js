@@ -1104,4 +1104,13 @@ document.addEventListener("DOMContentLoaded", () => {
   formGoogleComplete.addEventListener("submit", handleGoogleCompleteProfileSubmit);
   document.getElementById("google-username-regenerate").addEventListener("click", handleGoogleUsernameRegenerate);
   document.getElementById("google-complete-cancel-btn").addEventListener("click", handleGoogleCompleteCancel);
+
+  // If Sidebar.js just signed someone out mid-session because their
+  // account got suspended while they were actively using the app,
+  // show them why instead of silently dropping them on a blank form.
+  const urlParams = new URLSearchParams(window.location.search);
+  const suspendedUntil = urlParams.get("suspended");
+  if (suspendedUntil) {
+    showStatus(`Your account was suspended until ${suspendedUntil}. You've been signed out.`, "error");
+  }
 });
