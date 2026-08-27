@@ -225,7 +225,7 @@ function buildAccountRow(account) {
     <td>${escapeHtml(account.username || "—")}</td>
     <td><span class="role-pill role-pill--${account.role}">${account.role === "admin" ? "Admin" : account.role === "employee" ? "Employee" : "Customer"}</span></td>
     <td></td>
-    <td class="accounts-table__actions"></td>
+    <td><div class="accounts-table__actions"></div></td>
   `;
 
   const statusCell = row.children[4];
@@ -242,7 +242,7 @@ function buildAccountRow(account) {
     statusCell.appendChild(badge);
   }
 
-  const actionsCell = row.children[5];
+  const actionsCell = row.children[5].querySelector(".accounts-table__actions");
   if (isSelf) {
     const note = document.createElement("span");
     note.className = "accounts-table__self-note";

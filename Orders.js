@@ -296,6 +296,48 @@ function shortOrderId(id) {
   return id.slice(0, 8).toUpperCase();
 }
 
+// ====================================================================
+// DELIVERY ADDRESS MAP
+// ----------------------------------------------------------------
+// Orders only store a plain text address (whatever the customer
+// typed or picked from their saved addresses in the mobile app,
+// landmarks included as free text) — no actual coordinates. So this
+// works by ADDRESS SEARCH, not by plotting a known exact point;
+// accuracy depends on how specific/well-formed the customer's typed
+// address (and any landmark mentioned in it) actually is.
+//
+// Uses Google's plain address-search embed URL, which — unlike the
+// official Maps Embed API — doesn't require an API key or any setup.
+// HONEST NOTE: this is a long-standing but technically unofficial
+// pattern; Google could change it without notice. The "Open in
+// Google Maps" link below is a reliable fallback either way, and
+// works the exact same way regardless.
+// ====================================================================
+function buildAddressMap(address) {
+  const wrap = document.createElement("div");
+  wrap.className = "order-detail__map-wrap";
+
+  const encoded = encodeURIComponent(address);
+
+  const iframe = document.createElement("iframe");
+  iframe.className = "order-detail__map";
+  iframe.src = `https://maps.google.com/maps?q=${encoded}&output=embed`;
+  iframe.loading = "lazy";
+  iframe.referrerPolicy = "no-referrer-when-downgrade";
+  iframe.title = "Delivery location map";
+  wrap.appendChild(iframe);
+
+  const link = document.createElement("a");
+  link.href = `https://www.google.com/maps/search/?api=1&query=${encoded}`;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  link.className = "order-detail__map-link";
+  link.textContent = "Open in Google Maps ↗";
+  wrap.appendChild(link);
+
+  return wrap;
+}
+
 // Fire-and-forget — a failed push notification shouldn't block or
 // undo the actual order status change, which already succeeded in
 // Firestore by the time this runs. Requires the Flutter app to have
@@ -383,6 +425,10 @@ function buildOrderDetailRow(order) {
   addressLine.className = "order-detail__address";
   addressLine.textContent = order.customerAddress ? `Deliver to: ${order.customerAddress}` : "No address on file.";
   wrap.appendChild(addressLine);
+
+  if (order.customerAddress) {
+    wrap.appendChild(buildAddressMap(order.customerAddress));
+  }
 
   const items = Array.isArray(order.items) ? order.items : [];
   const list = document.createElement("div");
