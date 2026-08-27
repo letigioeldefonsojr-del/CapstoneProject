@@ -185,7 +185,6 @@ function buildStockListItem(item, alreadyRead) {
 
   el.addEventListener("click", async (event) => {
     event.preventDefault();
-    el.classList.add("is-selected");
     await markRead(currentUid, item.id);
     window.location.href = `Inventory.html?filter=${item.filterValue}`;
   });
@@ -211,7 +210,6 @@ function buildOrderListItem(item, alreadyRead) {
 
   el.addEventListener("click", async (event) => {
     event.preventDefault();
-    el.classList.add("is-selected");
     await markRead(currentUid, item.id);
     window.location.href = item.orderId ? `Orders.html?orderId=${item.orderId}` : "Orders.html";
   });
