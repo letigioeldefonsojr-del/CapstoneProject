@@ -29,7 +29,7 @@ const ORDERS_COLLECTION = "orders";
 // UPDATE THIS after deploying onesignal-worker.js — shown in the
 // Cloudflare dashboard right after deployment, same pattern as the
 // Gemini Worker URL.
-const NOTIFICATION_WORKER_URL = "onesignal-notify.eldefonsojrletigio.workers.dev";
+const NOTIFICATION_WORKER_URL = "https://onesignal-notify.eldefonsojrletigio.workers.dev";
 
 // "Rejected" folds into the Cancelled tab (both mean the order never
 // proceeded); "Undelivered" gets its own tab since it's a distinct
