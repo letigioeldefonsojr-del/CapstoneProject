@@ -1,8 +1,7 @@
-import { db } from "./firebase-config.js";
-import { collection, onSnapshot } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getWorstAlertDetail } from "./StockAlerts.js";
 import { getReadSet, markRead, markAllRead, getClearedSet, markAllCleared, loadReadStatus } from "./ReadStatus.js";
 import { confirmDialog } from "./ConfirmDialog.js";
+import { getLatestProducts, getLatestNotifications } from "./Sidebar.js";
 
 // ====================================================================
 // CHUNK 0 — CONFIG
@@ -48,58 +47,61 @@ document.addEventListener("sidebar:ready", async (event) => {
 // anywhere re-renders this page immediately, no reload needed.
 // ====================================================================
 function loadEverything() {
-  onSnapshot(
-    collection(db, "products"),
-    (snap) => {
-      const products = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      const clearedSet = getClearedSet(currentUid);
+  function renderStockItems(products) {
+    const clearedSet = getClearedSet(currentUid);
 
-      stockItems = products
-        .map((product) => {
-          const detail = getWorstAlertDetail(product);
-          if (!detail) return null;
-          const id = `stock-${product.id}-${detail.status}`;
-          if (clearedSet.has(id)) return null;
-          return {
-            id,
-            type: "stock",
-            message: buildStockMessage(product, detail),
-            filterValue: detail.status
-          };
-        })
-        .filter(Boolean);
+    stockItems = products
+      .map((product) => {
+        const detail = getWorstAlertDetail(product);
+        if (!detail) return null;
+        const id = `stock-${product.id}-${detail.status}`;
+        if (clearedSet.has(id)) return null;
+        return {
+          id,
+          type: "stock",
+          message: buildStockMessage(product, detail),
+          filterValue: detail.status
+        };
+      })
+      .filter(Boolean);
 
-      render();
-    },
-    (error) => console.error("Couldn't load stock alerts:", error)
-  );
+    render();
+  }
 
-  onSnapshot(
-    collection(db, "employeeNotifications"),
-    (snap) => {
-      const clearedSet = getClearedSet(currentUid);
+  function renderOrderItems(notifications) {
+    const clearedSet = getClearedSet(currentUid);
 
-      orderItems = snap.docs
-        .map((d) => {
-          const data = d.data();
-          const millis = data.createdAt?.toMillis?.() || null;
-          return {
-            id: d.id,
-            type: "order",
-            message: data.message || "New notification",
-            createdAtMillis: millis,
-            timeLabel: millis
-              ? new Date(millis).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
-              : ""
-          };
-        })
-        .filter((n) => !clearedSet.has(n.id))
-        .sort((a, b) => (b.createdAtMillis || 0) - (a.createdAtMillis || 0));
+    orderItems = notifications
+      .map((data) => {
+        const millis = data.createdAt?.toMillis?.() || null;
+        return {
+          id: data.id,
+          type: "order",
+          message: data.message || "New notification",
+          orderId: data.orderId || null,
+          createdAtMillis: millis,
+          timeLabel: millis
+            ? new Date(millis).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
+            : ""
+        };
+      })
+      .filter((n) => !clearedSet.has(n.id))
+      .sort((a, b) => (b.createdAtMillis || 0) - (a.createdAtMillis || 0));
 
-      render();
-    },
-    (error) => console.error("Couldn't load order notifications:", error)
-  );
+    render();
+  }
+
+  // Sidebar.js (loaded on every page already) maintains its own live
+  // listeners on these exact collections for the notification badge —
+  // reusing that data here instead of opening two MORE duplicate
+  // listeners, which was genuinely slowing down every page load.
+  const existingProducts = getLatestProducts();
+  if (existingProducts) renderStockItems(existingProducts);
+  document.addEventListener("products:live", (event) => renderStockItems(event.detail.products));
+
+  const existingNotifications = getLatestNotifications();
+  if (existingNotifications) renderOrderItems(existingNotifications);
+  document.addEventListener("notifications:live", (event) => renderOrderItems(event.detail.notifications));
 }
 
 function buildStockMessage(product, detail) {
@@ -211,7 +213,7 @@ function buildOrderListItem(item, alreadyRead) {
     event.preventDefault();
     el.classList.add("is-selected");
     await markRead(currentUid, item.id);
-    window.location.href = "Orders.html";
+    window.location.href = item.orderId ? `Orders.html?orderId=${item.orderId}` : "Orders.html";
   });
 
   return el;

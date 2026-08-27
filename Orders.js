@@ -68,6 +68,9 @@ let pendingUndeliverableOrderId = null;
 // ====================================================================
 // CHUNK 1 — WAIT FOR THE SHARED SIDEBAR (auth guard lives there)
 // ====================================================================
+let targetOrderId = new URLSearchParams(window.location.search).get("orderId");
+let hasHandledTargetOrder = false;
+
 document.addEventListener("sidebar:ready", (event) => {
   currentRole = event.detail.role;
 
@@ -290,6 +293,49 @@ function render() {
       expandedOrderMainRow = mainRow;
     }
   });
+
+  handleTargetOrderJump();
+}
+
+// Arrived here from a notification click ("New order from Elde —
+// ₱855.00") — jump straight to that specific order: switch to the
+// "All" tab (guarantees it's actually in the rendered table
+// regardless of its current status), scroll it into view, expand its
+// detail, and highlight it. Runs once, not on every subsequent
+// real-time re-render.
+function handleTargetOrderJump() {
+  if (!targetOrderId || hasHandledTargetOrder) return;
+
+  if (activeTab !== "all") {
+    hasHandledTargetOrder = true; // set before switching tabs — switching triggers another render()
+    activeTab = "all";
+    document.querySelectorAll(".order-status-card").forEach((card) =>
+      card.classList.toggle("is-active", card.dataset.status === "all")
+    );
+    render();
+    return;
+  }
+
+  const targetRow = document.querySelector(`tr[data-order-id="${targetOrderId}"]`);
+  if (!targetRow) {
+    // Order genuinely isn't in this list (deleted, or ID was stale) —
+    // stop trying rather than silently retrying forever.
+    hasHandledTargetOrder = true;
+    targetOrderId = null;
+    return;
+  }
+
+  hasHandledTargetOrder = true;
+  targetRow.click(); // reuses the existing expand/accordion logic already wired on this row
+  targetRow.classList.add("is-highlighted-from-notification");
+  targetRow.scrollIntoView({ behavior: "smooth", block: "center" });
+
+  // Clean the query param so refreshing the page doesn't repeat this.
+  if (window.history.replaceState) {
+    window.history.replaceState({}, "", window.location.pathname);
+  }
+
+  setTimeout(() => targetRow.classList.remove("is-highlighted-from-notification"), 3000);
 }
 
 function shortOrderId(id) {

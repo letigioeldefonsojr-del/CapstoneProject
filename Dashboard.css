@@ -2380,3 +2380,12 @@ button {
     outline: 2px solid var(--brand-green);
     outline-offset: -2px;
 }
+
+.is-highlighted-from-notification {
+    animation: order-highlight-flash 1.5s ease-in-out;
+}
+
+@keyframes order-highlight-flash {
+    0%, 100% { background: transparent; }
+    20%, 60% { background: var(--brand-green-soft, #e8f3ec); }
+}

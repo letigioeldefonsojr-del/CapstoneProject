@@ -13,6 +13,13 @@ import { confirmDialog } from "./ConfirmDialog.js";
 // ====================================================================
 const LOGIN_PAGE_URL = "Index.html";
 
+// Latest live data from Sidebar.js's own listeners, shared with other
+// pages via getLatestProducts()/getLatestNotifications() below and the
+// "products:live"/"notifications:live" events, so they don't need to
+// open their own duplicate Firestore listeners on the same data.
+let latestProducts = null;
+let latestNotifications = null;
+
 const EMPLOYEE_COLLECTION = "employees";
 const EMPLOYEE_NAME_FIELD = "firstName";
 const ADMIN_COLLECTION = "admins";
@@ -302,29 +309,52 @@ async function loadNotifBadge(uid) {
   // variant-aware check — a variant-only product's stock going to 0
   // now correctly triggers this, which the old per-page duplicated
   // logic (checking only the flat parent stock field) silently missed.
+  //
+  // Also dispatches this same data as a shared event ("products:live")
+  // so other pages (Dashboard.js, etc.) can reuse it instead of
+  // opening their OWN separate live listener on the same collection —
+  // Sidebar.js runs on every page already, so this was genuinely
+  // duplicated work slowing down every single page load.
   onSnapshot(
     collection(db, "products"),
     (snap) => {
       const products = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      latestProducts = products;
       unreadStockAlerts = products.filter((product) => {
         const detail = getWorstAlertDetail(product);
         return detail && isUnread(`stock-${product.id}-${detail.status}`);
       }).length;
       renderBadge();
+      document.dispatchEvent(new CustomEvent("products:live", { detail: { products } }));
     },
     (error) => console.error("Couldn't load products for notification badge:", error)
   );
 
-  // Real-time: recomputes the instant a new order notification is
-  // written, instead of waiting for a stale cache to expire.
+  // Same idea — shared with Dashboard.js/Notifications.js via
+  // "notifications:live" instead of each maintaining its own
+  // duplicate listener on this same collection.
   onSnapshot(
     collection(db, "employeeNotifications"),
     (snap) => {
+      latestNotifications = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       unreadOrders = snap.docs.filter((d) => isUnread(d.id)).length;
       renderBadge();
+      document.dispatchEvent(new CustomEvent("notifications:live", { detail: { notifications: latestNotifications } }));
     },
     (error) => console.error("Couldn't load notifications for badge:", error)
   );
+}
+
+// Exposed so a page whose own script runs AFTER Sidebar.js's first
+// snapshot already arrived can grab the current data immediately,
+// instead of only being able to react to the NEXT change (closes a
+// small timing gap the events alone wouldn't cover).
+export function getLatestProducts() {
+  return latestProducts;
+}
+
+export function getLatestNotifications() {
+  return latestNotifications;
 }
 
 // ====================================================================
