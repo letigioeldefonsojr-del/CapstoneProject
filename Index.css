@@ -893,3 +893,63 @@ input:focus-visible {
     opacity: 0.6;
     cursor: not-allowed;
 }
+
+/* ===========================
+   SUSPENSION GLASS OVERLAY
+   =========================== */
+.suspension-overlay {
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(4px);
+}
+
+.suspension-card {
+    background: rgba(255, 255, 255, 0.18);
+    backdrop-filter: blur(20px) saturate(150%);
+    -webkit-backdrop-filter: blur(20px) saturate(150%);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 18px;
+    padding: 32px 28px;
+    max-width: 360px;
+    width: 90%;
+    text-align: center;
+    color: #ffffff;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.suspension-card__icon {
+    color: #ff8a80;
+    display: flex;
+    justify-content: center;
+    margin-bottom: 12px;
+}
+
+.suspension-card__icon svg {
+    width: 40px;
+    height: 40px;
+}
+
+.suspension-card h3 {
+    font-family: var(--font-display);
+    font-size: 1.3rem;
+    margin-bottom: 16px;
+}
+
+.suspension-card__row {
+    font-size: 13.5px;
+    line-height: 1.6;
+    text-align: left;
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin-bottom: 8px;
+}
+
+.suspension-card__note {
+    font-size: 12px;
+    opacity: 0.85;
+    margin: 14px 0 18px;
+}
+
+.suspension-card .btn-primary {
+    width: 100%;
+}

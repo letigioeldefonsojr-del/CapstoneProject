@@ -101,7 +101,7 @@ async function resolveRole(uid) {
 
   if (adminSnap.status === "fulfilled" && adminSnap.value.exists()) {
     if (isSuspended(adminSnap.value.data())) {
-      await signOutSuspended(adminSnap.value.data().suspendedUntil);
+      await signOutSuspended(adminSnap.value.data());
       return null;
     }
     sessionStorage.setItem("almares_role", "admin");
@@ -110,7 +110,7 @@ async function resolveRole(uid) {
 
   if (employeeSnap.status === "fulfilled" && employeeSnap.value.exists()) {
     if (isSuspended(employeeSnap.value.data())) {
-      await signOutSuspended(employeeSnap.value.data().suspendedUntil);
+      await signOutSuspended(employeeSnap.value.data());
       return null;
     }
     sessionStorage.setItem("almares_role", "employee");
@@ -148,7 +148,7 @@ async function checkAccountStillValid(uid, role) {
     }
 
     if (isSuspended(snap.data())) {
-      await signOutSuspended(snap.data().suspendedUntil);
+      await signOutSuspended(snap.data());
       return false;
     }
 
@@ -166,12 +166,13 @@ function isSuspended(data) {
   return millis != null && millis > Date.now();
 }
 
-async function signOutSuspended(suspendedUntil) {
-  const untilDate = suspendedUntil.toDate().toLocaleDateString();
+async function signOutSuspended(data) {
+  const untilDate = data.suspendedUntil.toDate().toLocaleDateString();
+  const reason = data.suspensionReason || "";
   console.warn(`User is suspended until ${untilDate} — signing out.`);
   await signOut(auth);
   sessionStorage.clear();
-  window.location.href = `${LOGIN_PAGE_URL}?suspended=${encodeURIComponent(untilDate)}`;
+  window.location.href = `${LOGIN_PAGE_URL}?suspended=${encodeURIComponent(untilDate)}&reason=${encodeURIComponent(reason)}`;
 }
 
 // ====================================================================

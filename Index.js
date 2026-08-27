@@ -464,11 +464,11 @@ document.addEventListener("DOMContentLoaded", () => {
       await signInWithEmailAndPassword(auth, email, password);
 
       const adminDoc = await getDoc(doc(db, ADMIN_COLLECTION, auth.currentUser.uid));
-      const suspendedUntilMillis = adminDoc.data()?.suspendedUntil?.toMillis?.();
+      const adminData = adminDoc.data();
+      const suspendedUntilMillis = adminData?.suspendedUntil?.toMillis?.();
       if (suspendedUntilMillis && suspendedUntilMillis > Date.now()) {
         await signOut(auth);
-        const untilDate = new Date(suspendedUntilMillis).toLocaleDateString();
-        showStatus(`This account is suspended until ${untilDate}. Contact an administrator.`, "error");
+        showSuspensionOverlay(new Date(suspendedUntilMillis).toLocaleDateString(), adminData.suspensionReason || "");
         return;
       }
 
@@ -629,8 +629,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const suspendedUntilMillis = data.suspendedUntil?.toMillis?.();
       if (suspendedUntilMillis && suspendedUntilMillis > Date.now()) {
-        const untilDate = new Date(suspendedUntilMillis).toLocaleDateString();
-        showStatus(`This account is suspended until ${untilDate}. Contact an administrator.`, "error");
+        showSuspensionOverlay(new Date(suspendedUntilMillis).toLocaleDateString(), data.suspensionReason || "");
         return;
       }
 
@@ -1111,6 +1110,53 @@ document.addEventListener("DOMContentLoaded", () => {
   const urlParams = new URLSearchParams(window.location.search);
   const suspendedUntil = urlParams.get("suspended");
   if (suspendedUntil) {
-    showStatus(`Your account was suspended until ${suspendedUntil}. You've been signed out.`, "error");
+    showSuspensionOverlay(suspendedUntil, urlParams.get("reason") || "");
   }
 });
+
+// ------------------------------------------------------------------
+// GLASS-EFFECT SUSPENSION OVERLAY
+// ----------------------------------------------------------------
+// Deliberately a prominent full modal, not the usual thin inline
+// status bar — this is important enough to be impossible to miss,
+// whether it's shown right after a blocked login attempt or right
+// after being signed out mid-session by a live suspension.
+// ------------------------------------------------------------------
+function showSuspensionOverlay(untilDate, reason) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay suspension-overlay";
+  overlay.innerHTML = `
+    <div class="suspension-card">
+      <div class="suspension-card__icon">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/>
+          <path d="M12 8V13" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+          <circle cx="12" cy="16.3" r="0.9" fill="currentColor"/>
+        </svg>
+      </div>
+      <h3>This Account is Suspended</h3>
+      <p class="suspension-card__row"><strong>Reason:</strong> ${reason ? escapeHtmlSuspension(reason) : "Not specified"}</p>
+      <p class="suspension-card__row"><strong>Suspended until:</strong> ${escapeHtmlSuspension(untilDate)}</p>
+      <p class="suspension-card__note">Contact an administrator if you believe this is a mistake.</p>
+      <button type="button" class="btn-primary" id="suspension-dismiss-btn">Okay</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  overlay.querySelector("#suspension-dismiss-btn").addEventListener("click", () => overlay.remove());
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) overlay.remove();
+  });
+
+  // Clean the query params out of the URL so refreshing the page
+  // doesn't show this same overlay again.
+  if (window.history.replaceState) {
+    window.history.replaceState({}, "", window.location.pathname);
+  }
+}
+
+function escapeHtmlSuspension(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}

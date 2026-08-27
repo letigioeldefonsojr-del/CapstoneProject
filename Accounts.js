@@ -165,19 +165,21 @@ function applyFilterAndRender() {
         <option value="customer">Customer</option>
       </select>
     </div>
-    <table class="inventory-table accounts-table">
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Email</th>
-          <th>Username</th>
-          <th>Role</th>
-          <th>Status</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody id="accounts-tbody"></tbody>
-    </table>
+    <div class="accounts-table-scroll">
+      <table class="inventory-table accounts-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Username</th>
+            <th>Role</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="accounts-tbody"></tbody>
+      </table>
+    </div>
   `;
   container.appendChild(panel);
 
@@ -267,7 +269,47 @@ function buildActionButton(label, className, onClick) {
   return btn;
 }
 
-// ---- Suspend (asks for a number of days via a small custom modal) ----
+// ---- Suspend (asks for a number of days + a reason via a small custom modal) ----
+const PRESET_REASONS = [
+  "Policy violation",
+  "Suspicious activity",
+  "Repeated complaints",
+  "Fraudulent activity",
+  "Non-payment / billing issue",
+  "Other (please specify)"
+];
+
+function buildReasonFieldHtml(idPrefix) {
+  return `
+    <div class="form-field" style="margin-top: 14px;">
+      <label for="${idPrefix}-reason-select">Reason</label>
+      <select id="${idPrefix}-reason-select">
+        ${PRESET_REASONS.map((r) => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join("")}
+      </select>
+    </div>
+    <div class="form-field" id="${idPrefix}-reason-custom-field" hidden>
+      <label for="${idPrefix}-reason-custom">Specify reason</label>
+      <textarea id="${idPrefix}-reason-custom" rows="2" placeholder="Describe the reason"></textarea>
+    </div>
+  `;
+}
+
+function wireReasonField(overlay, idPrefix) {
+  const select = overlay.querySelector(`#${idPrefix}-reason-select`);
+  const customField = overlay.querySelector(`#${idPrefix}-reason-custom-field`);
+  select.addEventListener("change", () => {
+    customField.hidden = select.value !== "Other (please specify)";
+  });
+}
+
+function getSelectedReason(overlay, idPrefix) {
+  const select = overlay.querySelector(`#${idPrefix}-reason-select`);
+  if (select.value === "Other (please specify)") {
+    return overlay.querySelector(`#${idPrefix}-reason-custom`).value.trim();
+  }
+  return select.value;
+}
+
 function handleSuspend(account) {
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
@@ -287,6 +329,7 @@ function handleSuspend(account) {
           <label for="suspend-days-input">Number of days</label>
           <input type="number" id="suspend-days-input" min="1" step="1" value="7">
         </div>
+        ${buildReasonFieldHtml("suspend")}
         <p class="form-status" id="suspend-status" hidden></p>
       </div>
       <div class="modal__footer">
@@ -299,6 +342,7 @@ function handleSuspend(account) {
   document.body.appendChild(overlay);
   const daysInput = overlay.querySelector("#suspend-days-input");
   const statusEl = overlay.querySelector("#suspend-status");
+  wireReasonField(overlay, "suspend");
   daysInput.focus();
 
   function close() { overlay.remove(); }
@@ -315,13 +359,26 @@ function handleSuspend(account) {
       return;
     }
 
+    const reason = getSelectedReason(overlay, "suspend");
+    if (!reason) {
+      statusEl.textContent = "Enter a reason.";
+      statusEl.dataset.kind = "error";
+      statusEl.hidden = false;
+      return;
+    }
+
     const btn = event.currentTarget;
     btn.disabled = true;
     btn.textContent = "Suspending...";
 
     try {
-      const suspendedUntil = Timestamp.fromDate(new Date(Date.now() + days * 24 * 60 * 60 * 1000));
-      await updateDoc(doc(db, collectionForRole(account.role), account.id), { suspendedUntil });
+      const untilDate = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+      const suspendedUntil = Timestamp.fromDate(untilDate);
+      await updateDoc(doc(db, collectionForRole(account.role), account.id), {
+        suspendedUntil,
+        suspensionReason: reason
+      });
+      await sendAccountActionEmail(account, "suspended", reason, untilDate);
       close();
     } catch (error) {
       console.error("Couldn't suspend account:", error);
@@ -350,17 +407,103 @@ async function handleLiftSuspension(account) {
   }
 }
 
-async function handleTerminate(account) {
-  const confirmed = await confirmDialog(
-    `Permanently terminate ${account.name || "this account"}? Their profile will be deleted and they'll be signed out immediately if currently logged in. This can't be undone.`,
-    { title: "Terminate account?", confirmLabel: "Terminate", danger: true }
-  );
-  if (!confirmed) return;
+function handleTerminate(account) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal">
+      <div class="modal__header">
+        <h3>Terminate ${escapeHtml(account.name || "this account")}?</h3>
+        <button type="button" class="modal__close" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M6 6L18 18M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modal__body">
+        <p class="confirm-dialog__message">Their profile will be permanently deleted and they'll be signed out immediately if currently logged in. This can't be undone.</p>
+        ${buildReasonFieldHtml("terminate")}
+        <p class="form-status" id="terminate-status" hidden></p>
+      </div>
+      <div class="modal__footer">
+        <button type="button" class="btn-outline" data-action="cancel">Cancel</button>
+        <button type="button" class="btn-danger-outline" data-action="confirm">Terminate</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+  const statusEl = overlay.querySelector("#terminate-status");
+  wireReasonField(overlay, "terminate");
+
+  function close() { overlay.remove(); }
+  overlay.querySelector(".modal__close").addEventListener("click", close);
+  overlay.querySelector('[data-action="cancel"]').addEventListener("click", close);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+  overlay.querySelector('[data-action="confirm"]').addEventListener("click", async (event) => {
+    const reason = getSelectedReason(overlay, "terminate");
+    if (!reason) {
+      statusEl.textContent = "Enter a reason.";
+      statusEl.dataset.kind = "error";
+      statusEl.hidden = false;
+      return;
+    }
+
+    const btn = event.currentTarget;
+    btn.disabled = true;
+    btn.textContent = "Terminating...";
+
+    try {
+      // Send the email BEFORE deleting — once the profile doc is gone,
+      // we no longer have their email address to send anything to.
+      await sendAccountActionEmail(account, "terminated", reason, null);
+      await deleteDoc(doc(db, collectionForRole(account.role), account.id));
+      close();
+    } catch (error) {
+      console.error("Couldn't terminate account:", error);
+      statusEl.textContent = "Something went wrong. Please try again.";
+      statusEl.dataset.kind = "error";
+      statusEl.hidden = false;
+      btn.disabled = false;
+      btn.textContent = "Terminate";
+    }
+  });
+}
+
+// ====================================================================
+// ACCOUNT ACTION EMAIL (suspend/terminate notification)
+// ----------------------------------------------------------------
+// Uses a dedicated EmailJS template (confirmed set up, not the OTP
+// one — that one is built specifically around a {{passcode}}/{{time}}
+// verification code, wrong shape for an account-status notice).
+// Variables sent: to_email, name, action, reason, until_date.
+// ====================================================================
+const ACCOUNT_EMAIL_TEMPLATE_ID = "template_aigi7ef";
+const EMAILJS_SERVICE_ID = "service_mmg4ncm"; // same service as the OTP emails — only the template differs
+
+async function sendAccountActionEmail(account, action, reason, untilDate) {
+  if (!account.email) {
+    console.warn("No email on file — skipping account action notification.");
+    return;
+  }
 
   try {
-    await deleteDoc(doc(db, collectionForRole(account.role), account.id));
+    if (!window.emailjs) throw new Error("EmailJS SDK not loaded");
+    window.emailjs.init({ publicKey: "D66Nq0gpzysnBwvyP" });
+
+    await window.emailjs.send(EMAILJS_SERVICE_ID, ACCOUNT_EMAIL_TEMPLATE_ID, {
+      to_email: account.email,
+      name: account.name || "",
+      action: action === "suspended" ? "Suspended" : "Terminated",
+      reason,
+      until_date: untilDate ? untilDate.toLocaleDateString() : ""
+    });
   } catch (error) {
-    console.error("Couldn't terminate account:", error);
+    // Deliberately doesn't block or fail the actual suspend/terminate
+    // action — the account status change already succeeded in
+    // Firestore by the time this runs. A failed notification email
+    // shouldn't undo that or confuse the admin with an error for
+    // something that actually worked.
+    console.error("Couldn't send account action email:", error);
   }
 }
 
