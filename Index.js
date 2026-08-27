@@ -462,6 +462,16 @@ document.addEventListener("DOMContentLoaded", () => {
       await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
 
       await signInWithEmailAndPassword(auth, email, password);
+
+      const adminDoc = await getDoc(doc(db, ADMIN_COLLECTION, auth.currentUser.uid));
+      const suspendedUntilMillis = adminDoc.data()?.suspendedUntil?.toMillis?.();
+      if (suspendedUntilMillis && suspendedUntilMillis > Date.now()) {
+        await signOut(auth);
+        const untilDate = new Date(suspendedUntilMillis).toLocaleDateString();
+        showStatus(`This account is suspended until ${untilDate}. Contact an administrator.`, "error");
+        return;
+      }
+
       await resetAttempts(rawInput);
       sessionStorage.setItem("almares_role", "admin");
       showStatus("Signed in. Redirecting...", "success");
@@ -614,6 +624,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
       if (data[EMPLOYEE_ACTIVE_FIELD] !== true) {
         showStatus("Your account isn't activated yet. Please verify your email first.", "error");
+        return;
+      }
+
+      const suspendedUntilMillis = data.suspendedUntil?.toMillis?.();
+      if (suspendedUntilMillis && suspendedUntilMillis > Date.now()) {
+        const untilDate = new Date(suspendedUntilMillis).toLocaleDateString();
+        showStatus(`This account is suspended until ${untilDate}. Contact an administrator.`, "error");
         return;
       }
 

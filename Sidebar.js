@@ -55,14 +55,16 @@ async function initSidebar(user) {
   document.dispatchEvent(new CustomEvent("sidebar:ready", { detail: { role, user } }));
 }
 
-// Feedback is admin-only — hidden by default directly in the HTML
-// (not just hidden via JS after the fact) so there's no flash of it
-// being visible before role resolution finishes. This just reveals it
-// once confirmed admin.
+// Feedback and Accounts are admin-only — hidden by default directly
+// in the HTML (not just hidden via JS after the fact) so there's no
+// flash of them being visible before role resolution finishes. This
+// just reveals them once confirmed admin.
 function applyRoleRestrictedNavItems(role) {
   if (role !== "admin") return;
   const feedbackLink = document.getElementById("feedback-nav-link");
   if (feedbackLink) feedbackLink.hidden = false;
+  const accountsLink = document.getElementById("accounts-nav-link");
+  if (accountsLink) accountsLink.hidden = false;
 }
 
 // ====================================================================

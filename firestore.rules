@@ -1,0 +1,138 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isEmployee() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/employees/$(request.auth.uid));
+    }
+    function isAdmin() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    // Customers: owner can fully read/write their own profile.
+    // Unauthenticated read is allowed ONLY so login-by-mobile-number can resolve
+    // an email before sign-in occurs (a known tradeoff of this login design).
+    match /users/{userId} {
+      allow read: if true;
+      allow write: if isSignedIn() && request.auth.uid == userId;
+      match /cart/{cartId} {
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+      }
+      match /addresses/{addressId} {
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+      }
+      match /notifications/{notifId} {
+        allow read: if isSignedIn() && request.auth.uid == userId;
+        allow write: if (isSignedIn() && request.auth.uid == userId) || isEmployee();
+      }
+    }
+    // Employees: readable by anyone (needed for login-by-username and the
+    // registration uniqueness check, both of which happen pre-auth).
+    // Writes remain restricted to the account owner.
+    match /employees/{employeeId} {
+      allow read: if true;
+      allow create: if isSignedIn() && request.auth.uid == employeeId;
+      allow update: if isSignedIn() && (request.auth.uid == employeeId || isAdmin());
+      allow delete: if isSignedIn() && (request.auth.uid == employeeId || isAdmin());
+    }
+    // Admins: self-registered account profile, same pattern as employees.
+    // Readable by anyone (mirrors employees — cheap, and lets the client
+    // resolve an admin's name/uid without extra auth if you ever need it).
+    // Writes restricted to the account owner.
+    match /admins/{adminId} {
+      allow read: if true;
+      allow create: if isSignedIn() && request.auth.uid == adminId;
+      allow update: if isSignedIn() && (request.auth.uid == adminId || isAdmin());
+      allow delete: if isSignedIn() && (request.auth.uid == adminId || isAdmin());
+    }
+    // Products: anyone signed in can read.
+    // Only admins can add/edit/delete products now — employees have no
+    // write access here at all (matches what the app UI enforces: only
+    // Admin sees Add/Edit/Bulk-Import controls). Customers can still
+    // update stock fields during checkout (separate, narrower clause).
+    match /products/{productId} {
+      allow read: if isSignedIn();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() ||
+        (isSignedIn() &&
+         request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(['stockCount', 'available', 'flavors']));
+    }
+    // Orders: customers can create/read/update their own; employees AND
+    // admins can read/update all. Deletion is allowed for employees/admins
+    // (any order) or customers (their own cancelled orders only —
+    // "Clear History").
+    match /orders/{orderId} {
+      allow read: if isSignedIn() &&
+        (isEmployee() || isAdmin() || resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() &&
+        (isEmployee() || isAdmin() || resource.data.userId == request.auth.uid);
+      allow delete: if isEmployee() || isAdmin() ||
+        (isSignedIn() && resource.data.userId == request.auth.uid &&
+         resource.data.status == 'cancelled');
+    }
+    // Employee notifications: employees AND admins can read (both roles
+    // see this feed in the app now); any signed-in user can create one
+    // (customers trigger these when placing an order). No one deletes
+    // these from the client anymore — "Clear All" is a per-user,
+    // client-side hide (see ReadStatus.js), not a document delete, so
+    // the shared feed isn't affected by one person clearing their view.
+    match /employeeNotifications/{notifId} {
+      allow read: if isEmployee() || isAdmin();
+      allow create: if isSignedIn() &&
+        request.resource.data.message is string &&
+        request.resource.data.message.size() > 0 &&
+        request.resource.data.message.size() < 500;
+    }
+    // Store settings (banner): anyone signed in can read; employees and
+    // admins can write (matches every other collection's role pattern).
+    match /settings/{settingId} {
+      allow read: if isSignedIn();
+      allow write: if isEmployee() || isAdmin();
+    }
+    // Stock movement log: append-only audit trail of inventory stock
+    // changes (barcode scanner sales/counts, manual edits). Both roles
+    // can read and create; nothing is ever updated or deleted here —
+    // it's a log, not editable data.
+    match /stockMovements/{movementId} {
+      allow read: if isEmployee() || isAdmin();
+      allow create: if isEmployee() || isAdmin();
+    }
+    // Login attempt tracking (rate limiting / escalating lockout).
+    // Must be open — this is checked and updated BEFORE the person is
+    // authenticated at all, since it's what gates whether a sign-in
+    // attempt is even allowed to happen. Only holds attempt counters/
+    // timestamps keyed by email or username, nothing sensitive.
+    match /loginAttempts/{attemptId} {
+      allow read, write: if true;
+    }
+    // Staff code: a single shared code required to register as either
+    // role (admin can rotate it). Public read since it's checked
+    // during signup, before the person is authenticated.
+    match /staffCode/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    // OTP email verification during signup. Public — this entire flow
+    // happens before the person has an account, so there's no
+    // authenticated user yet to gate it behind.
+    match /otpVerifications/{email} {
+      allow read, write: if true;
+    }
+    // Password reset email rate limiting — same public pre-auth
+    // pattern as loginAttempts/otpVerifications.
+    match /resetEmailAttempts/{email} {
+      allow read, write: if true;
+    }
+    // Per-user read/cleared notification tracking — private to each
+    // account (moved off localStorage so it survives a domain
+    // change during techno-transfer).
+    match /notificationStatus/{uid} {
+      allow read, write: if isSignedIn() && request.auth.uid == uid;
+    }
+  }
+}
