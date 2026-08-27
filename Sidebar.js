@@ -1,6 +1,6 @@
 import { auth, db } from "./firebase-config.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
-import { doc, getDoc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { doc, getDoc, collection, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getWorstAlertDetail } from "./StockAlerts.js";
 import { getReadSet, getClearedSet, loadReadStatus } from "./ReadStatus.js";
 import { promptDeleteAccount } from "./DeleteAccount.js";
@@ -310,13 +310,35 @@ async function loadNotifBadge(uid) {
   // now correctly triggers this, which the old per-page duplicated
   // logic (checking only the flat parent stock field) silently missed.
   //
+  // SCALABILITY FIX: previously fetched the ENTIRE products
+  // collection just to check stock levels — on a catalog of
+  // thousands of products, that's thousands of documents downloaded
+  // and processed on every single page load, everywhere, just for a
+  // badge count. This query only pulls products whose stockCount is
+  // already ≤99 (the low-stock threshold) — an indexed range query,
+  // not a full scan — so the amount of data fetched stays small and
+  // proportional to how many products actually need attention, not
+  // how large the whole catalog is.
+  //
+  // HONEST LIMITATION: this specific query can't see INTO a variant
+  // product's nested flavors array (Firestore can't efficiently query
+  // that), so a variant-only product (parent stockCount left null,
+  // stock tracked per-variant instead) won't be caught by this query
+  // even if a specific variant is critically low. A fully complete
+  // fix would need a computed status field written at product-update
+  // time in Inventory.js (every Add/Edit/CSV-import/Scan/Stock-Count
+  // path) — a real, doable follow-up, just larger in scope than this
+  // pass. For a catalog that's mostly non-variant products, this
+  // still closes the overwhelming majority of the actual scale
+  // problem today.
+  //
   // Also dispatches this same data as a shared event ("products:live")
   // so other pages (Dashboard.js, etc.) can reuse it instead of
   // opening their OWN separate live listener on the same collection —
   // Sidebar.js runs on every page already, so this was genuinely
   // duplicated work slowing down every single page load.
   onSnapshot(
-    collection(db, "products"),
+    query(collection(db, "products"), where("stockCount", "<=", 99)),
     (snap) => {
       const products = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       latestProducts = products;

@@ -1,6 +1,6 @@
 import { db } from "./firebase-config.js";
 import {
-  collection, getDocs, query, where, doc, getDoc, setDoc, deleteDoc, serverTimestamp, Timestamp
+  collection, getDocs, getCountFromServer, query, where, doc, getDoc, setDoc, deleteDoc, serverTimestamp, Timestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { isProductInAlertState, getWorstAlertDetail } from "./StockAlerts.js";
 import { getClearedSet, loadReadStatus } from "./ReadStatus.js";
@@ -64,9 +64,23 @@ function loadStats() {
 }
 
 function loadProductStats() {
-  function renderFromProducts(products) {
-    document.getElementById("stat-products-value").textContent = products.length;
+  // Total count needs its OWN source — the shared products:live data
+  // is now deliberately filtered to just low-stock items (see
+  // Sidebar.js), which is exactly right for the two stats below, but
+  // wrong for a true catalog-wide total. getCountFromServer() is a
+  // lightweight aggregation — it downloads a single number, not every
+  // product document, so this stays scalable regardless of catalog
+  // size.
+  getCountFromServer(collection(db, "products"))
+    .then((snap) => {
+      document.getElementById("stat-products-value").textContent = snap.data().count;
+    })
+    .catch((error) => {
+      console.error("Couldn't load total product count:", error);
+      document.getElementById("stat-products-value").textContent = "—";
+    });
 
+  function renderFromProducts(products) {
     const lowStockCount = products.filter((product) => isProductInAlertState(product)).length;
 
     // The banner is specifically titled "Critically Low Stock Items

@@ -183,9 +183,9 @@ function buildStockListItem(item, alreadyRead) {
   `;
   el.querySelector(".notif-list__message").textContent = item.message;
 
-  el.addEventListener("click", async (event) => {
+  el.addEventListener("click", (event) => {
     event.preventDefault();
-    await markRead(currentUid, item.id);
+    markRead(currentUid, item.id).catch((error) => console.error("Couldn't save read status:", error)); // fire-and-forget — don't make every click wait on a network round-trip
     window.location.href = `Inventory.html?filter=${item.filterValue}`;
   });
 
@@ -208,9 +208,9 @@ function buildOrderListItem(item, alreadyRead) {
   el.querySelector(".notif-list__message").textContent = item.message;
   el.querySelector(".notif-list__time").textContent = item.timeLabel;
 
-  el.addEventListener("click", async (event) => {
+  el.addEventListener("click", (event) => {
     event.preventDefault();
-    await markRead(currentUid, item.id);
+    markRead(currentUid, item.id).catch((error) => console.error("Couldn't save read status:", error)); // fire-and-forget, same reasoning as the stock alert click above
     window.location.href = item.orderId ? `Orders.html?orderId=${item.orderId}` : "Orders.html";
   });
 
