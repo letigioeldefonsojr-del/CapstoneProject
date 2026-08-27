@@ -2374,3 +2374,9 @@ button {
 .order-detail__map-link:hover {
     text-decoration: underline;
 }
+
+.notif-list__item--clickable.is-selected {
+    background: var(--brand-green-soft, #e8f3ec);
+    outline: 2px solid var(--brand-green);
+    outline-offset: -2px;
+}

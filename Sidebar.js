@@ -1,7 +1,7 @@
 import { auth, db } from "./firebase-config.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import { doc, getDoc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
-import { isProductInAlertState } from "./StockAlerts.js";
+import { getWorstAlertDetail } from "./StockAlerts.js";
 import { getReadSet, getClearedSet, loadReadStatus } from "./ReadStatus.js";
 import { promptDeleteAccount } from "./DeleteAccount.js";
 import { confirmDialog } from "./ConfirmDialog.js";
@@ -306,9 +306,10 @@ async function loadNotifBadge(uid) {
     collection(db, "products"),
     (snap) => {
       const products = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      unreadStockAlerts = products.filter((product) =>
-        isProductInAlertState(product) && isUnread(`stock-${product.id}`)
-      ).length;
+      unreadStockAlerts = products.filter((product) => {
+        const detail = getWorstAlertDetail(product);
+        return detail && isUnread(`stock-${product.id}-${detail.status}`);
+      }).length;
       renderBadge();
     },
     (error) => console.error("Couldn't load products for notification badge:", error)

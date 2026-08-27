@@ -58,7 +58,7 @@ function loadEverything() {
         .map((product) => {
           const detail = getWorstAlertDetail(product);
           if (!detail) return null;
-          const id = `stock-${product.id}`;
+          const id = `stock-${product.id}-${detail.status}`;
           if (clearedSet.has(id)) return null;
           return {
             id,
@@ -183,6 +183,7 @@ function buildStockListItem(item, alreadyRead) {
 
   el.addEventListener("click", async (event) => {
     event.preventDefault();
+    el.classList.add("is-selected");
     await markRead(currentUid, item.id);
     window.location.href = `Inventory.html?filter=${item.filterValue}`;
   });
@@ -208,6 +209,7 @@ function buildOrderListItem(item, alreadyRead) {
 
   el.addEventListener("click", async (event) => {
     event.preventDefault();
+    el.classList.add("is-selected");
     await markRead(currentUid, item.id);
     window.location.href = "Orders.html";
   });
