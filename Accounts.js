@@ -29,6 +29,7 @@ import { confirmDialog } from "./ConfirmDialog.js";
 // ====================================================================
 let allAccounts = [];
 let currentAdminUid = null;
+let roleFilter = "all"; // "all" | "admin" | "employee" | "customer"
 
 document.addEventListener("sidebar:ready", (event) => {
   // Admin-only page. The nav link is already hidden for employees
@@ -48,15 +49,17 @@ function loadAccounts() {
 
   let adminDocs = [];
   let employeeDocs = [];
+  let customerDocs = [];
   let adminLoaded = false;
   let employeeLoaded = false;
+  let customerLoaded = false;
 
   function mergeAndRender() {
-    if (!adminLoaded || !employeeLoaded) return; // wait for both sources before first render
-    allAccounts = [...adminDocs, ...employeeDocs].sort((a, b) =>
+    if (!adminLoaded || !employeeLoaded || !customerLoaded) return; // wait for all three sources before first render
+    allAccounts = [...adminDocs, ...employeeDocs, ...customerDocs].sort((a, b) =>
       (a.name || "").localeCompare(b.name || "")
     );
-    render();
+    applyFilterAndRender();
   }
 
   onSnapshot(
@@ -100,9 +103,34 @@ function loadAccounts() {
       container.innerHTML = `<p class="forecast-loading">Couldn't load accounts right now.</p>`;
     }
   );
+
+  // Customers — from the mobile app's "users" collection (schema
+  // confirmed from register_screen.dart: fullName, email,
+  // mobileNumber). No "username" concept for customers, so that
+  // column just shows their mobile number instead.
+  onSnapshot(
+    collection(db, "users"),
+    (snap) => {
+      customerDocs = snap.docs.map((d) => ({
+        id: d.id,
+        role: "customer",
+        name: d.data().fullName,
+        email: d.data().email,
+        username: d.data().mobileNumber || "—",
+        phone: d.data().mobileNumber,
+        suspendedUntil: d.data().suspendedUntil
+      }));
+      customerLoaded = true;
+      mergeAndRender();
+    },
+    (error) => {
+      console.error("Couldn't load customer accounts:", error);
+      container.innerHTML = `<p class="forecast-loading">Couldn't load accounts right now.</p>`;
+    }
+  );
 }
 
-function render() {
+function applyFilterAndRender() {
   const container = document.getElementById("accounts-content");
   container.innerHTML = "";
 
@@ -113,6 +141,7 @@ function render() {
     { value: allAccounts.length, label: "Total Accounts" },
     { value: allAccounts.filter((a) => a.role === "admin").length, label: "Admins" },
     { value: allAccounts.filter((a) => a.role === "employee").length, label: "Employees" },
+    { value: allAccounts.filter((a) => a.role === "customer").length, label: "Customers" },
     { value: suspendedCount, label: "Currently Suspended" }
   ].forEach((card) => {
     const el = document.createElement("div");
@@ -127,7 +156,15 @@ function render() {
   const panel = document.createElement("div");
   panel.className = "panel";
   panel.innerHTML = `
-    <h3 class="panel__title">All Registered Accounts</h3>
+    <div class="feedback-list__header">
+      <h3 class="panel__title" style="margin:0;">All Registered Accounts</h3>
+      <select id="accounts-role-filter" class="feedback-sort-select">
+        <option value="all">All roles</option>
+        <option value="admin">Admin</option>
+        <option value="employee">Employee</option>
+        <option value="customer">Customer</option>
+      </select>
+    </div>
     <table class="inventory-table accounts-table">
       <thead>
         <tr>
@@ -144,14 +181,30 @@ function render() {
   `;
   container.appendChild(panel);
 
-  const tbody = panel.querySelector("#accounts-tbody");
+  const roleFilterSelect = panel.querySelector("#accounts-role-filter");
+  roleFilterSelect.value = roleFilter;
+  roleFilterSelect.addEventListener("change", (event) => {
+    roleFilter = event.target.value;
+    applyFilterAndRender();
+  });
 
-  if (allAccounts.length === 0) {
+  const tbody = panel.querySelector("#accounts-tbody");
+  const visibleAccounts = roleFilter === "all"
+    ? allAccounts
+    : allAccounts.filter((a) => a.role === roleFilter);
+
+  if (visibleAccounts.length === 0) {
     tbody.innerHTML = `<tr><td colspan="6" class="inventory-empty">No accounts found.</td></tr>`;
     return;
   }
 
-  allAccounts.forEach((account) => tbody.appendChild(buildAccountRow(account)));
+  visibleAccounts.forEach((account) => tbody.appendChild(buildAccountRow(account)));
+}
+
+function collectionForRole(role) {
+  if (role === "admin") return "admins";
+  if (role === "employee") return "employees";
+  return "users"; // customer
 }
 
 function isCurrentlySuspended(account) {
@@ -168,7 +221,7 @@ function buildAccountRow(account) {
     <td>${escapeHtml(account.name || "(no name)")}</td>
     <td>${escapeHtml(account.email || "—")}</td>
     <td>${escapeHtml(account.username || "—")}</td>
-    <td><span class="role-pill role-pill--${account.role}">${account.role === "admin" ? "Admin" : "Employee"}</span></td>
+    <td><span class="role-pill role-pill--${account.role}">${account.role === "admin" ? "Admin" : account.role === "employee" ? "Employee" : "Customer"}</span></td>
     <td></td>
     <td class="accounts-table__actions"></td>
   `;
@@ -227,7 +280,9 @@ function handleSuspend(account) {
         </button>
       </div>
       <div class="modal__body">
-        <p class="confirm-dialog__message">They won't be able to log in until the suspension ends.</p>
+        <p class="confirm-dialog__message">${account.role === "customer"
+          ? "Honest limitation: this only sets a flag on their profile — the mobile app doesn't currently check it, so it won't actually block their mobile login. It would need a small update on the mobile app's side to actually enforce this."
+          : "They won't be able to log in until the suspension ends."}</p>
         <div class="form-field" style="margin-top: 14px;">
           <label for="suspend-days-input">Number of days</label>
           <input type="number" id="suspend-days-input" min="1" step="1" value="7">
@@ -266,7 +321,7 @@ function handleSuspend(account) {
 
     try {
       const suspendedUntil = Timestamp.fromDate(new Date(Date.now() + days * 24 * 60 * 60 * 1000));
-      await updateDoc(doc(db, account.role === "admin" ? "admins" : "employees", account.id), { suspendedUntil });
+      await updateDoc(doc(db, collectionForRole(account.role), account.id), { suspendedUntil });
       close();
     } catch (error) {
       console.error("Couldn't suspend account:", error);
@@ -287,7 +342,7 @@ async function handleLiftSuspension(account) {
   if (!confirmed) return;
 
   try {
-    await updateDoc(doc(db, account.role === "admin" ? "admins" : "employees", account.id), {
+    await updateDoc(doc(db, collectionForRole(account.role), account.id), {
       suspendedUntil: deleteField()
     });
   } catch (error) {
@@ -303,7 +358,7 @@ async function handleTerminate(account) {
   if (!confirmed) return;
 
   try {
-    await deleteDoc(doc(db, account.role === "admin" ? "admins" : "employees", account.id));
+    await deleteDoc(doc(db, collectionForRole(account.role), account.id));
   } catch (error) {
     console.error("Couldn't terminate account:", error);
   }
