@@ -104,7 +104,6 @@ function loadProductStats() {
 
   document.addEventListener("products:live", (event) => renderFromProducts(event.detail.products));
 }
-}
 
 function updateLowStockBanner(count) {
   const banner = document.getElementById("low-stock-banner");
