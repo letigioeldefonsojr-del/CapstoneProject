@@ -390,11 +390,13 @@ function buildEntryRow(entry, mode) {
     ? `~${entry.velocity.toFixed(1)} units/day`
     : `~${(entry.velocity * 7).toFixed(1)} units/week`;
 
-  const stockoutLabel = entry.daysUntilStockout != null
-    ? entry.daysUntilStockout < 1
-      ? "Stockout imminent"
-      : `~${Math.round(entry.daysUntilStockout)} days until stockout`
-    : "";
+  const stockoutLabel = entry.currentStock === 0
+    ? "Out of stock"
+    : entry.daysUntilStockout != null
+      ? entry.daysUntilStockout < 1
+        ? "Stockout imminent"
+        : `~${Math.round(entry.daysUntilStockout)} days until stockout`
+      : "";
 
   row.innerHTML = `
     <div class="forecast-item__thumb-wrap"></div>
@@ -504,20 +506,37 @@ async function loadAiInsight(clustered, restockRecommended, totalTracked, noData
     if (!response.ok) throw new Error(`Worker returned ${response.status}`);
 
     const result = await response.json();
-    textEl.innerHTML = "";
-    // Gemini's response now comes back as multiple short paragraphs
-    // (one per topic — health, urgent action, opportunities, slow
-    // stock) rather than one dense sentence — render each on its own
-    // line instead of running them all together.
-    result.summary.split(/\n+/).filter((line) => line.trim()).forEach((line) => {
-      const p = document.createElement("p");
-      p.textContent = line.trim();
-      textEl.appendChild(p);
-    });
+    renderAiSections(textEl, result.sections);
   } catch (error) {
     console.error("Couldn't load AI insight:", error);
     // Fails quietly — the rest of the forecast page (the real
     // computed data) already rendered and works fine on its own.
     panel.hidden = true;
   }
+}
+
+function renderAiSections(textEl, sections) {
+  textEl.innerHTML = "";
+
+  const parts = [
+    { key: "health", label: "Inventory Health" },
+    { key: "urgent", label: "Urgent Action" },
+    { key: "opportunity", label: "Opportunity" },
+    { key: "slowStock", label: "Slow-Moving Stock" }
+  ];
+
+  parts.forEach(({ key, label }) => {
+    const value = sections?.[key];
+    if (!value) return;
+
+    const block = document.createElement("div");
+    block.className = "forecast-ai-panel__section";
+    block.innerHTML = `
+      <h4 class="forecast-ai-panel__section-label"></h4>
+      <p class="forecast-ai-panel__section-text"></p>
+    `;
+    block.querySelector(".forecast-ai-panel__section-label").textContent = label;
+    block.querySelector(".forecast-ai-panel__section-text").textContent = value;
+    textEl.appendChild(block);
+  });
 }

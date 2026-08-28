@@ -66,7 +66,18 @@ export default {
             generationConfig: {
               maxOutputTokens: 700,
               temperature: 0.4,
-              thinkingConfig: { thinkingBudget: 0 }
+              thinkingConfig: { thinkingBudget: 0 },
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: "object",
+                properties: {
+                  health: { type: "string" },
+                  urgent: { type: "string" },
+                  opportunity: { type: "string" },
+                  slowStock: { type: "string" }
+                },
+                required: ["health", "urgent", "opportunity", "slowStock"]
+              }
             }
           })
         }
@@ -87,7 +98,14 @@ export default {
       return jsonResponse({ error: "The AI service returned an empty response." }, 502);
     }
 
-    return jsonResponse({ summary: text });
+    let sections;
+    try {
+      sections = JSON.parse(text);
+    } catch (error) {
+      return jsonResponse({ error: "The AI service returned malformed structured output.", detail: text }, 502);
+    }
+
+    return jsonResponse({ sections });
   }
 };
 
@@ -108,7 +126,7 @@ function buildPrompt(fastMovers, moderateMovers, slowMovers, restockRecommended,
     .map((p) => `${p.name} (${p.currentStock} left${p.daysUntilStockout != null ? `, ~${Math.round(p.daysUntilStockout)} days until stockout` : ""}, ${p.velocityTier}-moving)`)
     .join(", ") || "none urgent right now";
 
-  return `You are an inventory analyst for a small grocery store. Based on the real data below, write a genuinely useful, structured analysis for the store admin — not just one summary sentence.
+  return `You are an inventory analyst for a small grocery store. Based on the real data below, write a genuinely useful, structured analysis for the store admin.
 
 Fast-moving products (best sellers): ${fastList}
 Moderate-moving products: ${moderateList}
@@ -117,13 +135,11 @@ Products needing restock soon, sorted by urgency: ${restockList}
 Total products with enough sales history to analyze: ${totalTracked}
 Products with no sales data yet (can't be analyzed): ${noDataCount ?? "unknown"}
 
-Write exactly 4 short paragraphs, each 1-2 sentences, in plain English, no markdown, no bullet points, no headers — separate each paragraph with a single blank line:
-1. Overall inventory health — a direct read on how things look right now, in plain terms.
-2. Urgent action — what needs restocking soonest and why, naming specific products.
-3. Opportunity — what's selling well that the store should make sure stays in stock, or lean into.
-4. Slow-moving stock — name anything at risk of becoming dead stock and suggest a concrete next step (e.g. a promotion, bundling, or reducing future restock quantity) — or say plainly if nothing looks concerning here.
-
-Be specific and reference actual product names from the data. Write the analysis now.`;
+Fill in each field with 1-2 plain-English sentences, no markdown, being specific and naming actual products from the data:
+- health: a direct read on overall inventory health right now
+- urgent: what needs restocking soonest and why, naming specific products
+- opportunity: what's selling well that the store should keep in stock or lean into
+- slowStock: name anything at risk of becoming dead stock and suggest a concrete next step (a promotion, bundling, reducing future restock quantity) — or say plainly if nothing looks concerning here`;
 }
 
 function corsHeaders() {

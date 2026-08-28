@@ -2026,12 +2026,25 @@ button {
     line-height: 1.6;
 }
 
-.forecast-ai-panel__text p {
-    margin: 0 0 10px;
+.forecast-ai-panel__section {
+    margin-bottom: 16px;
 }
 
-.forecast-ai-panel__text p:last-child {
+.forecast-ai-panel__section:last-child {
     margin-bottom: 0;
+}
+
+.forecast-ai-panel__section-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--brand-green);
+    margin: 0 0 4px;
+}
+
+.forecast-ai-panel__section-text {
+    margin: 0;
 }
 
 /* ===========================
