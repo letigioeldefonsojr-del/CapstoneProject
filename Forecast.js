@@ -265,8 +265,11 @@ function renderResults(clustered, productsWithoutData) {
     return;
   }
 
-  const bestSellersLow = allTracked.filter((p) =>
-    p.velocityTier === "fast" && isLowOrOut(p.currentStock)
+  const bestSellersOut = allTracked.filter((p) =>
+    p.velocityTier === "fast" && p.currentStock === 0
+  );
+  const bestSellersAlmostOut = allTracked.filter((p) =>
+    p.velocityTier === "fast" && p.currentStock > 0 && isLowOrOut(p.currentStock)
   );
   const restockRecommended = allTracked
     .filter((p) => isLowOrOut(p.currentStock))
@@ -278,11 +281,21 @@ function renderResults(clustered, productsWithoutData) {
   container.insertBefore(aiPanel, container.firstChild);
   loadAiInsight(clustered, restockRecommended, allTracked.length, productsWithoutData.length, aiPanel);
 
-  if (bestSellersLow.length > 0) {
+  if (bestSellersOut.length > 0) {
+    container.appendChild(buildSection(
+      "Best Sellers Out of Stock",
+      "Fast-moving products that have completely run out — restock these first, they're actively losing sales right now.",
+      bestSellersOut,
+      "urgent",
+      "urgent"
+    ));
+  }
+
+  if (bestSellersAlmostOut.length > 0) {
     container.appendChild(buildSection(
       "Best Sellers Almost Out of Stock",
-      "Fast-moving products that need attention now — these sell quickly and are already running low.",
-      bestSellersLow,
+      "Fast-moving products that need attention now — these sell quickly and are running low, but haven't run out yet.",
+      bestSellersAlmostOut,
       "urgent",
       "urgent"
     ));
