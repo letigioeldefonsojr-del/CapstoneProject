@@ -2026,6 +2026,14 @@ button {
     line-height: 1.6;
 }
 
+.forecast-ai-panel__text p {
+    margin: 0 0 10px;
+}
+
+.forecast-ai-panel__text p:last-child {
+    margin-bottom: 0;
+}
+
 /* ===========================
    STORE BANNER PANEL
    =========================== */

@@ -276,7 +276,7 @@ function renderResults(clustered, productsWithoutData) {
 
   const aiPanel = buildAiInsightPanel();
   container.insertBefore(aiPanel, container.firstChild);
-  loadAiInsight(clustered.fast, restockRecommended, allTracked.length, aiPanel);
+  loadAiInsight(clustered, restockRecommended, allTracked.length, productsWithoutData.length, aiPanel);
 
   if (bestSellersLow.length > 0) {
     container.appendChild(buildSection(
@@ -468,7 +468,7 @@ function buildAiInsightPanel() {
   return panel;
 }
 
-async function loadAiInsight(fastMovers, restockRecommended, totalTracked, panel) {
+async function loadAiInsight(clustered, restockRecommended, totalTracked, noDataCount, panel) {
   const textEl = panel.querySelector(".forecast-ai-panel__text");
 
   try {
@@ -476,23 +476,44 @@ async function loadAiInsight(fastMovers, restockRecommended, totalTracked, panel
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        fastMovers: fastMovers.slice(0, 5).map((p) => ({
+        fastMovers: clustered.fast.slice(0, 8).map((p) => ({
+          name: p.product.name || "Unnamed product",
+          velocity: Number(p.velocity.toFixed(1)),
+          currentStock: p.currentStock
+        })),
+        moderateMovers: clustered.moderate.slice(0, 5).map((p) => ({
           name: p.product.name || "Unnamed product",
           velocity: Number(p.velocity.toFixed(1))
         })),
-        restockRecommended: restockRecommended.slice(0, 5).map((p) => ({
+        slowMovers: clustered.slow.slice(0, 5).map((p) => ({
+          name: p.product.name || "Unnamed product",
+          velocity: Number(p.velocity.toFixed(2)),
+          currentStock: p.currentStock
+        })),
+        restockRecommended: restockRecommended.slice(0, 8).map((p) => ({
           name: p.product.name || "Unnamed product",
           currentStock: p.currentStock,
-          daysUntilStockout: p.daysUntilStockout != null ? Number(p.daysUntilStockout.toFixed(1)) : null
+          daysUntilStockout: p.daysUntilStockout != null ? Number(p.daysUntilStockout.toFixed(1)) : null,
+          velocityTier: p.velocityTier
         })),
-        totalTracked
+        totalTracked,
+        noDataCount
       })
     });
 
     if (!response.ok) throw new Error(`Worker returned ${response.status}`);
 
     const result = await response.json();
-    textEl.textContent = result.summary;
+    textEl.innerHTML = "";
+    // Gemini's response now comes back as multiple short paragraphs
+    // (one per topic — health, urgent action, opportunities, slow
+    // stock) rather than one dense sentence — render each on its own
+    // line instead of running them all together.
+    result.summary.split(/\n+/).filter((line) => line.trim()).forEach((line) => {
+      const p = document.createElement("p");
+      p.textContent = line.trim();
+      textEl.appendChild(p);
+    });
   } catch (error) {
     console.error("Couldn't load AI insight:", error);
     // Fails quietly — the rest of the forecast page (the real

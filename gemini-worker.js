@@ -17,7 +17,7 @@
 // Reasonable for a capstone's actual usage scale; worth tightening
 // later if this becomes a real production concern.
 // ====================================================================
-const GEMINI_MODEL = "gemini-1.5-flash";
+const GEMINI_MODEL = "gemini-2.5-flash"; // confirmed live/stable via ListModels on 2026-08-23
 
 // Only your own site is allowed to call this — blocks random other
 // websites from using your Gemini quota via this endpoint.
@@ -27,6 +27,13 @@ export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") {
       return new Response(null, { headers: corsHeaders() });
+    }
+
+    if (request.method === "GET") {
+      // Bare visits (e.g. typing the URL directly) just confirm the
+      // Worker is alive and reachable — the real work only happens on
+      // POST, which is what Forecast.js actually sends.
+      return jsonResponse({ status: "Worker is running. Send a POST request to get an AI insight." });
     }
 
     if (request.method !== "POST") {
@@ -40,12 +47,12 @@ export default {
       return jsonResponse({ error: "Invalid JSON body" }, 400);
     }
 
-    const { fastMovers, restockRecommended, totalTracked } = body || {};
+    const { fastMovers, moderateMovers, slowMovers, restockRecommended, totalTracked, noDataCount } = body || {};
     if (!Array.isArray(fastMovers) || !Array.isArray(restockRecommended)) {
       return jsonResponse({ error: "Missing or malformed forecast data" }, 400);
     }
 
-    const prompt = buildPrompt(fastMovers, restockRecommended, totalTracked);
+    const prompt = buildPrompt(fastMovers, moderateMovers, slowMovers, restockRecommended, totalTracked, noDataCount);
 
     let geminiResponse;
     try {
@@ -56,7 +63,11 @@ export default {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { maxOutputTokens: 200, temperature: 0.4 }
+            generationConfig: {
+              maxOutputTokens: 700,
+              temperature: 0.4,
+              thinkingConfig: { thinkingBudget: 0 }
+            }
           })
         }
       );
@@ -65,7 +76,8 @@ export default {
     }
 
     if (!geminiResponse.ok) {
-      return jsonResponse({ error: "The AI service returned an error." }, 502);
+      const errorBody = await geminiResponse.text();
+      return jsonResponse({ error: "The AI service returned an error.", detail: errorBody, status: geminiResponse.status }, 502);
     }
 
     const data = await geminiResponse.json();
@@ -79,24 +91,39 @@ export default {
   }
 };
 
-function buildPrompt(fastMovers, restockRecommended, totalTracked) {
-  const fastList = fastMovers
-    .slice(0, 5)
-    .map((p) => `${p.name} (~${p.velocity} units/day)`)
+function buildPrompt(fastMovers, moderateMovers, slowMovers, restockRecommended, totalTracked, noDataCount) {
+  const fastList = (fastMovers || [])
+    .map((p) => `${p.name} (~${p.velocity} units/day, ${p.currentStock} in stock)`)
     .join(", ") || "none currently tracked";
 
-  const restockList = restockRecommended
-    .slice(0, 5)
-    .map((p) => `${p.name} (${p.currentStock} left${p.daysUntilStockout != null ? `, ~${Math.round(p.daysUntilStockout)} days until stockout` : ""})`)
+  const moderateList = (moderateMovers || [])
+    .map((p) => `${p.name} (~${p.velocity} units/day)`)
+    .join(", ") || "none";
+
+  const slowList = (slowMovers || [])
+    .map((p) => `${p.name} (~${p.velocity} units/day, ${p.currentStock} in stock)`)
+    .join(", ") || "none currently tracked";
+
+  const restockList = (restockRecommended || [])
+    .map((p) => `${p.name} (${p.currentStock} left${p.daysUntilStockout != null ? `, ~${Math.round(p.daysUntilStockout)} days until stockout` : ""}, ${p.velocityTier}-moving)`)
     .join(", ") || "none urgent right now";
 
-  return `You are an inventory assistant for a small grocery store. Write a short, plain-English summary (2-3 sentences, no markdown, no bullet points) for the store admin based on this real data. Be direct and actionable.
+  return `You are an inventory analyst for a small grocery store. Based on the real data below, write a genuinely useful, structured analysis for the store admin — not just one summary sentence.
 
-Fast-moving products: ${fastList}
-Products needing restock soon: ${restockList}
-Total products with sales data: ${totalTracked}
+Fast-moving products (best sellers): ${fastList}
+Moderate-moving products: ${moderateList}
+Slow-moving products (at risk of becoming dead stock): ${slowList}
+Products needing restock soon, sorted by urgency: ${restockList}
+Total products with enough sales history to analyze: ${totalTracked}
+Products with no sales data yet (can't be analyzed): ${noDataCount ?? "unknown"}
 
-Write the summary now.`;
+Write exactly 4 short paragraphs, each 1-2 sentences, in plain English, no markdown, no bullet points, no headers — separate each paragraph with a single blank line:
+1. Overall inventory health — a direct read on how things look right now, in plain terms.
+2. Urgent action — what needs restocking soonest and why, naming specific products.
+3. Opportunity — what's selling well that the store should make sure stays in stock, or lean into.
+4. Slow-moving stock — name anything at risk of becoming dead stock and suggest a concrete next step (e.g. a promotion, bundling, or reducing future restock quantity) — or say plainly if nothing looks concerning here.
+
+Be specific and reference actual product names from the data. Write the analysis now.`;
 }
 
 function corsHeaders() {
