@@ -1,6 +1,6 @@
 import { auth, db } from "./firebase-config.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
-import { doc, getDoc, collection, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { doc, getDoc, collection, query, where, onSnapshot, enableNetwork, disableNetwork } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getWorstAlertDetail } from "./StockAlerts.js";
 import { getReadSet, getClearedSet, loadReadStatus } from "./ReadStatus.js";
 import { promptDeleteAccount } from "./DeleteAccount.js";
@@ -37,6 +37,51 @@ onAuthStateChanged(auth, (user) => {
   }
   initSidebar(user);
 });
+
+// ====================================================================
+// STALE CONNECTION RECOVERY
+// ----------------------------------------------------------------
+// Firestore's real-time listeners (onSnapshot) rely on a persistent
+// connection — after a PC sleeps, or a browser tab sits backgrounded
+// for a while, that connection can go stale without automatically
+// recovering on its own. Every live listener across the app (this
+// badge, plus whatever each individual page has open — Orders,
+// Accounts, Feedback, etc.) can end up silently frozen, showing old
+// data with no indication anything's wrong, until a manual reload.
+//
+// This runs on every page (Sidebar.js is loaded everywhere) and
+// watches for the tab becoming visible again after being hidden for
+// a while — the exact moment this problem would show up. When that
+// happens, it forces Firestore to fully tear down and re-establish
+// its connection (disableNetwork then enableNetwork — Firestore's own
+// documented way to recover from this), which automatically resumes
+// every active listener on the page cleanly, without needing an
+// actual page reload.
+// ====================================================================
+const STALE_THRESHOLD_MS = 60 * 1000; // only bother reconnecting if hidden for at least a minute — no need for brief tab-switches
+let hiddenSinceMillis = null;
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    hiddenSinceMillis = Date.now();
+    return;
+  }
+
+  // Became visible again
+  if (hiddenSinceMillis && Date.now() - hiddenSinceMillis >= STALE_THRESHOLD_MS) {
+    recoverStaleConnection();
+  }
+  hiddenSinceMillis = null;
+});
+
+async function recoverStaleConnection() {
+  try {
+    await disableNetwork(db);
+    await enableNetwork(db);
+  } catch (error) {
+    console.error("Couldn't recover Firestore connection after being idle:", error);
+  }
+}
 
 async function initSidebar(user) {
   const role = await resolveRole(user.uid);
