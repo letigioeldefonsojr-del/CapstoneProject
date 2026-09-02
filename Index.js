@@ -32,13 +32,12 @@ const EMPLOYEE_USERNAME_FIELD = "username";  // primary lookup field
 const EMPLOYEE_EMAIL_FIELD    = "email";     // used to resolve to Firebase Auth
 const EMPLOYEE_ACTIVE_FIELD   = "activated"; // boolean: true / false
 
-// SECURITY NOTE: letting anyone reach this page self-register an
-// Administrator account is a real risk once this is public — normally
-// admin accounts are provisioned manually, not self-served. Before
-// this goes live, gate CHUNK 7B behind something (an invite code
-// checked server-side, an allow-listed email domain via a Cloud
-// Function, or remove the admin sign-up form and create admins
-// directly from the Firebase console instead).
+// SECURITY NOTE (resolved): admin self-signup used to be a real risk
+// here — anyone with the Staff Code could create their own admin
+// account. Fixed: the admin signup form was removed entirely (both
+// the manual email/password path and the Google sign-in path), and
+// new admin accounts can now only be created by an existing admin,
+// from the Accounts page (see Accounts.js's "Add New Admin" feature).
 //
 // IMPORTANT — Firestore rule needed: your current rules (the ones
 // you shared) have no "admins" collection, so this write WILL be
@@ -534,12 +533,6 @@ document.addEventListener("DOMContentLoaded", () => {
       default:
         return "Something went wrong. Please try again.";
     }
-  }
-
-  // ------------------------------------------------------------------
-  // CHUNK 7B — ADMINISTRATOR CREATE ACCOUNT (Firebase Authentication)
-  // See the SECURITY NOTE at the top of this file (CHUNK 0).
-  // ------------------------------------------------------------------
   }
 
   // ------------------------------------------------------------------
