@@ -322,6 +322,22 @@ body {
     height: 16px;
 }
 
+.phone-prefix {
+    position: absolute;
+    left: 46px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 2;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-dark);
+    pointer-events: none;
+}
+
+.phone-input-wrapper input {
+    padding-left: 84px !important;
+}
+
 .input-wrapper input {
     width: 100%;
     height: 50px;
