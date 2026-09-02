@@ -2,6 +2,7 @@ import { auth, db } from "./firebase-config.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import { doc, getDoc, collection, query, where, onSnapshot, enableNetwork, disableNetwork } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getWorstAlertDetail } from "./StockAlerts.js";
+import { getPreferences } from "./NotificationPreferences.js";
 import { getReadSet, getClearedSet, loadReadStatus } from "./ReadStatus.js";
 import { promptDeleteAccount } from "./DeleteAccount.js";
 import { confirmDialog } from "./ConfirmDialog.js";
@@ -87,10 +88,12 @@ async function initSidebar(user) {
   const role = await resolveRole(user.uid);
   if (!role) return; // resolveRole already signed out and is redirecting — nothing more to do here
 
+  const preferences = await getPreferences(user.uid, role);
+
   renderIdentity(role, user);
   startClock();
   highlightActiveNav();
-  loadNotifBadge(user.uid);
+  loadNotifBadge(user.uid, preferences);
   wireCollapse();
   wireLogout();
   wireDeleteAccount(user, role);
@@ -99,7 +102,7 @@ async function initSidebar(user) {
   // Let the page's own script (Dashboard.js, Inventory.js, etc.) know
   // the sidebar is ready and what role is logged in, in case it needs
   // to adjust its own content (e.g. hiding an admin-only button).
-  document.dispatchEvent(new CustomEvent("sidebar:ready", { detail: { role, user } }));
+  document.dispatchEvent(new CustomEvent("sidebar:ready", { detail: { role, user, preferences } }));
 }
 
 // Feedback and Accounts are admin-only — hidden by default directly
@@ -324,7 +327,7 @@ function highlightActiveNav() {
 // share badge state. Cleared items never count, read-but-not-cleared
 // items don't count either — only unread AND not-cleared does.
 // ====================================================================
-async function loadNotifBadge(uid) {
+async function loadNotifBadge(uid, preferences) {
   const badge = document.getElementById("notif-badge");
   if (!badge) return;
 
@@ -390,10 +393,12 @@ async function loadNotifBadge(uid) {
     (snap) => {
       const products = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       latestProducts = products;
-      unreadStockAlerts = products.filter((product) => {
-        const detail = getWorstAlertDetail(product);
-        return detail && isUnread(`stock-${product.id}-${detail.status}`);
-      }).length;
+      unreadStockAlerts = preferences.stockAlerts
+        ? products.filter((product) => {
+            const detail = getWorstAlertDetail(product);
+            return detail && isUnread(`stock-${product.id}-${detail.status}`);
+          }).length
+        : 0;
       renderBadge();
       document.dispatchEvent(new CustomEvent("products:live", { detail: { products } }));
     },
@@ -407,7 +412,7 @@ async function loadNotifBadge(uid) {
     collection(db, "employeeNotifications"),
     (snap) => {
       latestNotifications = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      unreadOrders = snap.docs.filter((d) => isUnread(d.id)).length;
+      unreadOrders = preferences.orderNotifications ? snap.docs.filter((d) => isUnread(d.id)).length : 0;
       renderBadge();
       document.dispatchEvent(new CustomEvent("notifications:live", { detail: { notifications: latestNotifications } }));
     },

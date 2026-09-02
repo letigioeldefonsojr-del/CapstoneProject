@@ -18,6 +18,7 @@ import { getLatestProducts, getLatestNotifications } from "./Sidebar.js";
 const PRODUCT_NAME_FIELD = "name";
 
 let currentUid = null;
+let currentPreferences = { stockAlerts: true, orderNotifications: true };
 let orderItems = [];  // [{ id, type:"order", message, timeLabel }]
 let stockItems = [];  // [{ id, type:"stock", message, filterValue }]
 let activeTab = "all";
@@ -27,6 +28,7 @@ let activeTab = "all";
 // ====================================================================
 document.addEventListener("sidebar:ready", async (event) => {
   currentUid = event.detail.user.uid;
+  currentPreferences = event.detail.preferences || currentPreferences;
   await loadReadStatus(currentUid);
   wireTabs();
   wireMarkAllRead();
@@ -48,6 +50,12 @@ document.addEventListener("sidebar:ready", async (event) => {
 // ====================================================================
 function loadEverything() {
   function renderStockItems(products) {
+    if (!currentPreferences.stockAlerts) {
+      stockItems = [];
+      render();
+      return;
+    }
+
     const clearedSet = getClearedSet(currentUid);
 
     stockItems = products
@@ -69,6 +77,12 @@ function loadEverything() {
   }
 
   function renderOrderItems(notifications) {
+    if (!currentPreferences.orderNotifications) {
+      orderItems = [];
+      render();
+      return;
+    }
+
     const clearedSet = getClearedSet(currentUid);
 
     orderItems = notifications

@@ -4,6 +4,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { isProductInAlertState, getWorstAlertDetail } from "./StockAlerts.js";
 import { getClearedSet, loadReadStatus } from "./ReadStatus.js";
+import { setPreferences } from "./NotificationPreferences.js";
 import { getLatestProducts, getLatestNotifications } from "./Sidebar.js";
 
 // ====================================================================
@@ -22,12 +23,13 @@ const ORDER_DATE_FIELD = "createdAt";
 // page's own content only starts loading after that.
 // ====================================================================
 document.addEventListener("sidebar:ready", (event) => {
-  const { role, user } = event.detail;
+  const { role, user, preferences } = event.detail;
   applyRoleVisibility(role);
   loadStats();
   loadRecentNotifications(user.uid);
   loadBannerPanel();
   wireBannerForm();
+  wireNotificationSettings(user.uid, role, preferences);
 });
 
 // ====================================================================
@@ -103,6 +105,33 @@ function loadProductStats() {
   if (alreadyLoaded) renderFromProducts(alreadyLoaded);
 
   document.addEventListener("products:live", (event) => renderFromProducts(event.detail.products));
+}
+}
+
+// Reflects the preferences Sidebar.js already loaded (no extra fetch
+// needed) and saves any change back — only affects this signed-in
+// person's own account, nothing else.
+function wireNotificationSettings(uid, role, preferences) {
+  const stockToggle = document.getElementById("pref-stock-alerts");
+  const orderToggle = document.getElementById("pref-order-notifications");
+  if (!stockToggle || !orderToggle) return;
+
+  stockToggle.checked = preferences.stockAlerts;
+  orderToggle.checked = preferences.orderNotifications;
+
+  async function saveChange() {
+    try {
+      await setPreferences(uid, role, {
+        stockAlerts: stockToggle.checked,
+        orderNotifications: orderToggle.checked
+      });
+    } catch (error) {
+      console.error("Couldn't save notification settings:", error);
+    }
+  }
+
+  stockToggle.addEventListener("change", saveChange);
+  orderToggle.addEventListener("change", saveChange);
 }
 
 function updateLowStockBanner(count) {

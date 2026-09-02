@@ -1,8 +1,9 @@
 import { db, auth } from "./firebase-config.js";
 import {
-  collection, onSnapshot, doc, updateDoc, deleteDoc, deleteField, Timestamp
+  collection, onSnapshot, doc, getDoc, updateDoc, deleteDoc, deleteField, Timestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { confirmDialog } from "./ConfirmDialog.js";
+import { resetAttempts } from "./LoginAttempts.js";
 
 // ====================================================================
 // ACCOUNT CONTROL (admin-only)
@@ -255,9 +256,64 @@ function buildAccountRow(account) {
       actionsCell.appendChild(buildActionButton("Suspend", "btn-outline", () => handleSuspend(account)));
     }
     actionsCell.appendChild(buildActionButton("Terminate", "btn-danger-outline", () => handleTerminate(account)));
+
+    // Checked separately from the main render (progressive
+    // enhancement) — doesn't block the whole table on N sequential
+    // lockout lookups just to show a button most accounts won't need.
+    checkAndApplyLockStatus(account, statusCell, actionsCell);
   }
 
   return row;
+}
+
+// Login lockouts are tracked by whatever the person actually TYPED to
+// log in (email or username — see LoginAttempts.js), not by account
+// ID, so this checks both possible identifiers for this account.
+async function checkAndApplyLockStatus(account, statusCell, actionsCell) {
+  const identifiers = [account.email, account.username].filter(Boolean);
+  if (identifiers.length === 0) return;
+
+  try {
+    const snaps = await Promise.all(
+      identifiers.map((id) => getDoc(doc(db, "loginAttempts", id.trim().toLowerCase())))
+    );
+
+    const lockedSnap = snaps.find((snap) => {
+      if (!snap.exists()) return false;
+      const data = snap.data();
+      if (data.permanentlyLocked) return true;
+      const lockedUntilMillis = data.lockedUntil?.toMillis?.();
+      return lockedUntilMillis && lockedUntilMillis > Date.now();
+    });
+
+    if (!lockedSnap) return; // not locked — nothing to add
+
+    const data = lockedSnap.data();
+    const badge = document.createElement("span");
+    badge.className = "stock-badge stock-badge--critical";
+    badge.textContent = data.permanentlyLocked
+      ? "Locked out"
+      : `Locked until ${new Date(data.lockedUntil.toMillis()).toLocaleTimeString()}`;
+    statusCell.appendChild(badge);
+
+    const unlockBtn = buildActionButton("Unlock", "btn-outline", async (event) => {
+      const btn = event.currentTarget;
+      btn.disabled = true;
+      btn.textContent = "Unlocking...";
+      try {
+        await resetAttempts(lockedSnap.ref.id);
+        badge.remove();
+        unlockBtn.remove();
+      } catch (error) {
+        console.error("Couldn't unlock account:", error);
+        btn.disabled = false;
+        btn.textContent = "Unlock";
+      }
+    });
+    actionsCell.insertBefore(unlockBtn, actionsCell.firstChild);
+  } catch (error) {
+    console.error("Couldn't check lockout status:", error);
+  }
 }
 
 function buildActionButton(label, className, onClick) {

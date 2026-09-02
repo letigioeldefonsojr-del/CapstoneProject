@@ -2412,3 +2412,24 @@ button {
     font-size: 12.5px;
     padding: 8px 14px;
 }
+
+.settings-toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13.5px;
+    cursor: pointer;
+}
+
+.settings-toggle-row:last-child {
+    border-bottom: none;
+}
+
+.settings-toggle-row input[type="checkbox"] {
+    width: 36px;
+    height: 20px;
+    accent-color: var(--brand-green);
+    cursor: pointer;
+}

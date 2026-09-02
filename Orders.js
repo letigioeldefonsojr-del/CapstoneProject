@@ -386,6 +386,108 @@ function shortOrderId(id) {
 }
 
 // ====================================================================
+// RECEIPT / INVOICE PDF
+// ----------------------------------------------------------------
+// Generated fresh, in the browser, the moment someone clicks the
+// button — nothing pre-generated or stored ahead of time.
+//
+// Builds the receipt as real, styled HTML first (a hidden div,
+// removed right after) — the ₱ symbol renders correctly there, same
+// as it already does everywhere else in this app, since that's just
+// normal browser text rendering. html2canvas then captures that HTML
+// as an image, which jsPDF embeds into the actual PDF page. This
+// sidesteps jsPDF's own built-in fonts entirely, which is what
+// couldn't render ₱ reliably in the first place (a real, known
+// limitation without embedding a whole custom Unicode font).
+//
+// HONEST TRADEOFF: since the receipt content is captured as an image
+// rather than real PDF text, the text in the resulting PDF isn't
+// selectable/searchable/copyable — a fair trade for a simple one-page
+// receipt where correct currency rendering matters more than that.
+// ====================================================================
+async function downloadReceipt(order) {
+  const html = buildReceiptHtml(order);
+
+  const container = document.createElement("div");
+  container.style.position = "fixed";
+  container.style.left = "-9999px";
+  container.style.top = "0";
+  container.style.width = "600px";
+  container.innerHTML = html;
+  document.body.appendChild(container);
+
+  try {
+    const canvas = await html2canvas(container, { scale: 2, backgroundColor: "#ffffff" });
+    const imgData = canvas.toDataURL("image/png");
+
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: "px", format: [canvas.width / 2, canvas.height / 2] });
+    pdf.addImage(imgData, "PNG", 0, 0, canvas.width / 2, canvas.height / 2);
+    pdf.save(`Receipt-${shortOrderId(order.id)}.pdf`);
+  } catch (error) {
+    console.error("Couldn't generate receipt:", error);
+  } finally {
+    container.remove();
+  }
+}
+
+function buildReceiptHtml(order) {
+  const orderDate = order.createdAt?.toDate?.() ? order.createdAt.toDate().toLocaleString() : "—";
+  const items = Array.isArray(order.items) ? order.items : [];
+
+  const itemRows = items.map((item) => {
+    const name = item.flavor ? `${item.productName} — ${item.flavor}` : (item.productName || "Item");
+    const unitPrice = typeof item.unitPrice === "number" ? `₱${item.unitPrice.toFixed(2)}` : "—";
+    const subtotal = typeof item.subtotal === "number" ? `₱${item.subtotal.toFixed(2)}` : "—";
+    return `
+      <tr>
+        <td style="padding:6px 0;">${escapeHtmlReceipt(name)}</td>
+        <td style="padding:6px 0; text-align:right;">× ${item.amount ?? 1}</td>
+        <td style="padding:6px 0; text-align:right;">${unitPrice}</td>
+        <td style="padding:6px 0; text-align:right;">${subtotal}</td>
+      </tr>
+    `;
+  }).join("");
+
+  const total = typeof order.total === "number" ? `₱${order.total.toFixed(2)}` : "—";
+
+  return `
+    <div style="font-family: Arial, sans-serif; color: #222; padding: 32px;">
+      <h2 style="text-align:center; margin:0 0 4px;">Almares 328 Wholesale Grocery Store</h2>
+      <p style="text-align:center; margin:0 0 20px; color:#666;">Official Receipt</p>
+      <hr style="border:none; border-top:1px solid #ccc; margin-bottom:16px;">
+      <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px;">
+        <span>Order ID: ${escapeHtmlReceipt(shortOrderId(order.id))}</span>
+        <span>Date: ${escapeHtmlReceipt(orderDate)}</span>
+      </div>
+      <p style="font-size:13px; margin:0 0 4px;">Customer: ${escapeHtmlReceipt(order.customerName || "—")}</p>
+      ${order.customerAddress ? `<p style="font-size:13px; margin:0 0 16px;">Delivery Address: ${escapeHtmlReceipt(order.customerAddress)}</p>` : "<div style='margin-bottom:16px;'></div>"}
+      <hr style="border:none; border-top:1px solid #ccc; margin-bottom:12px;">
+      <table style="width:100%; border-collapse:collapse; font-size:13px;">
+        <thead>
+          <tr style="font-weight:bold; border-bottom:1px solid #ccc;">
+            <td style="padding-bottom:6px;">Item</td>
+            <td style="padding-bottom:6px; text-align:right;">Qty</td>
+            <td style="padding-bottom:6px; text-align:right;">Unit Price</td>
+            <td style="padding-bottom:6px; text-align:right;">Subtotal</td>
+          </tr>
+        </thead>
+        <tbody>${itemRows}</tbody>
+      </table>
+      <hr style="border:none; border-top:1px solid #ccc; margin:12px 0;">
+      <p style="text-align:right; font-size:16px; font-weight:bold; margin:0 0 20px;">Total: ${total}</p>
+      <p style="text-align:center; font-size:11px; color:#999;">Thank you for your business.</p>
+    </div>
+  `;
+}
+
+function escapeHtmlReceipt(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// ====================================================================
 // DELIVERY ADDRESS MAP
 // ----------------------------------------------------------------
 // Orders only store a plain text address (whatever the customer
@@ -599,7 +701,11 @@ function buildActionsForOrder(order) {
     reasonNote.textContent = order.cancelReason;
     wrap.appendChild(reasonNote);
   }
-  // delivered / rejected / undelivered / awaiting-confirmation: no actions, view-only.
+
+  if (order.status === "delivered") {
+    wrap.appendChild(buildActionButton("Download Receipt", "btn-outline", () => downloadReceipt(order)));
+  }
+  // rejected / undelivered / awaiting-confirmation: no actions, view-only.
 
   return wrap;
 }
