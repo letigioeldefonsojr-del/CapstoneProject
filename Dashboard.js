@@ -107,7 +107,6 @@ function loadProductStats() {
   document.addEventListener("products:live", (event) => renderFromProducts(event.detail.products));
 }
 
-
 // Reflects the preferences Sidebar.js already loaded (no extra fetch
 // needed) and saves any change back — only affects this signed-in
 // person's own account, nothing else.
