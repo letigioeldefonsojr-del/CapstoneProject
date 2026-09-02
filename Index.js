@@ -90,6 +90,25 @@ const stopWatchingInitialAuthState = onAuthStateChanged(auth, (user) => {
 // ====================================================================
 document.addEventListener("DOMContentLoaded", () => {
 
+  // Chrome's "Suggest a strong password" feature can keep re-filling
+  // a signup password field on page reload, even when the form was
+  // never actually submitted — it's the browser restoring its own
+  // suggestion, not anything this app stored. Explicitly blanking
+  // every password field on load overrides that, so a reload always
+  // starts from a genuinely clean form.
+  document.querySelectorAll('input[type="password"]').forEach((input) => {
+    input.value = "";
+  });
+  // Some browsers apply autofill slightly AFTER the page's own JS
+  // finishes running — this catches that case too, since the first
+  // clear above might otherwise run before the browser's autofill
+  // has actually happened.
+  setTimeout(() => {
+    document.querySelectorAll('input[type="password"]').forEach((input) => {
+      input.value = "";
+    });
+  }, 150);
+
   // ------------------------------------------------------------------
   // CHUNK 2 — ELEMENT REFERENCES
   // ------------------------------------------------------------------
