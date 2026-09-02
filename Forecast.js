@@ -314,7 +314,7 @@ function renderResults(clustered, productsWithoutData) {
   if (clustered.fast.length > 0) {
     container.appendChild(buildSection(
       "Fast-Moving Products",
-      "Grouped automatically by K-Means clustering based on real sales velocity — not a fixed threshold.",
+      "Products that sell quickly and are frequently purchased or replaced by consumers.",
       clustered.fast,
       "trend",
       "trend"
