@@ -72,7 +72,7 @@ const EMPLOYEE_REDIRECT_URL   = "Dashboard.html";
 // stopWatchingInitialAuthState() is for. createUserWithEmailAndPassword
 // and signInWithEmailAndPassword both trigger their own auth-state
 // change internally. Without unsubscribing, this listener would fire
-// again right in the middle of handleAdminSignup / handleAdminLogin
+// again right in the middle of handleEmployeeSignup / handleAdminLogin
 // and redirect immediately — racing against (and usually beating) that
 // function's own code, which is exactly what was causing new admin
 // signups to get bounced to the Dashboard before the Firestore write
@@ -109,7 +109,6 @@ document.addEventListener("DOMContentLoaded", () => {
   // not something to clear. This is specifically about Chrome's
   // "suggest a strong password" persisting unwantedly on signup.
   const SIGNUP_PASSWORD_FIELD_IDS = [
-    "admin-signup-password", "admin-signup-confirm-password",
     "signup-password", "signup-confirm-password"
   ];
 
@@ -133,7 +132,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const roleThumb   = document.getElementById("role-thumb");
 
   const formAdmin    = document.getElementById("form-admin");
-  const formAdminSignup = document.getElementById("form-admin-signup");
   const formEmployee = document.getElementById("form-employee");
   const formSignup   = document.getElementById("form-employee-signup");
   const formOtpVerify = document.getElementById("form-otp-verify");
@@ -147,8 +145,6 @@ document.addEventListener("DOMContentLoaded", () => {
   let pendingOAuthSignup = null;
   const googleProvider = new GoogleAuthProvider();
 
-  const toAdminSignupLink = document.getElementById("to-admin-signup");
-  const toAdminLoginLink  = document.getElementById("to-admin-login");
   const toSignupLink = document.getElementById("to-signup");
   const toLoginLink  = document.getElementById("to-login");
 
@@ -174,12 +170,11 @@ document.addEventListener("DOMContentLoaded", () => {
     pendingSignup = null;
 
     if (isAdmin) {
-      setAdminMode("login");
+      setAdminMode();
       formEmployee.hidden = true;
       formSignup.hidden = true;
     } else {
       formAdmin.hidden = true;
-      formAdminSignup.hidden = true;
       setEmployeeMode("login");
     }
 
@@ -192,21 +187,16 @@ document.addEventListener("DOMContentLoaded", () => {
   // ------------------------------------------------------------------
   // CHUNK 3A — ADMINISTRATOR LOGIN <-> CREATE ACCOUNT
   // ------------------------------------------------------------------
-  function setAdminMode(mode) {
-    const isLogin = mode === "login";
+  function setAdminMode() {
     hideOtpStep();
     hideGoogleCompleteProfileStep();
     pendingOAuthSignup = null;
     pendingSignup = null;
-    formAdmin.hidden = !isLogin;
-    formAdminSignup.hidden = isLogin;
-    roleToggle.hidden = !isLogin;
-    cardTitle.textContent = isLogin ? "Login" : "Create Account";
+    formAdmin.hidden = false;
+    roleToggle.hidden = false;
+    cardTitle.textContent = "Login";
     hideStatus();
   }
-
-  toAdminSignupLink.addEventListener("click", () => setAdminMode("signup"));
-  toAdminLoginLink.addEventListener("click", () => setAdminMode("login"));
 
   // ------------------------------------------------------------------
   // CHUNK 3B — EMPLOYEE LOGIN <-> CREATE ACCOUNT ("Register here" / "Login here")
@@ -232,7 +222,6 @@ document.addEventListener("DOMContentLoaded", () => {
   // ------------------------------------------------------------------
   function showOtpStep(email) {
     formAdmin.hidden = true;
-    formAdminSignup.hidden = true;
     formEmployee.hidden = true;
     formSignup.hidden = true;
     roleToggle.hidden = true;
@@ -253,7 +242,6 @@ document.addEventListener("DOMContentLoaded", () => {
   // ------------------------------------------------------------------
   function showGoogleCompleteProfileStep() {
     formAdmin.hidden = true;
-    formAdminSignup.hidden = true;
     formEmployee.hidden = true;
     formSignup.hidden = true;
     roleToggle.hidden = true;
@@ -449,7 +437,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  wireUsernameAutoGen("admin-signup-name", "admin-signup-username", "admin-username-regenerate");
   wireUsernameAutoGen("signup-name", "signup-username", "employee-username-regenerate");
 
   // ------------------------------------------------------------------
@@ -553,59 +540,6 @@ document.addEventListener("DOMContentLoaded", () => {
   // CHUNK 7B — ADMINISTRATOR CREATE ACCOUNT (Firebase Authentication)
   // See the SECURITY NOTE at the top of this file (CHUNK 0).
   // ------------------------------------------------------------------
-  async function handleAdminSignup(event) {
-    event.preventDefault();
-    hideStatus();
-
-    const name = document.getElementById("admin-signup-name").value.trim();
-    const username = document.getElementById("admin-signup-username").value.trim();
-    const email = document.getElementById("admin-signup-email").value.trim();
-    const phoneDigits = document.getElementById("admin-signup-phone").value.trim();
-    const phone = phoneDigits ? `+63${phoneDigits}` : "";
-    const staffCode = document.getElementById("admin-signup-staffcode").value.trim();
-    const password = document.getElementById("admin-signup-password").value;
-    const confirmPassword = document.getElementById("admin-signup-confirm-password").value;
-    const submitBtn = document.getElementById("admin-signup-submit");
-
-    if (!name || !username || !email || !phone || !staffCode || !password || !confirmPassword) {
-      showStatus("Fill in every field to create an account.", "error");
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      showStatus("Passwords don't match.", "error");
-      return;
-    }
-
-    const strength = validatePasswordStrength(password, name);
-    if (!strength.valid) {
-      showStatus(strength.message, "error");
-      return;
-    }
-
-    setButtonLoading(submitBtn, true, "Create Account", "Verifying...");
-
-    try {
-      const staffCodeResult = await verifyStaffCode(staffCode);
-      if (!staffCodeResult.valid) {
-        showStatus(staffCodeResult.message, "error");
-        return;
-      }
-
-      if (await isUsernameTaken(username)) {
-        showStatus("That username is already taken. Try regenerating or pick another.", "error");
-        return;
-      }
-
-      await sendOtpCode(email, name);
-      pendingSignup = { role: "admin", name, username, email, phone, password };
-      showOtpStep(email);
-    } catch (error) {
-      console.error("Couldn't start admin signup:", error);
-      showStatus("Couldn't send a verification code right now. Please try again.", "error");
-    } finally {
-      setButtonLoading(submitBtn, false, "Create Account", "Verifying...");
-    }
   }
 
   // ------------------------------------------------------------------
@@ -884,18 +818,12 @@ document.addEventListener("DOMContentLoaded", () => {
     await signOut(auth);
     sessionStorage.removeItem("almares_role");
 
-    const wasAdmin = role === "admin";
     pendingSignup = null;
     hideOtpStep();
 
     showStatus(`Account created! Your username is "${username}" — please log in.`, "success");
-    if (wasAdmin) {
-      formAdminSignup.reset();
-      setAdminMode("login");
-    } else {
-      formSignup.reset();
-      setEmployeeMode("login");
-    }
+    formSignup.reset();
+    setEmployeeMode("login");
   }
 
   async function handleOtpResend() {
@@ -921,15 +849,9 @@ document.addEventListener("DOMContentLoaded", () => {
   // so there's nothing to undo, just clear the pending state and
   // return to that role's login screen.
   function handleOtpCancel() {
-    const wasAdmin = pendingSignup?.role === "admin";
     pendingSignup = null;
     clearOtpDigitInputs();
-
-    if (wasAdmin) {
-      setAdminMode("login");
-    } else {
-      setEmployeeMode("login");
-    }
+    setEmployeeMode("login");
   }
 
   // ------------------------------------------------------------------
@@ -972,9 +894,23 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       // First time signing in with this account for this role — no
-      // Firestore profile yet. They stay authenticated (the popup
-      // already did that part) but get no app access until they
-      // finish this step and a real profile doc gets created.
+      // Firestore profile yet.
+      if (role === "admin") {
+        // No more self-service admin creation, via any path — matches
+        // removing the manual admin signup form. New admins can now
+        // only be created by an existing admin, from the Accounts
+        // page. Sign them back out rather than continuing to
+        // "Complete Your Profile", which would otherwise still let
+        // anyone with the Staff Code create a brand new admin account
+        // through Google specifically, defeating the whole point.
+        await signOut(auth);
+        showStatus("Admin accounts can't be created this way. Ask an existing admin to add you from the Accounts page.", "error");
+        return;
+      }
+
+      // They stay authenticated (the popup already did that part) but
+      // get no app access until they finish this step and a real
+      // profile doc gets created.
       pendingOAuthSignup = {
         role,
         uid: user.uid,
@@ -1075,7 +1011,6 @@ document.addEventListener("DOMContentLoaded", () => {
   // Firestore profile — sign them back out so they're not left in that
   // half-finished state.
   async function handleGoogleCompleteCancel() {
-    const wasAdmin = pendingOAuthSignup?.role === "admin";
     pendingOAuthSignup = null;
 
     try {
@@ -1084,11 +1019,7 @@ document.addEventListener("DOMContentLoaded", () => {
       console.error("Couldn't sign out:", error);
     }
 
-    if (wasAdmin) {
-      setAdminMode("login");
-    } else {
-      setEmployeeMode("login");
-    }
+    setEmployeeMode("login");
   }
 
   let googleCompleteUsernameSuffix = 0;
@@ -1124,7 +1055,6 @@ document.addEventListener("DOMContentLoaded", () => {
   // CHUNK 11 — WIRE UP FORM SUBMISSIONS
   // ------------------------------------------------------------------
   formAdmin.addEventListener("submit", handleAdminLogin);
-  formAdminSignup.addEventListener("submit", handleAdminSignup);
   formEmployee.addEventListener("submit", handleEmployeeLogin);
   formSignup.addEventListener("submit", handleEmployeeSignup);
   formOtpVerify.addEventListener("submit", handleOtpVerifySubmit);

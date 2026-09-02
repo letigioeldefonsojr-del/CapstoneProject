@@ -1,9 +1,14 @@
-import { db, auth } from "./firebase-config.js";
+import { db, auth, app } from "./firebase-config.js";
+import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
 import {
-  collection, onSnapshot, doc, getDoc, updateDoc, deleteDoc, deleteField, Timestamp
+  getAuth, createUserWithEmailAndPassword, signOut
+} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
+import {
+  collection, onSnapshot, doc, setDoc, getDoc, updateDoc, deleteDoc, deleteField, Timestamp, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { confirmDialog } from "./ConfirmDialog.js";
 import { resetAttempts } from "./LoginAttempts.js";
+import { generateUniqueUsername, isUsernameTaken } from "./UsernameGenerator.js";
 
 // ====================================================================
 // ACCOUNT CONTROL (admin-only)
@@ -159,6 +164,7 @@ function applyFilterAndRender() {
   panel.innerHTML = `
     <div class="feedback-list__header">
       <h3 class="panel__title" style="margin:0;">All Registered Accounts</h3>
+      <button type="button" class="btn-primary" id="add-admin-btn">+ Add New Admin</button>
       <select id="accounts-role-filter" class="feedback-sort-select">
         <option value="all">All roles</option>
         <option value="admin">Admin</option>
@@ -190,6 +196,8 @@ function applyFilterAndRender() {
     roleFilter = event.target.value;
     applyFilterAndRender();
   });
+
+  panel.querySelector("#add-admin-btn").addEventListener("click", handleAddNewAdmin);
 
   const tbody = panel.querySelector("#accounts-tbody");
   const visibleAccounts = roleFilter === "all"
@@ -364,6 +372,159 @@ function getSelectedReason(overlay, idPrefix) {
     return overlay.querySelector(`#${idPrefix}-reason-custom`).value.trim();
   }
   return select.value;
+}
+
+// ====================================================================
+// ADD NEW ADMIN
+// ----------------------------------------------------------------
+// Admin accounts can no longer be self-registered (the public signup
+// form was removed) — this is now the only way a new admin account
+// gets created, and only an already-logged-in admin can do it.
+//
+// TECHNICAL NOTE: creating a Firebase Auth user via the normal client
+// SDK automatically signs in AS that new user on whatever auth
+// instance you call it on — which would immediately log the CURRENT
+// admin out and replace their session with the brand new account.
+// This uses a SEPARATE, temporary secondary Firebase App instance
+// specifically for the creation step, so the primary app (and the
+// current admin's actual session) is never touched. The temporary
+// instance is torn down immediately after, win or lose.
+// ====================================================================
+function generateTempPassword() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+  let result = "";
+  for (let i = 0; i < 12; i++) {
+    result += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return result;
+}
+
+function handleAddNewAdmin() {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  const tempPassword = generateTempPassword();
+
+  overlay.innerHTML = `
+    <div class="modal">
+      <div class="modal__header">
+        <h3>Add New Admin</h3>
+        <button type="button" class="modal__close" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M6 6L18 18M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modal__body">
+        <div class="form-field">
+          <label for="new-admin-name">Full name</label>
+          <input type="text" id="new-admin-name" placeholder="Enter their full name">
+        </div>
+        <div class="form-field" style="margin-top: 12px;">
+          <label for="new-admin-email">Email</label>
+          <input type="email" id="new-admin-email" placeholder="Enter their email">
+        </div>
+        <div class="form-field" style="margin-top: 12px;">
+          <label for="new-admin-username">Username</label>
+          <input type="text" id="new-admin-username" placeholder="Auto-filled from their name — edit if you like">
+        </div>
+        <div class="form-field" style="margin-top: 12px;">
+          <label for="new-admin-temp-password">Temporary password</label>
+          <input type="text" id="new-admin-temp-password" value="${tempPassword}">
+          <p style="font-size:11.5px; color:var(--muted); margin:4px 0 0;">Auto-generated — share this with them so they can log in, and ask them to change it right away. Editable if you'd rather set your own.</p>
+        </div>
+        <p class="form-status" id="new-admin-status" hidden></p>
+      </div>
+      <div class="modal__footer">
+        <button type="button" class="btn-outline" data-action="cancel">Cancel</button>
+        <button type="button" class="btn-primary" data-action="confirm">Create Admin Account</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+  const nameInput = overlay.querySelector("#new-admin-name");
+  const usernameInput = overlay.querySelector("#new-admin-username");
+  const statusEl = overlay.querySelector("#new-admin-status");
+  nameInput.focus();
+
+  let usernameManuallyEdited = false;
+  usernameInput.addEventListener("input", () => { usernameManuallyEdited = true; });
+  nameInput.addEventListener("blur", async () => {
+    if (usernameManuallyEdited || !nameInput.value.trim()) return;
+    usernameInput.value = await generateUniqueUsername(nameInput.value.trim(), 0);
+  });
+
+  function close() { overlay.remove(); }
+  overlay.querySelector(".modal__close").addEventListener("click", close);
+  overlay.querySelector('[data-action="cancel"]').addEventListener("click", close);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+  overlay.querySelector('[data-action="confirm"]').addEventListener("click", async (event) => {
+    const name = nameInput.value.trim();
+    const email = overlay.querySelector("#new-admin-email").value.trim();
+    const username = usernameInput.value.trim();
+    const password = overlay.querySelector("#new-admin-temp-password").value;
+
+    if (!name || !email || !username || !password) {
+      statusEl.textContent = "Fill in every field.";
+      statusEl.dataset.kind = "error";
+      statusEl.hidden = false;
+      return;
+    }
+    if (password.length < 8) {
+      statusEl.textContent = "Password must be at least 8 characters.";
+      statusEl.dataset.kind = "error";
+      statusEl.hidden = false;
+      return;
+    }
+
+    const btn = event.currentTarget;
+    btn.disabled = true;
+    btn.textContent = "Creating...";
+
+    // A uniquely-named secondary app each time, so overlapping usage
+    // (unlikely, but possible) never collides with a leftover instance.
+    const secondaryApp = initializeApp(app.options, `AddAdmin-${Date.now()}`);
+    const secondaryAuth = getAuth(secondaryApp);
+
+    try {
+      if (await isUsernameTaken(username)) {
+        statusEl.textContent = "That username is already taken. Try a different one.";
+        statusEl.dataset.kind = "error";
+        statusEl.hidden = false;
+        return;
+      }
+
+      const result = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+      const newUid = result.user.uid;
+
+      await setDoc(doc(db, "admins", newUid), {
+        name,
+        email,
+        username,
+        role: "admin",
+        createdAt: serverTimestamp()
+      });
+
+      // The temporary instance signed itself in as the new admin the
+      // moment it was created — sign that out before tearing the
+      // instance down, so there's no lingering active session for it.
+      await signOut(secondaryAuth);
+
+      close();
+    } catch (error) {
+      console.error("Couldn't create admin account:", error);
+      statusEl.textContent = error.code === "auth/email-already-in-use"
+        ? "That email is already registered."
+        : "Something went wrong. Please try again.";
+      statusEl.dataset.kind = "error";
+      statusEl.hidden = false;
+      btn.disabled = false;
+      btn.textContent = "Create Admin Account";
+    } finally {
+      // Always torn down, whether creation succeeded or failed —
+      // never leaves an orphaned secondary app instance behind.
+      await deleteApp(secondaryApp);
+    }
+  });
 }
 
 function handleSuspend(account) {
