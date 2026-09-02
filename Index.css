@@ -953,3 +953,25 @@ input:focus-visible {
 .suspension-card .btn-primary {
     width: 100%;
 }
+
+/* ===========================
+   AUTOFILL DETECTION (signup password fields)
+   ----------------------------------------------------------------
+   No native JS event fires when a browser autofills a field — this
+   is the standard workaround: define an animation that does nothing
+   visually, but attach it specifically to the browser's internal
+   :-webkit-autofill state. The 'animationstart' event firing in JS
+   is what actually reveals the real moment autofill happened.
+   =========================== */
+@keyframes onAutofillDetected {
+  from { opacity: 1; }
+  to { opacity: 1; }
+}
+
+#admin-signup-password:-webkit-autofill,
+#admin-signup-confirm-password:-webkit-autofill,
+#signup-password:-webkit-autofill,
+#signup-confirm-password:-webkit-autofill {
+    animation-name: onAutofillDetected;
+    animation-duration: 0.01s;
+}

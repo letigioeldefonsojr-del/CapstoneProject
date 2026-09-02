@@ -96,18 +96,33 @@ document.addEventListener("DOMContentLoaded", () => {
   // suggestion, not anything this app stored. Explicitly blanking
   // every password field on load overrides that, so a reload always
   // starts from a genuinely clean form.
-  document.querySelectorAll('input[type="password"]').forEach((input) => {
+  // A fixed timeout can't reliably catch browser autofill, since the
+  // exact timing varies and can happen later than any reasonable
+  // delay. This uses a well-established technique instead: browsers
+  // apply a distinct internal state when autofilling a field, which
+  // this hooks a CSS animation onto (see Index.css) specifically to
+  // detect the REAL moment autofill happens, however late it occurs
+  // — not a guess based on a fixed delay.
+  //
+  // Scoped to SIGNUP password fields only — a returning user's saved
+  // password autofilling the LOGIN field is actually wanted behavior,
+  // not something to clear. This is specifically about Chrome's
+  // "suggest a strong password" persisting unwantedly on signup.
+  const SIGNUP_PASSWORD_FIELD_IDS = [
+    "admin-signup-password", "admin-signup-confirm-password",
+    "signup-password", "signup-confirm-password"
+  ];
+
+  SIGNUP_PASSWORD_FIELD_IDS.forEach((id) => {
+    const input = document.getElementById(id);
+    if (!input) return;
     input.value = "";
-  });
-  // Some browsers apply autofill slightly AFTER the page's own JS
-  // finishes running — this catches that case too, since the first
-  // clear above might otherwise run before the browser's autofill
-  // has actually happened.
-  setTimeout(() => {
-    document.querySelectorAll('input[type="password"]').forEach((input) => {
-      input.value = "";
+    input.addEventListener("animationstart", (event) => {
+      if (event.animationName === "onAutofillDetected") {
+        input.value = "";
+      }
     });
-  }, 150);
+  });
 
   // ------------------------------------------------------------------
   // CHUNK 2 — ELEMENT REFERENCES
