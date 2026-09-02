@@ -2405,3 +2405,10 @@ button {
     0%, 100% { background: transparent; }
     20%, 60% { background: var(--brand-green-soft, #e8f3ec); }
 }
+
+.orders-show-older-btn {
+    display: block;
+    margin: 0 0 14px;
+    font-size: 12.5px;
+    padding: 8px 14px;
+}

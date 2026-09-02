@@ -1,6 +1,6 @@
 import { db } from "./firebase-config.js";
 import {
-  collection, doc, updateDoc, onSnapshot
+  collection, doc, updateDoc, onSnapshot, query, where, Timestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { confirmDialog } from "./ConfirmDialog.js";
 
@@ -78,21 +78,41 @@ document.addEventListener("sidebar:ready", (event) => {
   wireSearch();
   wireSort();
   wireUndeliverableModal();
+  document.getElementById("orders-show-older-btn").addEventListener("click", toggleFullHistory);
+  updateShowOlderButton();
   loadOrders();
 });
 
 // ====================================================================
 // CHUNK 2 — LOAD ORDERS
 // ====================================================================
+// Recent-only by default — an order history that grows forever would
+// otherwise mean this page gets slower every month, with no ceiling.
+// "Show older orders" switches to the full, unfiltered query on
+// demand, so anyone tracking down an old order can still find it —
+// it's just not downloaded automatically on every single page visit.
+const RECENT_WINDOW_DAYS = 60;
+let showingFullHistory = false;
+let unsubscribeOrders = null;
+
 function loadOrders() {
-  // Real-time: set up ONCE. Fires immediately with current data, then
-  // again automatically whenever anything in this collection changes
-  // — a staff action here (Approve, Mark Delivered, etc.) OR a
+  if (unsubscribeOrders) unsubscribeOrders();
+
+  const ordersQuery = showingFullHistory
+    ? collection(db, ORDERS_COLLECTION)
+    : query(
+        collection(db, ORDERS_COLLECTION),
+        where("createdAt", ">=", Timestamp.fromDate(new Date(Date.now() - RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000)))
+      );
+
+  // Real-time: fires immediately with current data, then again
+  // automatically whenever anything in this collection changes — a
+  // staff action here (Approve, Mark Delivered, etc.) OR a
   // customer-side update from the mobile app (confirming they
   // received their order, submitting a rating, cancelling). No manual
   // reload needed on either side.
-  onSnapshot(
-    collection(db, ORDERS_COLLECTION),
+  unsubscribeOrders = onSnapshot(
+    ordersQuery,
     (snap) => {
       allOrders = snap.docs
         .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
@@ -107,6 +127,20 @@ function loadOrders() {
         `<tr><td colspan="7" class="inventory-empty">Couldn't load orders right now.</td></tr>`;
     }
   );
+}
+
+function toggleFullHistory() {
+  showingFullHistory = !showingFullHistory;
+  loadOrders();
+  updateShowOlderButton();
+}
+
+function updateShowOlderButton() {
+  const btn = document.getElementById("orders-show-older-btn");
+  if (!btn) return;
+  btn.textContent = showingFullHistory
+    ? "Showing all orders — click to show recent only"
+    : `Show older orders (beyond the last ${RECENT_WINDOW_DAYS} days)`;
 }
 
 // No longer needed for its own sake — the onSnapshot listener above
@@ -318,8 +352,17 @@ function handleTargetOrderJump() {
 
   const targetRow = document.querySelector(`tr[data-order-id="${targetOrderId}"]`);
   if (!targetRow) {
-    // Order genuinely isn't in this list (deleted, or ID was stale) —
-    // stop trying rather than silently retrying forever.
+    if (!showingFullHistory) {
+      // Not found yet, but might just be older than the recent
+      // window — expand to full history and let the next render
+      // retry, rather than assuming it's genuinely missing.
+      showingFullHistory = true;
+      updateShowOlderButton();
+      loadOrders();
+      return;
+    }
+    // Genuinely isn't in the list even with full history (deleted,
+    // or the ID was stale) — stop trying rather than retrying forever.
     hasHandledTargetOrder = true;
     targetOrderId = null;
     return;
