@@ -412,9 +412,21 @@ async function downloadReceipt(order) {
   container.style.position = "fixed";
   container.style.left = "-9999px";
   container.style.top = "0";
-  container.style.width = "600px";
+  container.style.width = "650px";
   container.innerHTML = html;
   document.body.appendChild(container);
+
+  // html2canvas captures whatever's actually rendered at the moment
+  // it runs — if the logo image hasn't finished loading yet, it
+  // captures a blank space instead of waiting for it. Explicitly
+  // waiting for the image's load event first avoids that.
+  const logoImg = container.querySelector("#receipt-logo");
+  if (logoImg && !logoImg.complete) {
+    await new Promise((resolve) => {
+      logoImg.onload = resolve;
+      logoImg.onerror = resolve; // don't hang forever if the logo genuinely fails to load
+    });
+  }
 
   try {
     const canvas = await html2canvas(container, { scale: 2, backgroundColor: "#ffffff" });
@@ -434,6 +446,7 @@ async function downloadReceipt(order) {
 function buildReceiptHtml(order) {
   const orderDate = order.createdAt?.toDate?.() ? order.createdAt.toDate().toLocaleString() : "—";
   const items = Array.isArray(order.items) ? order.items : [];
+  const BRAND_GREEN = "#14532d";
 
   const itemRows = items.map((item) => {
     const name = item.flavor ? `${item.productName} — ${item.flavor}` : (item.productName || "Item");
@@ -451,11 +464,18 @@ function buildReceiptHtml(order) {
 
   const total = typeof order.total === "number" ? `₱${order.total.toFixed(2)}` : "—";
 
+  // box-sizing:border-box + width:100% on the outer wrapper guarantees
+  // padding is INCLUDED in that fixed width, not added on top of it —
+  // and word-wrap/overflow-wrap forces long text to wrap onto a new
+  // line rather than visually overflow past the container's edge
+  // (which is what html2canvas would otherwise crop off entirely,
+  // since it only captures the container's own defined bounds).
   return `
-    <div style="font-family: Arial, sans-serif; color: #222; padding: 32px;">
-      <h2 style="text-align:center; margin:0 0 4px;">Almares 328 Wholesale Grocery Store</h2>
+    <div style="box-sizing:border-box; width:100%; font-family: Arial, sans-serif; color: #222; padding: 32px; word-wrap: break-word; overflow-wrap: break-word;">
+      <img id="receipt-logo" src="Logo.png" alt="Almares 328 Logo" style="display:block; margin:0 auto 12px; width:64px; height:64px; object-fit:contain;">
+      <h2 style="text-align:center; margin:0 0 4px; color:${BRAND_GREEN}; font-size:20px; line-height:1.3;">Almares 328 Wholesale Grocery Store</h2>
       <p style="text-align:center; margin:0 0 20px; color:#666;">Official Receipt</p>
-      <hr style="border:none; border-top:1px solid #ccc; margin-bottom:16px;">
+      <hr style="border:none; border-top:2px solid ${BRAND_GREEN}; margin-bottom:16px;">
       <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px;">
         <span>Order ID: ${escapeHtmlReceipt(shortOrderId(order.id))}</span>
         <span>Date: ${escapeHtmlReceipt(orderDate)}</span>
@@ -465,7 +485,7 @@ function buildReceiptHtml(order) {
       <hr style="border:none; border-top:1px solid #ccc; margin-bottom:12px;">
       <table style="width:100%; border-collapse:collapse; font-size:13px;">
         <thead>
-          <tr style="font-weight:bold; border-bottom:1px solid #ccc;">
+          <tr style="font-weight:bold; border-bottom:2px solid ${BRAND_GREEN}; color:${BRAND_GREEN};">
             <td style="padding-bottom:6px;">Item</td>
             <td style="padding-bottom:6px; text-align:right;">Qty</td>
             <td style="padding-bottom:6px; text-align:right;">Unit Price</td>
@@ -474,8 +494,8 @@ function buildReceiptHtml(order) {
         </thead>
         <tbody>${itemRows}</tbody>
       </table>
-      <hr style="border:none; border-top:1px solid #ccc; margin:12px 0;">
-      <p style="text-align:right; font-size:16px; font-weight:bold; margin:0 0 20px;">Total: ${total}</p>
+      <hr style="border:none; border-top:2px solid ${BRAND_GREEN}; margin:12px 0;">
+      <p style="text-align:right; font-size:16px; font-weight:bold; margin:0 0 20px; color:${BRAND_GREEN};">Total: ${total}</p>
       <p style="text-align:center; font-size:11px; color:#999;">Thank you for your business.</p>
     </div>
   `;
