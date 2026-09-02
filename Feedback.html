@@ -95,6 +95,26 @@
             </a>
         </nav>
 
+        <script>
+          // Reveals Feedback/Accounts INSTANTLY, before the rest of
+          // the page even finishes loading, for a returning admin
+          // whose role was already confirmed earlier in this same
+          // browser session — no reason to make them wait through
+          // another full role-check just to see something already
+          // known. A brand new sign-in (nothing cached yet) still
+          // waits for the real check in Sidebar.js, same as before —
+          // this only skips the wait when it genuinely already knows
+          // the answer.
+          (function () {
+            if (sessionStorage.getItem("almares_role") === "admin") {
+              var feedbackLink = document.getElementById("feedback-nav-link");
+              var accountsLink = document.getElementById("accounts-nav-link");
+              if (feedbackLink) feedbackLink.hidden = false;
+              if (accountsLink) accountsLink.hidden = false;
+            }
+          })();
+        </script>
+
         <div class="sidebar__foot">
             <button type="button" class="nav-item nav-item--logout" id="logout-btn">
                 <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
