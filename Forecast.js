@@ -1,6 +1,6 @@
 import { db } from "./firebase-config.js";
 import {
-  collection, getDocs, query, where
+  collection, getDocs, query, where, Timestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getProducts } from "./ProductCache.js";
 import { kMeansCluster, normalizeFeatures } from "./KMeans.js";
@@ -99,8 +99,23 @@ async function loadForecast() {
 }
 
 // ---- Data fetching ---------------------------------------------------
+// Rolling window instead of full history: a sale from 8 months ago
+// shouldn't weigh the same as one from last week when the whole point
+// is "how fast is this selling right now" — so this is both faster
+// (less data fetched) AND a more honest calculation, not just a
+// performance compromise.
+const VELOCITY_WINDOW_DAYS = 90;
+
+function windowCutoffTimestamp() {
+  return Timestamp.fromDate(new Date(Date.now() - VELOCITY_WINDOW_DAYS * 24 * 60 * 60 * 1000));
+}
+
 async function fetchSaleMovements() {
-  const q = query(collection(db, STOCK_MOVEMENTS_COLLECTION), where("type", "==", "sale"));
+  const q = query(
+    collection(db, STOCK_MOVEMENTS_COLLECTION),
+    where("type", "==", "sale"),
+    where("createdAt", ">=", windowCutoffTimestamp())
+  );
   const snap = await getDocs(q);
 
   return snap.docs
@@ -118,7 +133,11 @@ async function fetchSaleMovements() {
 // undelivered explicitly didn't. Flattens each order's items[] array
 // into individual depletion events, one per line item.
 async function fetchDeliveredOrderItems() {
-  const q = query(collection(db, ORDERS_COLLECTION), where("status", "==", "delivered"));
+  const q = query(
+    collection(db, ORDERS_COLLECTION),
+    where("status", "==", "delivered"),
+    where("createdAt", ">=", windowCutoffTimestamp())
+  );
   const snap = await getDocs(q);
 
   const events = [];
@@ -314,7 +333,7 @@ function renderResults(clustered, productsWithoutData) {
   if (clustered.fast.length > 0) {
     container.appendChild(buildSection(
       "Fast-Moving Products",
-      "Products that sell quickly and are frequently purchased or replaced by consumers.",
+      "Grouped automatically by K-Means clustering based on real sales velocity — not a fixed threshold.",
       clustered.fast,
       "trend",
       "trend"
@@ -516,7 +535,10 @@ async function loadAiInsight(clustered, restockRecommended, totalTracked, noData
       })
     });
 
-    if (!response.ok) throw new Error(`Worker returned ${response.status}`);
+    if (!response.ok) {
+      const detail = await response.json().catch(() => null);
+      throw new Error(`Worker returned ${response.status}: ${JSON.stringify(detail)}`);
+    }
 
     const result = await response.json();
     renderAiSections(textEl, result.sections);
