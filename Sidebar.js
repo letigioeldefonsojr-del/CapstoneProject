@@ -131,14 +131,17 @@ async function resolveRole(uid) {
   const cached = sessionStorage.getItem("almares_role");
 
   if (cached) {
-    // Role itself is safe to cache (it essentially never changes for
-    // an account) — but suspension/termination status can change at
-    // ANY moment during an active session, so that part has to be
-    // re-checked fresh on every page load, not just once at initial
-    // login. Without this, someone suspended mid-session would keep
-    // full access until they happened to log out and back in.
-    const stillValid = await checkAccountStillValid(uid, cached);
-    return stillValid ? cached : null;
+    // Don't make every page load wait on a network round-trip just to
+    // recheck something that's true the overwhelming majority of the
+    // time (not suspended). Return the cached role immediately so the
+    // UI (nav links, identity, etc.) appears instantly — and check
+    // suspension/termination in the BACKGROUND at the same time. If
+    // that background check finds a real problem, it signs out and
+    // redirects at that point, same as before — this only changes
+    // when the check happens relative to the UI, not whether it
+    // happens.
+    checkAccountStillValid(uid, cached);
+    return cached;
   }
 
   const [adminSnap, employeeSnap] = await Promise.allSettled([
