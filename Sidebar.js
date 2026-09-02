@@ -12,7 +12,7 @@ import { confirmDialog } from "./ConfirmDialog.js";
 // Shared across every page that includes this file. Adjust here once
 // instead of in five separate places.
 // ====================================================================
-const LOGIN_PAGE_URL = "index.html";
+const LOGIN_PAGE_URL = "/";
 
 // Latest live data from Sidebar.js's own listeners, shared with other
 // pages via getLatestProducts()/getLatestNotifications() below and the

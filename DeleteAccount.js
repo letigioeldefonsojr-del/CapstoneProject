@@ -29,7 +29,7 @@ import { doc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.13.0/fireb
 // they'd be left signed in with no profile doc — unlikely, but worth
 // knowing if you ever see someone stuck in that state.
 // ====================================================================
-const LOGIN_PAGE_URL = "index.html";
+const LOGIN_PAGE_URL = "/";
 
 export function promptDeleteAccount(user, role) {
   const isPasswordAccount = user.providerData.some((p) => p.providerId === "password");
