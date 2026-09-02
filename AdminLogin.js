@@ -156,7 +156,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (result.secondsLeft) {
           showLockoutCountdown(submitBtn, result.secondsLeft);
         } else {
-          showStatus(result.message, "error");
+          showStatus("No account with that email or username found.", "error");
         }
         return;
       }

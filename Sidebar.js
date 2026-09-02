@@ -339,10 +339,6 @@ async function loadNotifBadge(uid, preferences) {
     return;
   }
 
-  const readSet = getReadSet(uid);
-  const clearedSet = getClearedSet(uid);
-  const isUnread = (id) => !readSet.has(id) && !clearedSet.has(id);
-
   let unreadStockAlerts = 0;
   let unreadOrders = 0;
 
@@ -355,6 +351,36 @@ async function loadNotifBadge(uid, preferences) {
       badge.hidden = true;
     }
   }
+
+  // Recomputes using whatever data is already cached — no Firestore
+  // re-fetch needed, since only the read/cleared status changed, not
+  // the underlying products/notifications themselves. Called from the
+  // two onSnapshot callbacks below (when the underlying DATA changes)
+  // and from the "readstatus:changed" listener further down (when
+  // something gets marked read/cleared elsewhere — e.g. Notifications.js's
+  // "Mark All Read" — which those onSnapshot listeners would otherwise
+  // never notice, since marking something read doesn't touch the
+  // products or employeeNotifications collections at all).
+  function recomputeUnreadCounts() {
+    const freshReadSet = getReadSet(uid);
+    const freshClearedSet = getClearedSet(uid);
+    const stillUnread = (id) => !freshReadSet.has(id) && !freshClearedSet.has(id);
+
+    unreadStockAlerts = preferences.stockAlerts && latestProducts
+      ? latestProducts.filter((product) => {
+          const detail = getWorstAlertDetail(product);
+          return detail && stillUnread(`stock-${product.id}-${detail.status}`);
+        }).length
+      : 0;
+
+    unreadOrders = preferences.orderNotifications && latestNotifications
+      ? latestNotifications.filter((n) => stillUnread(n.id)).length
+      : 0;
+
+    renderBadge();
+  }
+
+  document.addEventListener("readstatus:changed", recomputeUnreadCounts);
 
   // Real-time: recomputes the moment ANY product's stock changes, not
   // just on page load / after a cache expires. Uses the shared,
@@ -394,13 +420,7 @@ async function loadNotifBadge(uid, preferences) {
     (snap) => {
       const products = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       latestProducts = products;
-      unreadStockAlerts = preferences.stockAlerts
-        ? products.filter((product) => {
-            const detail = getWorstAlertDetail(product);
-            return detail && isUnread(`stock-${product.id}-${detail.status}`);
-          }).length
-        : 0;
-      renderBadge();
+      recomputeUnreadCounts();
       document.dispatchEvent(new CustomEvent("products:live", { detail: { products } }));
     },
     (error) => console.error("Couldn't load products for notification badge:", error)
@@ -413,8 +433,7 @@ async function loadNotifBadge(uid, preferences) {
     collection(db, "employeeNotifications"),
     (snap) => {
       latestNotifications = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      unreadOrders = preferences.orderNotifications ? snap.docs.filter((d) => isUnread(d.id)).length : 0;
-      renderBadge();
+      recomputeUnreadCounts();
       document.dispatchEvent(new CustomEvent("notifications:live", { detail: { notifications: latestNotifications } }));
     },
     (error) => console.error("Couldn't load notifications for badge:", error)

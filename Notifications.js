@@ -238,6 +238,7 @@ function wireMarkAllRead() {
   document.getElementById("mark-all-read-btn").addEventListener("click", () => {
     const allIds = [...stockItems, ...orderItems].map((item) => item.id);
     markAllRead(currentUid, allIds);
+    document.dispatchEvent(new CustomEvent("readstatus:changed"));
     render();
   });
 }
@@ -274,6 +275,7 @@ function wireClearAll() {
     if (!confirmed) return;
 
     markAllCleared(currentUid, idsToClear);
+    document.dispatchEvent(new CustomEvent("readstatus:changed"));
 
     if (showStock) stockItems = stockItems.filter((item) => !idsToClear.includes(item.id));
     if (showOrders) orderItems = orderItems.filter((item) => !idsToClear.includes(item.id));
