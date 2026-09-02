@@ -31,7 +31,7 @@ let emailjsInitialized = false;
 function ensureEmailJsInitialized() {
   if (emailjsInitialized) return;
   if (!window.emailjs) {
-    throw new Error("EmailJS SDK didn't load. Check the script tag in Index.html.");
+    throw new Error("EmailJS SDK didn't load. Check the script tag in EmployeeLogin.html.");
   }
   window.emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
   emailjsInitialized = true;

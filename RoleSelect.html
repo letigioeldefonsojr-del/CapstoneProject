@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Almares 328 - Select Role</title>
+    <link rel="icon" type="image/png" href="Logo.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="Index.css">
+</head>
+<body>
+    <div class="login-container">
+
+        <!-- ============================================================
+             LEFT PANEL — BRAND
+             ============================================================ -->
+        <div class="left-panel">
+            <div class="brand-wrapper">
+                <div class="brand-kicker">
+                    <span class="brand-kicker__dot"></span>
+                    <span class="brand-kicker__line"></span>
+                    <span class="brand-kicker__text">Almares 328 Grocery Store</span>
+                </div>
+                <div class="logo-container">
+                    <img src="Logo.png" alt="WholeSale Grocery Store Logo" class="brand-logo no-download" draggable="false">
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================================
+             RIGHT PANEL — ROLE SELECTION
+             ============================================================ -->
+        <div class="right-panel">
+            <div class="login-card">
+
+                <div class="card-header">
+                    <span class="line"></span>
+                    <h2>Who's logging in?</h2>
+                    <span class="line"></span>
+                </div>
+
+                <p class="role-select__subtitle">Choose your role to continue.</p>
+
+                <div class="role-select__options">
+                    <a href="AdminLogin.html" class="role-select__card">
+                        <div class="role-select__icon">
+                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <path d="M12 3L19 6.5V11C19 15.5 16 19.3 12 21C8 19.3 5 15.5 5 11V6.5L12 3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+                                <path d="M9 12L11 14L15.5 9.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </div>
+                        <div class="role-select__text">
+                            <h3>Administrator</h3>
+                            <p>Full system access and account management.</p>
+                        </div>
+                        <svg class="role-select__arrow" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M9 5L15 12L9 19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </a>
+
+                    <a href="EmployeeLogin.html" class="role-select__card">
+                        <div class="role-select__icon">
+                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <circle cx="12" cy="8" r="3.2" stroke="currentColor" stroke-width="1.7"/>
+                                <path d="M4.5 20C5.5 16 8.4 14.3 12 14.3C15.6 14.3 18.5 16 19.5 20" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                            </svg>
+                        </div>
+                        <div class="role-select__text">
+                            <h3>Employee</h3>
+                            <p>Day-to-day inventory, orders, and store tasks.</p>
+                        </div>
+                        <svg class="role-select__arrow" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M9 5L15 12L9 19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </a>
+                </div>
+
+            </div>
+        </div>
+
+    </div>
+</body>
+</html>

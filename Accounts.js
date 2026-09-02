@@ -21,7 +21,7 @@ import { generateUniqueUsername, isUsernameTaken } from "./UsernameGenerator.js"
 //
 //   SUSPEND — writes a suspendedUntil timestamp to their Firestore
 //   profile. Enforced at the app level: both login handlers in
-//   Index.js check this field and block sign-in with a clear message
+//   AdminLogin.js/EmployeeLogin.js check this field and block sign-in with a clear message
 //   until it passes. Doesn't stop someone from installing lower-level
 //   Firebase access another way, but does correctly stop them from
 //   using this app for the chosen duration.

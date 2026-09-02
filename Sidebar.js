@@ -12,7 +12,7 @@ import { confirmDialog } from "./ConfirmDialog.js";
 // Shared across every page that includes this file. Adjust here once
 // instead of in five separate places.
 // ====================================================================
-const LOGIN_PAGE_URL = "Index.html";
+const LOGIN_PAGE_URL = "RoleSelect.html";
 
 // Latest live data from Sidebar.js's own listeners, shared with other
 // pages via getLatestProducts()/getLatestNotifications() below and the
@@ -120,7 +120,7 @@ function applyRoleRestrictedNavItems(role) {
 // ====================================================================
 // CHUNK 1B — RESOLVE ROLE (sessionStorage cache, Firestore as fallback)
 // ----------------------------------------------------------------
-// sessionStorage is only set by Index.js's login/signup handlers — and
+// sessionStorage is only set by AdminLogin.js/EmployeeLogin.js's login/signup handlers — and
 // it clears when the tab/browser closes. Firebase Auth's own session
 // survives much longer than that, so someone can still be genuinely
 // signed in with sessionStorage empty (e.g. reopening the browser
@@ -154,7 +154,7 @@ async function resolveRole(uid) {
 
   if (adminSnap.status === "fulfilled" && adminSnap.value.exists()) {
     if (isSuspended(adminSnap.value.data())) {
-      await signOutSuspended(adminSnap.value.data());
+      await signOutSuspended(adminSnap.value.data(), "admin");
       return null;
     }
     sessionStorage.setItem("almares_role", "admin");
@@ -163,7 +163,7 @@ async function resolveRole(uid) {
 
   if (employeeSnap.status === "fulfilled" && employeeSnap.value.exists()) {
     if (isSuspended(employeeSnap.value.data())) {
-      await signOutSuspended(employeeSnap.value.data());
+      await signOutSuspended(employeeSnap.value.data(), "employee");
       return null;
     }
     sessionStorage.setItem("almares_role", "employee");
@@ -201,7 +201,7 @@ async function checkAccountStillValid(uid, role) {
     }
 
     if (isSuspended(snap.data())) {
-      await signOutSuspended(snap.data());
+      await signOutSuspended(snap.data(), role);
       return false;
     }
 
@@ -219,13 +219,14 @@ function isSuspended(data) {
   return millis != null && millis > Date.now();
 }
 
-async function signOutSuspended(data) {
+async function signOutSuspended(data, role) {
   const untilDate = data.suspendedUntil.toDate().toLocaleDateString();
   const reason = data.suspensionReason || "";
   console.warn(`User is suspended until ${untilDate} — signing out.`);
   await signOut(auth);
   sessionStorage.clear();
-  window.location.href = `${LOGIN_PAGE_URL}?suspended=${encodeURIComponent(untilDate)}&reason=${encodeURIComponent(reason)}`;
+  const targetPage = role === "admin" ? "AdminLogin.html" : "EmployeeLogin.html";
+  window.location.href = `${targetPage}?suspended=${encodeURIComponent(untilDate)}&reason=${encodeURIComponent(reason)}`;
 }
 
 // ====================================================================
