@@ -2458,3 +2458,32 @@ button {
 .notif-list__jump-link:hover {
     background: var(--brand-green-soft, #e8f3ec);
 }
+
+.scroll-to-top-btn {
+    position: fixed;
+    bottom: 28px;
+    right: 28px;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--brand-green);
+    color: #ffffff;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    z-index: 50;
+    transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.scroll-to-top-btn:hover {
+    transform: translateY(-2px);
+    background: #0f3f22;
+}
+
+.scroll-to-top-btn svg {
+    width: 20px;
+    height: 20px;
+}
