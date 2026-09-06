@@ -222,8 +222,16 @@ function buildStockListItem(item, alreadyRead) {
 
   el.addEventListener("click", (event) => {
     event.preventDefault();
-    markRead(currentUid, item.id).catch((error) => console.error("Couldn't save read status:", error)); // fire-and-forget — don't make every click wait on a network round-trip
-    window.location.href = `Inventory.html?filter=${item.filterValue}`;
+    markRead(currentUid, item.id).catch((error) => console.error("Couldn't save read status:", error));
+    // Small delay before navigating — without this, the write above
+    // can get cancelled mid-flight by the page unloading before it
+    // actually reaches the server, which is exactly what was causing
+    // items to still show as unread after being clicked. 150ms is
+    // enough for the request to leave the browser, while still
+    // feeling essentially instant.
+    setTimeout(() => {
+      window.location.href = `Inventory.html?filter=${item.filterValue}`;
+    }, 150);
   });
 
   return el;
@@ -247,8 +255,12 @@ function buildOrderListItem(item, alreadyRead) {
 
   el.addEventListener("click", (event) => {
     event.preventDefault();
-    markRead(currentUid, item.id).catch((error) => console.error("Couldn't save read status:", error)); // fire-and-forget, same reasoning as the stock alert click above
-    window.location.href = item.orderId ? `Orders.html?orderId=${item.orderId}` : "Orders.html";
+    markRead(currentUid, item.id).catch((error) => console.error("Couldn't save read status:", error));
+    // Same reasoning as the stock alert click above — give the write
+    // a real chance to leave the browser before the page unloads.
+    setTimeout(() => {
+      window.location.href = item.orderId ? `Orders.html?orderId=${item.orderId}` : "Orders.html";
+    }, 150);
   });
 
   return el;
