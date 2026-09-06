@@ -2313,6 +2313,19 @@ button {
     letter-spacing: 0.04em;
     padding: 10px 16px;
     border-top: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+}
+
+.orders-group-header-row:hover td {
+    background: var(--brand-green-soft, #e8f3ec);
+    color: var(--brand-green);
+}
+
+.orders-group-header-row__chevron {
+    display: inline-block;
+    width: 14px;
+    margin-right: 4px;
 }
 
 /* ===========================

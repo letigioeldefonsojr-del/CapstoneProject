@@ -58,6 +58,7 @@ let allOrders = [];
 let searchQuery = "";
 let sortOrder = "newest"; // "newest" | "oldest"
 let groupBy = "none"; // "none" | "week" | "month" | "year"
+let expandedGroupLabel = null; // accordion state — only this one group's orders are visible when grouping is active
 let activeTab = "all";
 let cancelledSubStatus = "cancelled"; // when activeTab === "cancelled": "cancelled" or "rejected"
 let expandedOrderDetail = null;   // accordion: only one order's detail row open at a time
@@ -222,10 +223,23 @@ function ordersForActiveTab() {
   });
 }
 
-function buildGroupHeaderRow(label) {
+function buildGroupHeaderRow(label, isExpanded) {
   const row = document.createElement("tr");
   row.className = "orders-group-header-row";
-  row.innerHTML = `<td colspan="7">${label}</td>`;
+  row.dataset.groupLabel = label;
+  row.innerHTML = `
+    <td colspan="7">
+      <span class="orders-group-header-row__chevron">${isExpanded ? "▾" : "▸"}</span>
+      ${label}
+    </td>
+  `;
+  row.addEventListener("click", () => {
+    // True accordion — only one group open at a time, matching "click
+    // September, only September shows" rather than independently
+    // toggleable sections.
+    expandedGroupLabel = expandedGroupLabel === label ? null : label;
+    render();
+  });
   return row;
 }
 
@@ -259,6 +273,7 @@ function wireSort() {
   });
   document.getElementById("orders-group-select").addEventListener("change", (event) => {
     groupBy = event.target.value;
+    expandedGroupLabel = null; // let render() auto-pick the first group under the new scheme
     render();
   });
 }
@@ -288,16 +303,25 @@ function render() {
   tbody.innerHTML = "";
   let lastGroupLabel = undefined; // undefined (not null) so the very first order always triggers a header when grouping is on
   orders.forEach((order) => {
+    let currentGroupLabel = null;
     if (groupBy !== "none") {
-      const label = getGroupLabel(order);
-      if (label !== lastGroupLabel) {
-        tbody.appendChild(buildGroupHeaderRow(label));
-        lastGroupLabel = label;
+      currentGroupLabel = getGroupLabel(order);
+      if (currentGroupLabel !== lastGroupLabel) {
+        // Nothing expanded yet (grouping was just turned on, or this
+        // is the first render since) — default to opening the first
+        // group encountered, rather than starting with everything
+        // collapsed and nothing visible at all.
+        if (expandedGroupLabel === null) expandedGroupLabel = currentGroupLabel;
+        tbody.appendChild(buildGroupHeaderRow(currentGroupLabel, currentGroupLabel === expandedGroupLabel));
+        lastGroupLabel = currentGroupLabel;
       }
     }
 
+    const isGroupCollapsed = groupBy !== "none" && currentGroupLabel !== expandedGroupLabel;
+
     const mainRow = buildOrderRow(order);
     mainRow.dataset.orderId = order.id;
+    mainRow.hidden = isGroupCollapsed;
     tbody.appendChild(mainRow);
 
     const detailRow = buildOrderDetailRow(order);
@@ -366,6 +390,19 @@ function handleTargetOrderJump() {
     hasHandledTargetOrder = true;
     targetOrderId = null;
     return;
+  }
+
+  // If grouping is active and this order's group is currently
+  // collapsed, its row exists in the DOM but is hidden — expand that
+  // specific group first, then let the next render's pass find it
+  // visible and proceed normally.
+  if (targetRow.hidden && groupBy !== "none") {
+    const targetOrder = allOrders.find((o) => o.id === targetOrderId);
+    if (targetOrder) {
+      expandedGroupLabel = getGroupLabel(targetOrder);
+      render();
+      return;
+    }
   }
 
   hasHandledTargetOrder = true;
@@ -454,7 +491,7 @@ function buildReceiptHtml(order) {
     const subtotal = typeof item.subtotal === "number" ? `₱${item.subtotal.toFixed(2)}` : "—";
     return `
       <tr>
-        <td style="padding:6px 0;">${escapeHtmlReceipt(name)}</td>
+        <td style="padding:6px 0; word-wrap:break-word;">${escapeHtmlReceipt(name)}</td>
         <td style="padding:6px 0; text-align:right;">× ${item.amount ?? 1}</td>
         <td style="padding:6px 0; text-align:right;">${unitPrice}</td>
         <td style="padding:6px 0; text-align:right;">${subtotal}</td>
@@ -483,13 +520,13 @@ function buildReceiptHtml(order) {
       <p style="font-size:13px; margin:0 0 4px;">Customer: ${escapeHtmlReceipt(order.customerName || "—")}</p>
       ${order.customerAddress ? `<p style="font-size:13px; margin:0 0 16px;">Delivery Address: ${escapeHtmlReceipt(order.customerAddress)}</p>` : "<div style='margin-bottom:16px;'></div>"}
       <hr style="border:none; border-top:1px solid #ccc; margin-bottom:12px;">
-      <table style="width:100%; border-collapse:collapse; font-size:13px;">
+      <table style="width:100%; table-layout:fixed; border-collapse:collapse; font-size:13px;">
         <thead>
           <tr style="font-weight:bold; border-bottom:2px solid ${BRAND_GREEN}; color:${BRAND_GREEN};">
-            <td style="padding-bottom:6px;">Item</td>
-            <td style="padding-bottom:6px; text-align:right;">Qty</td>
-            <td style="padding-bottom:6px; text-align:right;">Unit Price</td>
-            <td style="padding-bottom:6px; text-align:right;">Subtotal</td>
+            <td style="padding-bottom:6px; width:40%; word-wrap:break-word;">Item</td>
+            <td style="padding-bottom:6px; width:15%; text-align:right;">Qty</td>
+            <td style="padding-bottom:6px; width:22%; text-align:right;">Unit Price</td>
+            <td style="padding-bottom:6px; width:23%; text-align:right;">Subtotal</td>
           </tr>
         </thead>
         <tbody>${itemRows}</tbody>

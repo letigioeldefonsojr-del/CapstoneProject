@@ -33,26 +33,12 @@ document.addEventListener("sidebar:ready", async (event) => {
   wireTabs();
   wireMarkAllRead();
   wireClearAll();
-  wireScrollToTop();
   loadEverything();
 });
 
 // Shows once you've scrolled down a meaningful amount, hides again
 // near the top — no point offering "back to top" when you're already
 // basically there.
-function wireScrollToTop() {
-  const btn = document.getElementById("scroll-to-top-btn");
-  if (!btn) return;
-
-  window.addEventListener("scroll", () => {
-    btn.hidden = window.scrollY < 300;
-  });
-
-  btn.addEventListener("click", () => {
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  });
-}
-
 // ====================================================================
 // CHUNK 2 — LOAD BOTH SOURCES (real-time)
 // ----------------------------------------------------------------

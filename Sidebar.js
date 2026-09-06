@@ -96,6 +96,7 @@ async function initSidebar(user) {
   loadNotifBadge(user.uid, preferences);
   wireCollapse();
   wireLogout();
+  wireScrollToTop();
   wireDeleteAccount(user, role);
   applyRoleRestrictedNavItems(role);
 
@@ -455,6 +456,23 @@ export function getLatestNotifications() {
 // ====================================================================
 // CHUNK 6 — SIDEBAR COLLAPSE
 // ====================================================================
+// Shared across every page that includes the button in its HTML
+// (Notifications, Orders, and any page added going forward) — a
+// no-op if that page doesn't have the button at all, so it's safe
+// to call unconditionally from every page's shared sidebar init.
+function wireScrollToTop() {
+  const btn = document.getElementById("scroll-to-top-btn");
+  if (!btn) return;
+
+  window.addEventListener("scroll", () => {
+    btn.hidden = window.scrollY < 300;
+  });
+
+  btn.addEventListener("click", () => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+}
+
 function wireCollapse() {
   const sidebar = document.getElementById("sidebar");
   const collapseBtn = document.getElementById("collapse-btn");
