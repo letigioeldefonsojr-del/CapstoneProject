@@ -237,18 +237,19 @@ function buildStockListItem(item, alreadyRead) {
   `;
   el.querySelector(".notif-list__message").textContent = item.message;
 
-  el.addEventListener("click", (event) => {
+  el.addEventListener("click", async (event) => {
     event.preventDefault();
-    markRead(currentUid, item.id).catch((error) => console.error("Couldn't save read status:", error));
-    // Small delay before navigating — without this, the write above
-    // can get cancelled mid-flight by the page unloading before it
-    // actually reaches the server, which is exactly what was causing
-    // items to still show as unread after being clicked. 150ms is
-    // enough for the request to leave the browser, while still
-    // feeling essentially instant.
-    setTimeout(() => {
-      window.location.href = `Inventory.html?filter=${item.filterValue}`;
-    }, 150);
+    // Actually wait for this to finish before navigating — a fixed
+    // delay was a guess at "probably enough time," not a real
+    // guarantee, and it wasn't reliable. Properly awaiting the write
+    // guarantees it completes before the page unloads, at the cost
+    // of a normal network-speed wait instead of feeling instant.
+    try {
+      await markRead(currentUid, item.id);
+    } catch (error) {
+      console.error("Couldn't save read status:", error);
+    }
+    window.location.href = `Inventory.html?filter=${item.filterValue}`;
   });
 
   return el;
@@ -270,14 +271,14 @@ function buildOrderListItem(item, alreadyRead) {
   el.querySelector(".notif-list__message").textContent = item.message;
   el.querySelector(".notif-list__time").textContent = item.timeLabel;
 
-  el.addEventListener("click", (event) => {
+  el.addEventListener("click", async (event) => {
     event.preventDefault();
-    markRead(currentUid, item.id).catch((error) => console.error("Couldn't save read status:", error));
-    // Same reasoning as the stock alert click above — give the write
-    // a real chance to leave the browser before the page unloads.
-    setTimeout(() => {
-      window.location.href = item.orderId ? `Orders.html?orderId=${item.orderId}` : "Orders.html";
-    }, 150);
+    try {
+      await markRead(currentUid, item.id);
+    } catch (error) {
+      console.error("Couldn't save read status:", error);
+    }
+    window.location.href = item.orderId ? `Orders.html?orderId=${item.orderId}` : "Orders.html";
   });
 
   return el;
