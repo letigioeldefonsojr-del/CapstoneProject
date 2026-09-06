@@ -58,7 +58,7 @@ let allOrders = [];
 let searchQuery = "";
 let sortOrder = "newest"; // "newest" | "oldest"
 let groupBy = "none"; // "none" | "week" | "month" | "year"
-let expandedGroupLabel = null; // accordion state — only this one group's orders are visible when grouping is active
+let expandedGroupLabel; // undefined = never set yet (auto-expand first group); null = user deliberately collapsed everything (stay collapsed); a string = that specific group is open
 let activeTab = "all";
 let cancelledSubStatus = "cancelled"; // when activeTab === "cancelled": "cancelled" or "rejected"
 let expandedOrderDetail = null;   // accordion: only one order's detail row open at a time
@@ -273,7 +273,7 @@ function wireSort() {
   });
   document.getElementById("orders-group-select").addEventListener("change", (event) => {
     groupBy = event.target.value;
-    expandedGroupLabel = null; // let render() auto-pick the first group under the new scheme
+    expandedGroupLabel = undefined; // let render() auto-pick the first group under the new scheme
     render();
   });
 }
@@ -311,7 +311,7 @@ function render() {
         // is the first render since) — default to opening the first
         // group encountered, rather than starting with everything
         // collapsed and nothing visible at all.
-        if (expandedGroupLabel === null) expandedGroupLabel = currentGroupLabel;
+        if (expandedGroupLabel === undefined) expandedGroupLabel = currentGroupLabel;
         tbody.appendChild(buildGroupHeaderRow(currentGroupLabel, currentGroupLabel === expandedGroupLabel));
         lastGroupLabel = currentGroupLabel;
       }
