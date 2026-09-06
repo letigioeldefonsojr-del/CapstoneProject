@@ -484,31 +484,32 @@ function buildReceiptHtml(order) {
   const orderDate = order.createdAt?.toDate?.() ? order.createdAt.toDate().toLocaleString() : "—";
   const items = Array.isArray(order.items) ? order.items : [];
   const BRAND_GREEN = "#14532d";
+  const CONTENT_WIDTH = 650; // must match the offscreen container's own width in downloadReceipt()
 
   const itemRows = items.map((item) => {
     const name = item.flavor ? `${item.productName} — ${item.flavor}` : (item.productName || "Item");
     const unitPrice = typeof item.unitPrice === "number" ? `₱${item.unitPrice.toFixed(2)}` : "—";
     const subtotal = typeof item.subtotal === "number" ? `₱${item.subtotal.toFixed(2)}` : "—";
     return `
-      <tr>
-        <td style="padding:6px 0; word-wrap:break-word;">${escapeHtmlReceipt(name)}</td>
-        <td style="padding:6px 0; text-align:right;">× ${item.amount ?? 1}</td>
-        <td style="padding:6px 0; text-align:right;">${unitPrice}</td>
-        <td style="padding:6px 0; text-align:right;">${subtotal}</td>
-      </tr>
+      <div style="display:flex; padding:6px 0; border-bottom:1px solid #eee;">
+        <div style="width:250px; word-wrap:break-word; overflow-wrap:break-word;">${escapeHtmlReceipt(name)}</div>
+        <div style="width:90px; text-align:right;">× ${item.amount ?? 1}</div>
+        <div style="width:130px; text-align:right;">${unitPrice}</div>
+        <div style="width:116px; text-align:right;">${subtotal}</div>
+      </div>
     `;
   }).join("");
 
   const total = typeof order.total === "number" ? `₱${order.total.toFixed(2)}` : "—";
 
-  // box-sizing:border-box + width:100% on the outer wrapper guarantees
-  // padding is INCLUDED in that fixed width, not added on top of it —
-  // and word-wrap/overflow-wrap forces long text to wrap onto a new
-  // line rather than visually overflow past the container's edge
-  // (which is what html2canvas would otherwise crop off entirely,
-  // since it only captures the container's own defined bounds).
+  // Deliberately no <table> anywhere — html2canvas (and similar
+  // html-to-canvas libraries) don't reliably replicate table layout,
+  // since they reimplement CSS layout themselves rather than using a
+  // real browser rendering engine for the capture. Plain flexbox divs
+  // with fixed pixel widths (matching the offscreen container's own
+  // fixed width, not a percentage) render far more predictably.
   return `
-    <div style="box-sizing:border-box; width:100%; font-family: Arial, sans-serif; color: #222; padding: 32px; word-wrap: break-word; overflow-wrap: break-word;">
+    <div style="box-sizing:border-box; width:${CONTENT_WIDTH}px; font-family: Arial, sans-serif; color: #222; padding: 32px; word-wrap: break-word; overflow-wrap: break-word;">
       <img id="receipt-logo" src="Logo.png" alt="Almares 328 Logo" style="display:block; margin:0 auto 12px; width:64px; height:64px; object-fit:contain;">
       <h2 style="text-align:center; margin:0 0 4px; color:${BRAND_GREEN}; font-size:20px; line-height:1.3;">Almares 328 Wholesale Grocery Store</h2>
       <p style="text-align:center; margin:0 0 20px; color:#666;">Official Receipt</p>
@@ -520,17 +521,13 @@ function buildReceiptHtml(order) {
       <p style="font-size:13px; margin:0 0 4px;">Customer: ${escapeHtmlReceipt(order.customerName || "—")}</p>
       ${order.customerAddress ? `<p style="font-size:13px; margin:0 0 16px;">Delivery Address: ${escapeHtmlReceipt(order.customerAddress)}</p>` : "<div style='margin-bottom:16px;'></div>"}
       <hr style="border:none; border-top:1px solid #ccc; margin-bottom:12px;">
-      <table style="width:100%; table-layout:fixed; border-collapse:collapse; font-size:13px;">
-        <thead>
-          <tr style="font-weight:bold; border-bottom:2px solid ${BRAND_GREEN}; color:${BRAND_GREEN};">
-            <td style="padding-bottom:6px; width:40%; word-wrap:break-word;">Item</td>
-            <td style="padding-bottom:6px; width:15%; text-align:right;">Qty</td>
-            <td style="padding-bottom:6px; width:22%; text-align:right;">Unit Price</td>
-            <td style="padding-bottom:6px; width:23%; text-align:right;">Subtotal</td>
-          </tr>
-        </thead>
-        <tbody>${itemRows}</tbody>
-      </table>
+      <div style="display:flex; font-weight:bold; border-bottom:2px solid ${BRAND_GREEN}; color:${BRAND_GREEN}; padding-bottom:6px; font-size:13px;">
+        <div style="width:250px;">Item</div>
+        <div style="width:90px; text-align:right;">Qty</div>
+        <div style="width:130px; text-align:right;">Unit Price</div>
+        <div style="width:116px; text-align:right;">Subtotal</div>
+      </div>
+      <div style="font-size:13px;">${itemRows}</div>
       <hr style="border:none; border-top:2px solid ${BRAND_GREEN}; margin:12px 0;">
       <p style="text-align:right; font-size:16px; font-weight:bold; margin:0 0 20px; color:${BRAND_GREEN};">Total: ${total}</p>
       <p style="text-align:center; font-size:11px; color:#999;">Thank you for your business.</p>
