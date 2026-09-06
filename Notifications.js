@@ -161,13 +161,20 @@ function render() {
 
   list.innerHTML = "";
 
+  // Quick jump-links so both sections (and how many items are in each)
+  // are visible immediately at the top, instead of only discoverable
+  // by scrolling all the way down.
+  if (activeTab === "all" && stockItems.length > 0 && orderItems.length > 0) {
+    list.appendChild(buildJumpLinksRow());
+  }
+
   if (showStock && stockItems.length > 0) {
-    if (activeTab === "all") list.appendChild(buildSectionHeader("Stock Alerts"));
+    if (activeTab === "all") list.appendChild(buildSectionHeader("Stock Alerts", stockItems.length, "section-stock-alerts"));
     stockItems.forEach((item) => list.appendChild(buildStockListItem(item, readSet.has(item.id))));
   }
 
   if (showOrders && orderItems.length > 0) {
-    if (activeTab === "all") list.appendChild(buildSectionHeader("Order Notifications"));
+    if (activeTab === "all") list.appendChild(buildSectionHeader("Order Notifications", orderItems.length, "section-order-notifications"));
     orderItems.forEach((item) => list.appendChild(buildOrderListItem(item, readSet.has(item.id))));
   }
 
@@ -176,10 +183,26 @@ function render() {
   }
 }
 
-function buildSectionHeader(text) {
+function buildJumpLinksRow() {
+  const row = document.createElement("li");
+  row.className = "notif-list__jump-row";
+  row.innerHTML = `
+    <button type="button" class="notif-list__jump-link" data-jump="section-stock-alerts">↓ Stock Alerts (${stockItems.length})</button>
+    <button type="button" class="notif-list__jump-link" data-jump="section-order-notifications">↓ Order Notifications (${orderItems.length})</button>
+  `;
+  row.querySelectorAll("[data-jump]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.getElementById(btn.dataset.jump)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+  return row;
+}
+
+function buildSectionHeader(text, count, id) {
   const header = document.createElement("li");
   header.className = "notif-list__section";
-  header.textContent = text;
+  header.id = id;
+  header.textContent = `${text} (${count})`;
   return header;
 }
 

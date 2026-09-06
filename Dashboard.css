@@ -2433,3 +2433,28 @@ button {
     accent-color: var(--brand-green);
     cursor: pointer;
 }
+
+.notif-list__jump-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 10px 16px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+}
+
+.notif-list__jump-link {
+    background: #ffffff;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--brand-green);
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.notif-list__jump-link:hover {
+    background: var(--brand-green-soft, #e8f3ec);
+}
