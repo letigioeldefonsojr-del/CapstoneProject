@@ -448,6 +448,10 @@ function buildEntryRow(entry, mode) {
   const velocityLabel = entry.velocity >= 1
     ? `~${entry.velocity.toFixed(1)} units/day`
     : `~${(entry.velocity * 7).toFixed(1)} units/week`;
+  // Makes the actual output transparent — this product's number came
+  // from real sales in the last 14 days, or (rarer) fell back to the
+  // 90-day baseline because there were none.
+  const windowLabel = entry.usedRecentWindow ? "last 14 days" : "90-day avg, no recent sales";
 
   const stockoutLabel = entry.currentStock === 0
     ? "Out of stock"
@@ -481,7 +485,7 @@ function buildEntryRow(entry, mode) {
 
   row.querySelector(".forecast-item__name").textContent = name;
   row.querySelector(".forecast-item__meta").textContent =
-    `${velocityLabel}${stockoutLabel ? " · " + stockoutLabel : ""}`;
+    `${velocityLabel} (${windowLabel})${stockoutLabel ? " · " + stockoutLabel : ""}`;
 
   const right = row.querySelector(".forecast-item__right");
   const stockBadge = document.createElement("span");
