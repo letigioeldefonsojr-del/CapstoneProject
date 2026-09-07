@@ -163,6 +163,16 @@ async function fetchDeliveredOrderItems() {
 // parent product's total — a deliberate simplification; a future
 // version could track per-variant velocity separately if that level
 // of detail becomes worth the added complexity.
+// A 14-day window for the primary "moving average" velocity — this
+// is what actually moved the needle on the honesty gap: sales from
+// 80 days ago no longer count equally with sales from yesterday.
+// Falls back to the full 90-day baseline only when a product had
+// literally zero sales in the last 14 days (but did sell earlier in
+// the 90-day window) — otherwise a product that's just had a quiet
+// couple of weeks would incorrectly look like it has zero velocity,
+// rather than genuinely slowed down.
+const RECENT_WINDOW_DAYS = 14;
+
 function computeVelocities(depletionEvents) {
   const byProduct = new Map();
 
@@ -170,27 +180,44 @@ function computeVelocities(depletionEvents) {
     const existing = byProduct.get(productId) || {
       totalUnitsSold: 0,
       firstSaleMillis: timestampMillis,
-      lastSaleMillis: timestampMillis
+      lastSaleMillis: timestampMillis,
+      events: []
     };
 
     existing.totalUnitsSold += unitsSold;
     existing.firstSaleMillis = Math.min(existing.firstSaleMillis, timestampMillis);
     existing.lastSaleMillis = Math.max(existing.lastSaleMillis, timestampMillis);
+    existing.events.push({ unitsSold, timestampMillis });
 
     byProduct.set(productId, existing);
   });
 
   const result = new Map();
   const now = Date.now();
+  const recentCutoffMillis = now - RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 
   byProduct.forEach((entry, productId) => {
     const daysActive = Math.max(1, (now - entry.firstSaleMillis) / (1000 * 60 * 60 * 24));
     const daysSinceLastSale = (now - entry.lastSaleMillis) / (1000 * 60 * 60 * 24);
-    const velocity = entry.totalUnitsSold / daysActive;
+    const baselineVelocity = entry.totalUnitsSold / daysActive;
+
+    const recentUnitsSold = entry.events
+      .filter((e) => e.timestampMillis >= recentCutoffMillis)
+      .reduce((sum, e) => sum + e.unitsSold, 0);
+    const recentVelocity = recentUnitsSold / RECENT_WINDOW_DAYS;
+
+    // Use the recent moving average whenever there's actually recent
+    // activity to base it on; otherwise the 90-day baseline is a more
+    // honest number than "0" for a product that's simply had a quiet
+    // stretch but is still a real, ongoing seller.
+    const velocity = recentUnitsSold > 0 ? recentVelocity : baselineVelocity;
+    const usedRecentWindow = recentUnitsSold > 0;
 
     result.set(productId, {
       totalUnitsSold: entry.totalUnitsSold,
       velocity,
+      baselineVelocity,
+      usedRecentWindow,
       daysSinceLastSale
     });
   });
