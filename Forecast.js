@@ -321,11 +321,20 @@ function renderResults(clustered, productsWithoutData) {
     .filter((p) => isLowOrOut(p.currentStock))
     .sort((a, b) => (a.daysUntilStockout ?? Infinity) - (b.daysUntilStockout ?? Infinity));
 
-  container.appendChild(buildSummaryCards(clustered, restockRecommended, productsWithoutData));
+  // Same daysUntilStockout number as restockRecommended above — just
+  // looking at the opposite end. A very HIGH number here means the
+  // product has far more supply than its current selling pace could
+  // work through in a reasonable time, tying up shelf space and
+  // capital rather than being at risk of running out.
+  const possibleOverstock = allTracked
+    .filter((p) => p.currentStock > 0 && p.daysUntilStockout != null && p.daysUntilStockout > OVERSTOCK_THRESHOLD_DAYS)
+    .sort((a, b) => (b.daysUntilStockout ?? 0) - (a.daysUntilStockout ?? 0));
+
+  container.appendChild(buildSummaryCards(clustered, restockRecommended, possibleOverstock, productsWithoutData));
 
   const aiPanel = buildAiInsightPanel();
   container.insertBefore(aiPanel, container.firstChild);
-  loadAiInsight(clustered, restockRecommended, allTracked.length, productsWithoutData.length, aiPanel);
+  loadAiInsight(clustered, restockRecommended, possibleOverstock, allTracked.length, productsWithoutData.length, aiPanel);
 
   if (bestSellersOut.length > 0) {
     container.appendChild(buildSection(
@@ -357,6 +366,16 @@ function renderResults(clustered, productsWithoutData) {
     ));
   }
 
+  if (possibleOverstock.length > 0) {
+    container.appendChild(buildSection(
+      "Possible Overstock",
+      `Products with more than ${OVERSTOCK_THRESHOLD_DAYS} days of supply at their current selling pace — worth reviewing whether that shelf space and capital could work harder elsewhere.`,
+      possibleOverstock,
+      "overstock",
+      "overstock"
+    ));
+  }
+
   if (clustered.fast.length > 0) {
     container.appendChild(buildSection(
       "Fast-Moving Products",
@@ -382,6 +401,14 @@ function renderResults(clustered, productsWithoutData) {
   }
 }
 
+// 60 days (~2 months) of supply at current selling pace is flagged as
+// possible overstock. Like the 99/49/0 stock-level thresholds
+// elsewhere in this app, this is a reasonable default judgment call
+// for a grocery store, not a universally "correct" number — it can
+// be adjusted here if a different threshold fits your actual
+// inventory turnover expectations better.
+const OVERSTOCK_THRESHOLD_DAYS = 60;
+
 function isLowOrOut(stock) {
   return stock <= 99; // matches the app-wide Low/Critical/Out thresholds
 }
@@ -390,13 +417,14 @@ function getStockUrgency(entry) {
   return entry.currentStock === 0 ? "out" : entry.currentStock <= 49 ? "critical" : entry.currentStock <= 99 ? "low" : "in";
 }
 
-function buildSummaryCards(clustered, restockRecommended, productsWithoutData) {
+function buildSummaryCards(clustered, restockRecommended, possibleOverstock, productsWithoutData) {
   const wrap = document.createElement("div");
   wrap.className = "forecast-summary-grid";
 
   const cards = [
     { value: clustered.fast.length, label: "Fast-Moving Products" },
     { value: restockRecommended.length, label: "Need Restocking" },
+    { value: possibleOverstock.length, label: "Possible Overstock" },
     { value: clustered.moderate.length + clustered.slow.length, label: "Moderate / Slow-Moving" },
     { value: productsWithoutData.length, label: "No Sales Data Yet" }
   ];
@@ -416,7 +444,8 @@ function buildSummaryCards(clustered, restockRecommended, productsWithoutData) {
 const SECTION_ICONS = {
   urgent: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M12 9V13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M10.3 3.9L2.6 17.5C2.1 18.4 2.8 19.5 3.8 19.5H20.2C21.2 19.5 21.9 18.4 21.4 17.5L13.7 3.9C13.2 3 11.8 3 10.3 3.9Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="16.3" r="0.9" fill="currentColor"/></svg>`,
   restock: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M12 3L20.5 7.5V16.5L12 21L3.5 16.5V7.5L12 3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M3.5 7.5L12 12M12 12L20.5 7.5M12 12V21" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>`,
-  trend: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M3.5 17L9 11L13 15L20.5 6.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M14.5 6.5H20.5V12.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+  trend: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M3.5 17L9 11L13 15L20.5 6.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M14.5 6.5H20.5V12.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  overstock: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="3" y="13" width="7" height="7" rx="1" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="13" width="7" height="7" rx="1" stroke="currentColor" stroke-width="1.7"/><rect x="8.5" y="4" width="7" height="7" rx="1" stroke="currentColor" stroke-width="1.7"/></svg>`
 };
 
 function buildSection(title, subtitle, entries, mode, iconKey) {
@@ -533,7 +562,7 @@ function buildAiInsightPanel() {
   return panel;
 }
 
-async function loadAiInsight(clustered, restockRecommended, totalTracked, noDataCount, panel) {
+async function loadAiInsight(clustered, restockRecommended, possibleOverstock, totalTracked, noDataCount, panel) {
   const textEl = panel.querySelector(".forecast-ai-panel__text");
 
   try {
@@ -560,6 +589,11 @@ async function loadAiInsight(clustered, restockRecommended, totalTracked, noData
           currentStock: p.currentStock,
           daysUntilStockout: p.daysUntilStockout != null ? Number(p.daysUntilStockout.toFixed(1)) : null,
           velocityTier: p.velocityTier
+        })),
+        possibleOverstock: possibleOverstock.slice(0, 8).map((p) => ({
+          name: p.product.name || "Unnamed product",
+          currentStock: p.currentStock,
+          daysOfSupply: p.daysUntilStockout != null ? Number(p.daysUntilStockout.toFixed(0)) : null
         })),
         totalTracked,
         noDataCount

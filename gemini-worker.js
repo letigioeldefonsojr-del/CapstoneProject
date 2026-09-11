@@ -17,7 +17,25 @@
 // Reasonable for a capstone's actual usage scale; worth tightening
 // later if this becomes a real production concern.
 // ====================================================================
-const GEMINI_MODEL = "gemini-2.5-flash"; // confirmed live/stable via ListModels on 2026-08-23
+// Switched from gemini-2.5-flash (20 requests/day free tier) to the
+// Flash-Lite variant — confirmed directly from the account's own
+// live usage dashboard to have a 500/day limit instead, a 25x
+// increase with no billing needed. HONEST NOTE: the exact API model
+// ID string (as opposed to the human-readable name shown on that
+// dashboard) is my best-formed guess based on Google's usual naming
+// pattern — if this specific ID is wrong, the detailed error
+// passthrough already built into this Worker will surface exactly
+// that (a clear "model not found" style message, not a silent
+// failure), so it's immediately diagnosable either way.
+const GEMINI_MODEL = "gemini-3.1-flash-lite";
+// If the primary model's daily quota runs out (429/RESOURCE_EXHAUSTED
+// specifically — not any other kind of error), automatically retry
+// the exact same request against this model instead, which has its
+// own separate, untouched quota. Only kicks in for quota exhaustion —
+// a genuine bad-request or malformed-prompt error wouldn't be fixed
+// by switching models, so those still fail normally without wasting
+// a second API call.
+const GEMINI_FALLBACK_MODEL = "gemini-3.5-flash-lite";
 
 // Only your own site is allowed to call this — blocks random other
 // websites from using your Gemini quota via this endpoint.
@@ -47,48 +65,44 @@ export default {
       return jsonResponse({ error: "Invalid JSON body" }, 400);
     }
 
-    const { fastMovers, moderateMovers, slowMovers, restockRecommended, totalTracked, noDataCount } = body || {};
+    const { fastMovers, moderateMovers, slowMovers, restockRecommended, possibleOverstock, totalTracked, noDataCount } = body || {};
     if (!Array.isArray(fastMovers) || !Array.isArray(restockRecommended)) {
       return jsonResponse({ error: "Missing or malformed forecast data" }, 400);
     }
 
-    const prompt = buildPrompt(fastMovers, moderateMovers, slowMovers, restockRecommended, totalTracked, noDataCount);
+    const prompt = buildPrompt(fastMovers, moderateMovers, slowMovers, restockRecommended, possibleOverstock, totalTracked, noDataCount);
 
     let geminiResponse;
+    let usedModel = GEMINI_MODEL;
     try {
-      geminiResponse = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${env.GEMINI_API_KEY}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              maxOutputTokens: 700,
-              temperature: 0.4,
-              thinkingConfig: { thinkingBudget: 0 },
-              responseMimeType: "application/json",
-              responseSchema: {
-                type: "object",
-                properties: {
-                  health: { type: "string" },
-                  urgent: { type: "string" },
-                  opportunity: { type: "string" },
-                  slowStock: { type: "string" }
-                },
-                required: ["health", "urgent", "opportunity", "slowStock"]
-              }
-            }
-          })
-        }
-      );
+      geminiResponse = await callGemini(GEMINI_MODEL, prompt, env);
+
+      // Only retry on quota exhaustion specifically — a malformed
+      // prompt or bad request would fail identically on the fallback
+      // model too, so retrying would just waste a second call for no
+      // benefit. 429 is genuinely quota-specific for this API.
+      if (geminiResponse.status === 429) {
+        console.warn(`${GEMINI_MODEL} hit its quota — retrying with ${GEMINI_FALLBACK_MODEL}.`);
+        geminiResponse = await callGemini(GEMINI_FALLBACK_MODEL, prompt, env);
+        usedModel = GEMINI_FALLBACK_MODEL;
+      }
     } catch (error) {
       return jsonResponse({ error: "Couldn't reach the AI service right now." }, 502);
     }
 
     if (!geminiResponse.ok) {
       const errorBody = await geminiResponse.text();
-      return jsonResponse({ error: "The AI service returned an error.", detail: errorBody, status: geminiResponse.status }, 502);
+      return jsonResponse({
+        error: "The AI service returned an error.",
+        detail: errorBody,
+        status: geminiResponse.status,
+        modelTried: usedModel,
+        // Diagnostic only — tells us exactly which Cloudflare data
+        // center/country handled this specific request, since Gemini's
+        // "location not supported" error depends on where the WORKER
+        // itself executes from, not where the end user is.
+        workerLocation: { colo: request.cf?.colo, country: request.cf?.country }
+      }, 502);
     }
 
     const data = await geminiResponse.json();
@@ -109,7 +123,36 @@ export default {
   }
 };
 
-function buildPrompt(fastMovers, moderateMovers, slowMovers, restockRecommended, totalTracked, noDataCount) {
+function callGemini(model, prompt, env) {
+  return fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          maxOutputTokens: 700,
+          temperature: 0.4,
+          thinkingConfig: { thinkingBudget: 0 },
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "object",
+            properties: {
+              health: { type: "string" },
+              urgent: { type: "string" },
+              opportunity: { type: "string" },
+              slowStock: { type: "string" }
+            },
+            required: ["health", "urgent", "opportunity", "slowStock"]
+          }
+        }
+      })
+    }
+  );
+}
+
+function buildPrompt(fastMovers, moderateMovers, slowMovers, restockRecommended, possibleOverstock, totalTracked, noDataCount) {
   const fastList = (fastMovers || [])
     .map((p) => `${p.name} (~${p.velocity} units/day, ${p.currentStock} in stock)`)
     .join(", ") || "none currently tracked";
@@ -126,12 +169,17 @@ function buildPrompt(fastMovers, moderateMovers, slowMovers, restockRecommended,
     .map((p) => `${p.name} (${p.currentStock} left${p.daysUntilStockout != null ? `, ~${Math.round(p.daysUntilStockout)} days until stockout` : ""}, ${p.velocityTier}-moving)`)
     .join(", ") || "none urgent right now";
 
+  const overstockList = (possibleOverstock || [])
+    .map((p) => `${p.name} (${p.currentStock} in stock, ~${p.daysOfSupply ?? "?"} days of supply at current pace)`)
+    .join(", ") || "none flagged right now";
+
   return `You are an inventory analyst for a small grocery store. Based on the real data below, write a genuinely useful, structured analysis for the store admin.
 
 Fast-moving products (best sellers): ${fastList}
 Moderate-moving products: ${moderateList}
 Slow-moving products (at risk of becoming dead stock): ${slowList}
 Products needing restock soon, sorted by urgency: ${restockList}
+Products with possible overstock (far more supply than current selling pace justifies — note this can happen even to a fast-seller if too much was ordered): ${overstockList}
 Total products with enough sales history to analyze: ${totalTracked}
 Products with no sales data yet (can't be analyzed): ${noDataCount ?? "unknown"}
 
@@ -139,7 +187,7 @@ Fill in each field with 1-2 plain-English sentences, no markdown, being specific
 - health: a direct read on overall inventory health right now
 - urgent: what needs restocking soonest and why, naming specific products
 - opportunity: what's selling well that the store should keep in stock or lean into
-- slowStock: name anything at risk of becoming dead stock and suggest a concrete next step (a promotion, bundling, reducing future restock quantity) — or say plainly if nothing looks concerning here`;
+- slowStock: cover both slow-moving stock at risk of becoming dead stock AND any possible overstock flagged above, naming specific products, and suggest a concrete next step for each (a promotion, bundling, reducing future restock quantity) — or say plainly if nothing looks concerning here`;
 }
 
 function corsHeaders() {
