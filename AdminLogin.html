@@ -103,6 +103,34 @@
                     </p>
                 </form>
 
+                <!-- FIRST-LOGIN EMAIL VERIFICATION (new admin accounts only) === -->
+                <form class="login-form" id="form-otp-verify" hidden>
+                    <p class="reset-password__email" id="otp-sent-to"></p>
+
+                    <div class="input-label">Enter the 6-digit code:</div>
+                    <div class="otp-digit-group" id="otp-digit-group">
+                        <input type="text" class="otp-digit-input" inputmode="numeric" maxlength="1" autocomplete="one-time-code" data-index="0">
+                        <input type="text" class="otp-digit-input" inputmode="numeric" maxlength="1" autocomplete="off" data-index="1">
+                        <input type="text" class="otp-digit-input" inputmode="numeric" maxlength="1" autocomplete="off" data-index="2">
+                        <input type="text" class="otp-digit-input" inputmode="numeric" maxlength="1" autocomplete="off" data-index="3">
+                        <input type="text" class="otp-digit-input" inputmode="numeric" maxlength="1" autocomplete="off" data-index="4">
+                        <input type="text" class="otp-digit-input" inputmode="numeric" maxlength="1" autocomplete="off" data-index="5">
+                    </div>
+
+                    <button type="submit" class="login-btn login-btn--top-gap" id="otp-verify-submit">
+                        <span class="login-btn__label">Verify & Continue</span>
+                        <svg class="icon-chevron" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M9 5L15 12L9 19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+
+                    <p class="auth-switch">
+                        Didn't get a code?
+                        <button type="button" class="auth-switch__link" id="otp-resend-btn">Resend code</button>
+                    </p>
+                    <p class="auth-switch">
+                        <button type="button" class="auth-switch__link" id="otp-cancel-btn">Cancel</button>
+                    </p>
+                </form>
+
             </div>
         </div>
 

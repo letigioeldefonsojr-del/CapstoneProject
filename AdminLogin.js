@@ -1,13 +1,14 @@
 import { auth, db } from "./firebase-config.js";
 import { promptForgotPassword } from "./ForgotPassword.js";
 import { checkLoginAllowed, recordFailedAttempt, resetAttempts } from "./LoginAttempts.js";
+import { sendOtpCode, verifyOtpCode } from "./OtpVerification.js";
 import {
   signInWithEmailAndPassword, onAuthStateChanged, signOut,
   setPersistence, browserLocalPersistence, browserSessionPersistence,
   GoogleAuthProvider, signInWithPopup
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import {
-  collection, query, where, getDocs, limit, doc, getDoc
+  collection, query, where, getDocs, limit, doc, getDoc, updateDoc
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 
 const ADMIN_COLLECTION = "admins";
@@ -23,7 +24,11 @@ onAuthStateChanged(auth, async (user) => {
   if (!user) return;
   try {
     const snap = await getDoc(doc(db, ADMIN_COLLECTION, user.uid));
-    if (snap.exists()) {
+    // emailVerified === false specifically (not just falsy) — existing
+    // admin accounts predate this field entirely and have it as
+    // undefined, which correctly means "already verified, nothing to
+    // check" rather than accidentally blocking every existing admin.
+    if (snap.exists() && snap.data().emailVerified !== false) {
       window.location.replace(ADMIN_REDIRECT_URL);
     }
   } catch (error) {
@@ -33,9 +38,62 @@ onAuthStateChanged(auth, async (user) => {
 
 document.addEventListener("DOMContentLoaded", () => {
   const formAdmin = document.getElementById("form-admin");
+  const formOtpVerify = document.getElementById("form-otp-verify");
+  const cardTitle = document.querySelector(".card-header h2");
   const statusBox = document.getElementById("form-status");
   const googleProvider = new GoogleAuthProvider();
   let activeCountdownInterval = null;
+  let pendingVerification = null;
+
+  function showOtpStep(email) {
+    formAdmin.hidden = true;
+    formOtpVerify.hidden = false;
+    if (cardTitle) cardTitle.textContent = "Verify Your Email";
+    document.getElementById("otp-sent-to").textContent = `We sent a 6-digit code to ${email}.`;
+    clearOtpDigitInputs();
+    hideStatus();
+    document.querySelector('.otp-digit-input[data-index="0"]').focus();
+  }
+
+  function hideOtpStep() {
+    formOtpVerify.hidden = true;
+    formAdmin.hidden = false;
+    if (cardTitle) cardTitle.textContent = "Administrator Login";
+  }
+
+  const otpDigitInputs = Array.from(document.querySelectorAll(".otp-digit-input"));
+
+  function clearOtpDigitInputs() {
+    otpDigitInputs.forEach((input) => { input.value = ""; });
+  }
+
+  function getOtpCode() {
+    return otpDigitInputs.map((input) => input.value).join("");
+  }
+
+  otpDigitInputs.forEach((input, index) => {
+    input.addEventListener("input", () => {
+      input.value = input.value.replace(/\D/g, "").slice(0, 1);
+      if (input.value && index < otpDigitInputs.length - 1) {
+        otpDigitInputs[index + 1].focus();
+      }
+    });
+
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Backspace" && !input.value && index > 0) {
+        otpDigitInputs[index - 1].focus();
+      }
+    });
+
+    input.addEventListener("paste", (event) => {
+      const pasted = (event.clipboardData || window.clipboardData).getData("text").replace(/\D/g, "");
+      if (!pasted) return;
+      event.preventDefault();
+      otpDigitInputs.forEach((box, boxIndex) => { box.value = pasted[boxIndex] || ""; });
+      const lastFilledIndex = Math.min(pasted.length, otpDigitInputs.length) - 1;
+      if (lastFilledIndex >= 0) otpDigitInputs[lastFilledIndex].focus();
+    });
+  });
 
   document.querySelectorAll(".password-toggle").forEach((toggle) => {
     toggle.addEventListener("click", () => {
@@ -175,6 +233,25 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
+      // New admin accounts (created via Accounts.js's "Add New Admin")
+      // start unverified — this proves whoever's actually logging in
+      // controls the email, not just that it was typed correctly when
+      // the account was created. Existing accounts never have this
+      // field at all, so it's undefined there, not false — meaning
+      // this only ever applies to genuinely new accounts.
+      if (adminData?.emailVerified === false) {
+        pendingVerification = { uid: auth.currentUser.uid, email, rawInput, name: adminData.name || "there" };
+        try {
+          await sendOtpCode(email, pendingVerification.name);
+          showOtpStep(email);
+        } catch (error) {
+          console.error("Couldn't send verification code:", error);
+          await signOut(auth);
+          showStatus("Couldn't send a verification code right now. Please try again.", "error");
+        }
+        return;
+      }
+
       await resetAttempts(rawInput);
       sessionStorage.setItem("almares_role", "admin");
       showStatus("Signed in. Redirecting...", "success");
@@ -193,6 +270,81 @@ document.addEventListener("DOMContentLoaded", () => {
     } finally {
       setButtonLoading(submitBtn, false, "Login", "Signing in...");
     }
+  }
+
+  async function handleOtpVerifySubmit(event) {
+    event.preventDefault();
+    hideStatus();
+
+    if (!pendingVerification) {
+      showStatus("Something went wrong — please log in again.", "error");
+      hideOtpStep();
+      return;
+    }
+
+    const code = getOtpCode();
+    const submitBtn = document.getElementById("otp-verify-submit");
+
+    if (code.length < 6) {
+      showStatus("Enter all 6 digits of the code.", "error");
+      return;
+    }
+
+    setButtonLoading(submitBtn, true, "Verify & Continue", "Verifying...");
+
+    try {
+      const result = await verifyOtpCode(pendingVerification.email, code);
+      if (!result.valid) {
+        showStatus(result.message, "error");
+        return;
+      }
+
+      await updateDoc(doc(db, ADMIN_COLLECTION, pendingVerification.uid), { emailVerified: true });
+      await resetAttempts(pendingVerification.rawInput);
+
+      sessionStorage.setItem("almares_role", "admin");
+      showStatus("Verified! Redirecting...", "success");
+      window.location.replace(ADMIN_REDIRECT_URL);
+    } catch (error) {
+      console.error("Couldn't verify code:", error);
+      showStatus("Something went wrong. Please try again.", "error");
+    } finally {
+      setButtonLoading(submitBtn, false, "Verify & Continue", "Verifying...");
+    }
+  }
+
+  async function handleOtpResend() {
+    if (!pendingVerification) return;
+    const resendBtn = document.getElementById("otp-resend-btn");
+    resendBtn.disabled = true;
+
+    try {
+      await sendOtpCode(pendingVerification.email, pendingVerification.name);
+      clearOtpDigitInputs();
+      otpDigitInputs[0].focus();
+      showStatus("A new code has been sent.", "success");
+    } catch (error) {
+      console.error("Couldn't resend code:", error);
+      showStatus("Couldn't resend the code right now. Please try again.", "error");
+    } finally {
+      resendBtn.disabled = false;
+    }
+  }
+
+  // Abandoning this step leaves a signed-in Firebase Auth user with an
+  // unverified account — sign them back out so they're not left in
+  // that half-finished state, and so the top-level onAuthStateChanged
+  // check (which also respects emailVerified) doesn't need to handle
+  // an in-between case.
+  async function handleOtpCancel() {
+    pendingVerification = null;
+    clearOtpDigitInputs();
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error("Couldn't sign out:", error);
+    }
+    hideOtpStep();
   }
 
   // Google Sign-In — existing admin accounts sign in normally. A
@@ -240,6 +392,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   formAdmin.addEventListener("submit", handleAdminLogin);
   document.getElementById("admin-google-btn").addEventListener("click", handleAdminGoogleSignIn);
+  formOtpVerify.addEventListener("submit", handleOtpVerifySubmit);
+  document.getElementById("otp-resend-btn").addEventListener("click", handleOtpResend);
+  document.getElementById("otp-cancel-btn").addEventListener("click", handleOtpCancel);
   document.querySelectorAll(".forgot-password-btn").forEach((btn) => {
     btn.addEventListener("click", () => promptForgotPassword());
   });

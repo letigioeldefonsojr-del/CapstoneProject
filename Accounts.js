@@ -1,7 +1,7 @@
 import { db, auth, app } from "./firebase-config.js";
 import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
 import {
-  getAuth, createUserWithEmailAndPassword, signOut
+  getAuth, createUserWithEmailAndPassword, updateProfile, signOut
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import {
   collection, onSnapshot, doc, setDoc, getDoc, updateDoc, deleteDoc, deleteField, Timestamp, serverTimestamp
@@ -516,11 +516,22 @@ function handleAddNewAdmin() {
       const result = await createUserWithEmailAndPassword(secondaryAuth, email, password);
       const newUid = result.user.uid;
 
+      // Firebase Auth's own displayName is what the sidebar's avatar
+      // and greeting actually read from for admin accounts (unlike
+      // employees, which have a Firestore fallback) — without this,
+      // it falls back to "?" and "there" instead of their real name.
+      await updateProfile(result.user, { displayName: name });
+
       await setDoc(doc(db, "admins", newUid), {
         name,
         email,
         username,
         role: "admin",
+        // Verified only once THEY log in and successfully enter an
+        // OTP sent to this email — proves whoever's actually logging
+        // in controls this inbox, not just that the person creating
+        // the account typed a real-looking address.
+        emailVerified: false,
         createdAt: serverTimestamp()
       });
 
