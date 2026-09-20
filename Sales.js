@@ -357,8 +357,20 @@ async function downloadReceipt(order) {
     const imgData = canvas.toDataURL("image/png");
 
     const { jsPDF } = window.jspdf;
-    const pdf = new jsPDF({ unit: "px", format: [canvas.width / 2, canvas.height / 2] });
-    pdf.addImage(imgData, "PNG", 0, 0, canvas.width / 2, canvas.height / 2);
+    const pxWidth = canvas.width / 2;
+    const pxHeight = canvas.height / 2;
+    // Root cause, confirmed directly: without an explicit orientation,
+    // jsPDF silently swaps width/height to force portrait whenever the
+    // content is wider than it is tall (a short receipt, few items) —
+    // squeezing the image into a page narrower than itself and
+    // cropping the right side. Explicitly matching orientation to the
+    // actual shape stops it from ever guessing.
+    const pdf = new jsPDF({
+      unit: "px",
+      format: [pxWidth, pxHeight],
+      orientation: pxWidth > pxHeight ? "landscape" : "portrait"
+    });
+    pdf.addImage(imgData, "PNG", 0, 0, pxWidth, pxHeight);
     pdf.save(`Receipt-${shortOrderId(order.id)}.pdf`);
   } catch (error) {
     console.error("Couldn't generate receipt:", error);
