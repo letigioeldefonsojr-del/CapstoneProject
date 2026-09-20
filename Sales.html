@@ -142,7 +142,13 @@
         </header>
 
         <div class="panel sales-date-panel">
-            <label for="sales-date-input" class="sales-date-panel__label">Viewing sales for:</label>
+            <div class="tab-row" id="sales-view-toggle">
+                <button type="button" class="tab-row__btn is-active" data-view="day">Today</button>
+                <button type="button" class="tab-row__btn" data-view="week">Weekly</button>
+                <button type="button" class="tab-row__btn" data-view="month">Monthly</button>
+                <button type="button" class="tab-row__btn" data-view="year">Yearly</button>
+            </div>
+            <label for="sales-date-input" class="sales-date-panel__label">Anchor date:</label>
             <input type="date" id="sales-date-input">
             <button type="button" class="btn-outline" id="sales-today-btn">Jump to Today</button>
         </div>
@@ -154,6 +160,8 @@
     </main>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script type="module" src="firebase-config.js"></script>
 <button type="button" id="scroll-to-top-btn" class="scroll-to-top-btn" aria-label="Back to top" hidden>
     <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M6 15L12 9L18 15" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>

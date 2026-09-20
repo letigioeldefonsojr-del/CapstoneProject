@@ -423,125 +423,6 @@ function shortOrderId(id) {
 }
 
 // ====================================================================
-// RECEIPT / INVOICE PDF
-// ----------------------------------------------------------------
-// Generated fresh, in the browser, the moment someone clicks the
-// button — nothing pre-generated or stored ahead of time.
-//
-// Builds the receipt as real, styled HTML first (a hidden div,
-// removed right after) — the ₱ symbol renders correctly there, same
-// as it already does everywhere else in this app, since that's just
-// normal browser text rendering. html2canvas then captures that HTML
-// as an image, which jsPDF embeds into the actual PDF page. This
-// sidesteps jsPDF's own built-in fonts entirely, which is what
-// couldn't render ₱ reliably in the first place (a real, known
-// limitation without embedding a whole custom Unicode font).
-//
-// HONEST TRADEOFF: since the receipt content is captured as an image
-// rather than real PDF text, the text in the resulting PDF isn't
-// selectable/searchable/copyable — a fair trade for a simple one-page
-// receipt where correct currency rendering matters more than that.
-// ====================================================================
-async function downloadReceipt(order) {
-  const html = buildReceiptHtml(order);
-
-  const container = document.createElement("div");
-  container.style.position = "fixed";
-  container.style.left = "-9999px";
-  container.style.top = "0";
-  container.style.width = "650px";
-  container.innerHTML = html;
-  document.body.appendChild(container);
-
-  // html2canvas captures whatever's actually rendered at the moment
-  // it runs — if the logo image hasn't finished loading yet, it
-  // captures a blank space instead of waiting for it. Explicitly
-  // waiting for the image's load event first avoids that.
-  const logoImg = container.querySelector("#receipt-logo");
-  if (logoImg && !logoImg.complete) {
-    await new Promise((resolve) => {
-      logoImg.onload = resolve;
-      logoImg.onerror = resolve; // don't hang forever if the logo genuinely fails to load
-    });
-  }
-
-  try {
-    const canvas = await html2canvas(container, { scale: 2, backgroundColor: "#ffffff" });
-    const imgData = canvas.toDataURL("image/png");
-
-    const { jsPDF } = window.jspdf;
-    const pdf = new jsPDF({ unit: "px", format: [canvas.width / 2, canvas.height / 2] });
-    pdf.addImage(imgData, "PNG", 0, 0, canvas.width / 2, canvas.height / 2);
-    pdf.save(`Receipt-${shortOrderId(order.id)}.pdf`);
-  } catch (error) {
-    console.error("Couldn't generate receipt:", error);
-  } finally {
-    container.remove();
-  }
-}
-
-function buildReceiptHtml(order) {
-  const orderDate = order.createdAt?.toDate?.() ? order.createdAt.toDate().toLocaleString() : "—";
-  const items = Array.isArray(order.items) ? order.items : [];
-  const BRAND_GREEN = "#14532d";
-  const CONTENT_WIDTH = 650; // must match the offscreen container's own width in downloadReceipt()
-
-  const itemRows = items.map((item) => {
-    const name = item.flavor ? `${item.productName} — ${item.flavor}` : (item.productName || "Item");
-    const unitPrice = typeof item.unitPrice === "number" ? `₱${item.unitPrice.toFixed(2)}` : "—";
-    const subtotal = typeof item.subtotal === "number" ? `₱${item.subtotal.toFixed(2)}` : "—";
-    return `
-      <div style="display:flex; padding:6px 0; border-bottom:1px solid #eee;">
-        <div style="width:250px; word-wrap:break-word; overflow-wrap:break-word;">${escapeHtmlReceipt(name)}</div>
-        <div style="width:90px; text-align:right;">× ${item.amount ?? 1}</div>
-        <div style="width:130px; text-align:right;">${unitPrice}</div>
-        <div style="width:116px; text-align:right;">${subtotal}</div>
-      </div>
-    `;
-  }).join("");
-
-  const total = typeof order.total === "number" ? `₱${order.total.toFixed(2)}` : "—";
-
-  // Deliberately no <table> anywhere — html2canvas (and similar
-  // html-to-canvas libraries) don't reliably replicate table layout,
-  // since they reimplement CSS layout themselves rather than using a
-  // real browser rendering engine for the capture. Plain flexbox divs
-  // with fixed pixel widths (matching the offscreen container's own
-  // fixed width, not a percentage) render far more predictably.
-  return `
-    <div style="box-sizing:border-box; width:${CONTENT_WIDTH}px; font-family: Arial, sans-serif; color: #222; padding: 32px; word-wrap: break-word; overflow-wrap: break-word;">
-      <img id="receipt-logo" src="Logo.png" alt="Almares 328 Logo" style="display:block; margin:0 auto 12px; width:64px; height:64px; object-fit:contain;">
-      <h2 style="text-align:center; margin:0 0 4px; color:${BRAND_GREEN}; font-size:20px; line-height:1.3;">Almares 328 Wholesale Grocery Store</h2>
-      <p style="text-align:center; margin:0 0 20px; color:#666;">Official Receipt</p>
-      <hr style="border:none; border-top:2px solid ${BRAND_GREEN}; margin-bottom:16px;">
-      <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px;">
-        <span>Order ID: ${escapeHtmlReceipt(shortOrderId(order.id))}</span>
-        <span>Date: ${escapeHtmlReceipt(orderDate)}</span>
-      </div>
-      <p style="font-size:13px; margin:0 0 4px;">Customer: ${escapeHtmlReceipt(order.customerName || "—")}</p>
-      ${order.customerAddress ? `<p style="font-size:13px; margin:0 0 16px;">Delivery Address: ${escapeHtmlReceipt(order.customerAddress)}</p>` : "<div style='margin-bottom:16px;'></div>"}
-      <hr style="border:none; border-top:1px solid #ccc; margin-bottom:12px;">
-      <div style="display:flex; font-weight:bold; border-bottom:2px solid ${BRAND_GREEN}; color:${BRAND_GREEN}; padding-bottom:6px; font-size:13px;">
-        <div style="width:250px;">Item</div>
-        <div style="width:90px; text-align:right;">Qty</div>
-        <div style="width:130px; text-align:right;">Unit Price</div>
-        <div style="width:116px; text-align:right;">Subtotal</div>
-      </div>
-      <div style="font-size:13px;">${itemRows}</div>
-      <hr style="border:none; border-top:2px solid ${BRAND_GREEN}; margin:12px 0;">
-      <p style="text-align:right; font-size:16px; font-weight:bold; margin:0 0 20px; color:${BRAND_GREEN};">Total: ${total}</p>
-      <p style="text-align:center; font-size:11px; color:#999;">Thank you for your business.</p>
-    </div>
-  `;
-}
-
-function escapeHtmlReceipt(text) {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-// ====================================================================
 // DELIVERY ADDRESS MAP
 // ----------------------------------------------------------------
 // Orders only store a plain text address (whatever the customer
@@ -755,11 +636,7 @@ function buildActionsForOrder(order) {
     reasonNote.textContent = order.cancelReason;
     wrap.appendChild(reasonNote);
   }
-
-  if (order.status === "delivered") {
-    wrap.appendChild(buildActionButton("Download Receipt", "btn-outline", () => downloadReceipt(order)));
-  }
-  // rejected / undelivered / awaiting-confirmation: no actions, view-only.
+  // delivered / rejected / undelivered / awaiting-confirmation: no actions, view-only.
 
   return wrap;
 }
