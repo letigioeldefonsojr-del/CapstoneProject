@@ -368,7 +368,7 @@ async function downloadReceipt(order) {
 }
 
 function buildReceiptHtml(order) {
-  const orderDate = order.createdAt?.toDate?.() ? order.createdAt.toDate().toLocaleString() : "—";
+  const orderDate = order.createdAt?.toDate?.() ? order.createdAt.toDate().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" }) : "—";
   const items = Array.isArray(order.items) ? order.items : [];
   const BRAND_GREEN = "#14532d";
   const CONTENT_WIDTH = 650;
@@ -378,40 +378,70 @@ function buildReceiptHtml(order) {
     const unitPrice = typeof item.unitPrice === "number" ? `₱${item.unitPrice.toFixed(2)}` : "—";
     const subtotal = typeof item.subtotal === "number" ? `₱${item.subtotal.toFixed(2)}` : "—";
     return `
-      <div style="display:flex; padding:6px 0; border-bottom:1px solid #eee;">
-        <div style="width:250px; word-wrap:break-word; overflow-wrap:break-word;">${escapeHtmlSales(name)}</div>
-        <div style="width:90px; text-align:right;">× ${item.amount ?? 1}</div>
-        <div style="width:130px; text-align:right;">${unitPrice}</div>
-        <div style="width:116px; text-align:right;">${subtotal}</div>
+      <div style="display:flex; padding:8px 0; border-bottom:1px solid #eee; font-size:13px;">
+        <div style="width:260px; word-wrap:break-word; overflow-wrap:break-word;">${escapeHtmlSales(name)}</div>
+        <div style="width:70px; text-align:right; color:#555;">${item.amount ?? 1}</div>
+        <div style="width:130px; text-align:right; color:#555;">${unitPrice}</div>
+        <div style="width:110px; text-align:right;">${subtotal}</div>
       </div>
     `;
   }).join("");
 
-  const total = typeof order.total === "number" ? `₱${order.total.toFixed(2)}` : "—";
+  const total = typeof order.total === "number" ? order.total : null;
+  const totalLabel = total != null ? `₱${total.toFixed(2)}` : "—";
 
+  // Layout modeled after a clean, standard invoice format (metadata
+  // block, two-column billing section, itemized table, right-aligned
+  // totals) rather than a heavily-branded storefront receipt — easier
+  // to read at a glance and consistent with what customers already
+  // expect a formal receipt to look like.
   return `
-    <div style="box-sizing:border-box; width:${CONTENT_WIDTH}px; font-family: Arial, sans-serif; color: #222; padding: 32px; word-wrap: break-word; overflow-wrap: break-word;">
-      <img id="receipt-logo" src="Logo.png" alt="Almares 328 Logo" style="display:block; margin:0 auto 12px; width:64px; height:64px; object-fit:contain;">
-      <h2 style="text-align:center; margin:0 0 4px; color:${BRAND_GREEN}; font-size:20px; line-height:1.3;">Almares 328 Wholesale Grocery Store</h2>
-      <p style="text-align:center; margin:0 0 20px; color:#666;">Official Receipt</p>
-      <hr style="border:none; border-top:2px solid ${BRAND_GREEN}; margin-bottom:16px;">
-      <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px;">
-        <span>Order ID: ${escapeHtmlSales(shortOrderId(order.id))}</span>
-        <span>Date: ${escapeHtmlSales(orderDate)}</span>
+    <div style="box-sizing:border-box; width:${CONTENT_WIDTH}px; font-family: Arial, sans-serif; color: #222; padding: 40px; word-wrap: break-word; overflow-wrap: break-word;">
+
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:28px;">
+        <h2 style="margin:0; font-size:24px; color:#111;">Receipt</h2>
+        <img id="receipt-logo" src="Logo.png" alt="Almares 328 Logo" style="width:48px; height:48px; object-fit:contain;">
       </div>
-      <p style="font-size:13px; margin:0 0 4px;">Customer: ${escapeHtmlSales(order.customerName || "—")}</p>
-      ${order.customerAddress ? `<p style="font-size:13px; margin:0 0 16px;">Delivery Address: ${escapeHtmlSales(order.customerAddress)}</p>` : "<div style='margin-bottom:16px;'></div>"}
-      <hr style="border:none; border-top:1px solid #ccc; margin-bottom:12px;">
-      <div style="display:flex; font-weight:bold; border-bottom:2px solid ${BRAND_GREEN}; color:${BRAND_GREEN}; padding-bottom:6px; font-size:13px;">
-        <div style="width:250px;">Item</div>
-        <div style="width:90px; text-align:right;">Qty</div>
+
+      <div style="font-size:13px; line-height:1.9; margin-bottom:28px;">
+        <div style="display:flex;"><div style="width:150px; color:#666;">Order ID</div><div>${escapeHtmlSales(shortOrderId(order.id))}</div></div>
+        <div style="display:flex;"><div style="width:150px; color:#666;">Date</div><div>${escapeHtmlSales(orderDate)}</div></div>
+      </div>
+
+      <div style="display:flex; gap:40px; margin-bottom:28px; font-size:13px; line-height:1.7;">
+        <div style="flex:1;">
+          <div style="font-weight:bold; margin-bottom:4px;">Almares 328 Wholesale Grocery Store</div>
+          <div style="color:#555;">Batangas City, Philippines</div>
+        </div>
+        <div style="flex:1;">
+          <div style="font-weight:bold; margin-bottom:4px;">Bill to</div>
+          <div style="color:#555;">${escapeHtmlSales(order.customerName || "—")}</div>
+          ${order.customerAddress ? `<div style="color:#555;">${escapeHtmlSales(order.customerAddress)}</div>` : ""}
+        </div>
+      </div>
+
+      <h3 style="font-size:16px; margin:0 0 16px; color:#111;">${totalLabel} paid on ${escapeHtmlSales(orderDate)}</h3>
+
+      <div style="display:flex; font-size:11px; text-transform:uppercase; letter-spacing:0.03em; color:#888; border-bottom:1px solid #ddd; padding-bottom:8px; margin-bottom:4px;">
+        <div style="width:260px;">Description</div>
+        <div style="width:70px; text-align:right;">Qty</div>
         <div style="width:130px; text-align:right;">Unit Price</div>
-        <div style="width:116px; text-align:right;">Subtotal</div>
+        <div style="width:110px; text-align:right;">Amount</div>
       </div>
-      <div style="font-size:13px;">${itemRows}</div>
-      <hr style="border:none; border-top:2px solid ${BRAND_GREEN}; margin:12px 0;">
-      <p style="text-align:right; font-size:16px; font-weight:bold; margin:0 0 20px; color:${BRAND_GREEN};">Total: ${total}</p>
-      <p style="text-align:center; font-size:11px; color:#999;">Thank you for your business.</p>
+      <div>${itemRows}</div>
+
+      <div style="display:flex; justify-content:flex-end; margin-top:16px;">
+        <div style="width:230px; font-size:13px;">
+          <div style="display:flex; justify-content:space-between; padding:4px 0;">
+            <span style="color:#666;">Subtotal</span><span>${totalLabel}</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; padding:8px 0; border-top:1px solid ${BRAND_GREEN}; margin-top:4px; font-weight:bold; color:${BRAND_GREEN};">
+            <span>Total</span><span>${totalLabel}</span>
+          </div>
+        </div>
+      </div>
+
+      <p style="text-align:center; font-size:11px; color:#999; margin-top:36px;">Thank you for your business.</p>
     </div>
   `;
 }

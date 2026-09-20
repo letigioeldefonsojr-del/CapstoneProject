@@ -28,6 +28,19 @@ const COLLECTION = "loginAttempts";
 const FREE_ATTEMPTS = 6; // first N failures show a plain error, no lockout at all
 const BASE_LOCKOUT_SECONDS = 30;
 const PERMANENT_LOCK_THRESHOLD = 15; // more than this many TOTAL failures = locked until admin clears it
+// If 15 minutes pass with no new failure, the count resets back to
+// zero — a genuinely mistyped password from a while ago shouldn't
+// permanently count against someone weeks later. This does NOT apply
+// to a permanent lock (see below) — that one stays until an admin
+// clears it specifically, otherwise it'd be meaningless (anyone could
+// just wait 15 minutes and keep trying forever).
+const ATTEMPT_RESET_WINDOW_MINUTES = 15;
+
+function isExpired(lastAttemptAt) {
+  const lastAttemptMillis = lastAttemptAt?.toMillis?.();
+  if (!lastAttemptMillis) return true; // no timestamp on record — treat as expired/fresh rather than guessing
+  return Date.now() - lastAttemptMillis > ATTEMPT_RESET_WINDOW_MINUTES * 60 * 1000;
+}
 
 function normalizeKey(identifier) {
   return identifier.trim().toLowerCase();
@@ -49,6 +62,13 @@ export async function checkLoginAllowed(identifier) {
         allowed: false,
         message: "This account has been locked after too many failed attempts. Contact an administrator to unlock it."
       };
+    }
+
+    // 15+ minutes since the last failure — this record is stale,
+    // treat it as if it doesn't exist at all rather than honoring an
+    // old, expired lockout window.
+    if (isExpired(data.lastAttemptAt)) {
+      return { allowed: true };
     }
 
     const lockedUntilMillis = data.lockedUntil?.toMillis?.();
@@ -74,7 +94,15 @@ export async function recordFailedAttempt(identifier) {
   const ref = attemptDocRef(identifier);
   try {
     const snap = await getDoc(ref);
-    const previousCount = snap.exists() ? (snap.data().failedCount || 0) : 0;
+    const existingData = snap.exists() ? snap.data() : null;
+
+    // A permanent lock is never reset by time passing — only an admin
+    // clearing it. Everything else (the free-attempt count, the
+    // escalating lockout) resets to zero once 15 minutes have passed
+    // since the last failure, treating this as a fresh start rather
+    // than continuing to add on to a stale count from a while ago.
+    const recordIsStale = existingData && !existingData.permanentlyLocked && isExpired(existingData.lastAttemptAt);
+    const previousCount = existingData && !recordIsStale ? (existingData.failedCount || 0) : 0;
     const failedCount = previousCount + 1;
     const permanentlyLocked = failedCount > PERMANENT_LOCK_THRESHOLD;
 
@@ -92,7 +120,7 @@ export async function recordFailedAttempt(identifier) {
       const remaining = FREE_ATTEMPTS - failedCount;
       return {
         message: remaining > 0
-          ? `Incorrect email or password. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining.`
+          ? `Incorrect email or password. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining before a wait is required.`
           : "Incorrect email or password."
       };
     }
