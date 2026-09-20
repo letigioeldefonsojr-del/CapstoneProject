@@ -36,6 +36,10 @@ document.addEventListener("sidebar:ready", (event) => {
 
   dateInput.addEventListener("change", loadSales);
   todayBtn.addEventListener("click", () => {
+    viewMode = "day";
+    document.querySelectorAll("#sales-view-toggle .tab-row__btn").forEach((b) =>
+      b.classList.toggle("is-active", b.dataset.view === "day")
+    );
     dateInput.value = formatDateForInput(new Date());
     loadSales();
   });
@@ -390,7 +394,7 @@ function buildReceiptHtml(order) {
     const unitPrice = typeof item.unitPrice === "number" ? `₱${item.unitPrice.toFixed(2)}` : "—";
     const subtotal = typeof item.subtotal === "number" ? `₱${item.subtotal.toFixed(2)}` : "—";
     return `
-      <div style="display:flex; padding:8px 0; border-bottom:1px solid #eee; font-size:13px;">
+      <div style="display:flex; padding:8px 0; border-bottom:1px solid #eee; font-size:11px;">
         <div style="width:260px; word-wrap:break-word; overflow-wrap:break-word;">${escapeHtmlSales(name)}</div>
         <div style="width:70px; text-align:right; color:#555;">${item.amount ?? 1}</div>
         <div style="width:130px; text-align:right; color:#555;">${unitPrice}</div>
@@ -411,16 +415,16 @@ function buildReceiptHtml(order) {
     <div style="box-sizing:border-box; width:${CONTENT_WIDTH}px; font-family: Arial, sans-serif; color: #222; padding: 40px; word-wrap: break-word; overflow-wrap: break-word;">
 
       <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:28px;">
-        <h2 style="margin:0; font-size:24px; color:#111;">Receipt</h2>
+        <h2 style="margin:0; font-size:20px; color:#111;">Receipt</h2>
         <img id="receipt-logo" src="Logo.png" alt="Almares 328 Logo" style="width:48px; height:48px; object-fit:contain;">
       </div>
 
-      <div style="font-size:13px; line-height:1.9; margin-bottom:28px;">
+      <div style="font-size:11px; line-height:1.9; margin-bottom:28px;">
         <div style="display:flex;"><div style="width:150px; color:#666;">Order ID</div><div>${escapeHtmlSales(shortOrderId(order.id))}</div></div>
         <div style="display:flex;"><div style="width:150px; color:#666;">Date</div><div>${escapeHtmlSales(orderDate)}</div></div>
       </div>
 
-      <div style="display:flex; gap:40px; margin-bottom:28px; font-size:13px; line-height:1.7;">
+      <div style="display:flex; gap:40px; margin-bottom:28px; font-size:11px; line-height:1.7;">
         <div style="flex:1;">
           <div style="font-weight:bold; margin-bottom:4px;">Almares 328 Wholesale Grocery Store</div>
           <div style="color:#555;">Batangas City, Philippines</div>
@@ -432,9 +436,9 @@ function buildReceiptHtml(order) {
         </div>
       </div>
 
-      <h3 style="font-size:16px; margin:0 0 16px; color:#111;">${totalLabel} paid on ${escapeHtmlSales(orderDate)}</h3>
+      <h3 style="font-size:13px; margin:0 0 16px; color:#111;">${totalLabel} paid on ${escapeHtmlSales(orderDate)}</h3>
 
-      <div style="display:flex; font-size:11px; text-transform:uppercase; letter-spacing:0.03em; color:#888; border-bottom:1px solid #ddd; padding-bottom:8px; margin-bottom:4px;">
+      <div style="display:flex; font-size:9px; text-transform:uppercase; letter-spacing:0.03em; color:#888; border-bottom:1px solid #ddd; padding-bottom:8px; margin-bottom:4px;">
         <div style="width:260px;">Description</div>
         <div style="width:70px; text-align:right;">Qty</div>
         <div style="width:130px; text-align:right;">Unit Price</div>
@@ -443,7 +447,7 @@ function buildReceiptHtml(order) {
       <div>${itemRows}</div>
 
       <div style="display:flex; justify-content:flex-end; margin-top:16px;">
-        <div style="width:230px; font-size:13px;">
+        <div style="width:230px; font-size:11px;">
           <div style="display:flex; justify-content:space-between; padding:4px 0;">
             <span style="color:#666;">Subtotal</span><span>${totalLabel}</span>
           </div>
@@ -453,7 +457,7 @@ function buildReceiptHtml(order) {
         </div>
       </div>
 
-      <p style="text-align:center; font-size:11px; color:#999; margin-top:36px;">Thank you for your business.</p>
+      <p style="text-align:center; font-size:9px; color:#999; margin-top:36px;">Thank you for your business.</p>
     </div>
   `;
 }
