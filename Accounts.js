@@ -391,12 +391,32 @@ function getSelectedReason(overlay, idPrefix) {
 // instance is torn down immediately after, win or lose.
 // ====================================================================
 function generateTempPassword() {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+  const letters = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz";
+  const digits = "23456789";
+  // Firebase's own auth service enforces a password policy on this
+  // project requiring at least one non-alphanumeric character —
+  // discovered directly from a real signup attempt failing with
+  // auth/password-does-not-meet-requirements. Excluding ambiguous
+  // symbols (quotes, backslash) that could cause confusion if
+  // hand-typed from a screen.
+  const symbols = "!@#$%^&*-_=+";
+  const allChars = letters + digits + symbols;
+
   let result = "";
-  for (let i = 0; i < 12; i++) {
-    result += chars[Math.floor(Math.random() * chars.length)];
+  // Guarantee at least one of each category, rather than leaving it
+  // to chance — a long random string drawn from a mixed set can
+  // still occasionally miss a category entirely by pure chance.
+  result += letters[Math.floor(Math.random() * letters.length)];
+  result += digits[Math.floor(Math.random() * digits.length)];
+  result += symbols[Math.floor(Math.random() * symbols.length)];
+
+  for (let i = result.length; i < 12; i++) {
+    result += allChars[Math.floor(Math.random() * allChars.length)];
   }
-  return result;
+
+  // Shuffle so the guaranteed characters aren't predictably at the
+  // start of every generated password.
+  return result.split("").sort(() => Math.random() - 0.5).join("");
 }
 
 function handleAddNewAdmin() {
@@ -514,7 +534,9 @@ function handleAddNewAdmin() {
       console.error("Couldn't create admin account:", error);
       statusEl.textContent = error.code === "auth/email-already-in-use"
         ? "That email is already registered."
-        : "Something went wrong. Please try again.";
+        : error.code === "auth/password-does-not-meet-requirements"
+          ? "Password must include a special character (like ! @ # $ %), not just letters and numbers."
+          : "Something went wrong. Please try again.";
       statusEl.dataset.kind = "error";
       statusEl.hidden = false;
       btn.disabled = false;
