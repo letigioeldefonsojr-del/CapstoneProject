@@ -4,8 +4,7 @@ import { checkLoginAllowed, recordFailedAttempt, resetAttempts } from "./LoginAt
 import { sendOtpCode, verifyOtpCode } from "./OtpVerification.js";
 import {
   signInWithEmailAndPassword, onAuthStateChanged, signOut,
-  setPersistence, browserLocalPersistence, browserSessionPersistence,
-  GoogleAuthProvider, signInWithPopup
+  setPersistence, browserLocalPersistence, browserSessionPersistence
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import {
   collection, query, where, getDocs, limit, doc, getDoc, updateDoc
@@ -41,7 +40,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const formOtpVerify = document.getElementById("form-otp-verify");
   const cardTitle = document.querySelector(".card-header h2");
   const statusBox = document.getElementById("form-status");
-  const googleProvider = new GoogleAuthProvider();
   let activeCountdownInterval = null;
   let pendingVerification = null;
 
@@ -347,51 +345,8 @@ document.addEventListener("DOMContentLoaded", () => {
     hideOtpStep();
   }
 
-  // Google Sign-In — existing admin accounts sign in normally. A
-  // first-time Google sign-in here does NOT create a new admin
-  // account (admin self-signup was removed entirely) — they're
-  // signed back out with a message instead.
-  async function handleAdminGoogleSignIn() {
-    const btn = document.getElementById("admin-google-btn");
-    btn.disabled = true;
-    hideStatus();
-
-    try {
-      const result = await signInWithPopup(auth, googleProvider);
-      const user = result.user;
-      const existingDoc = await getDoc(doc(db, ADMIN_COLLECTION, user.uid));
-
-      if (existingDoc.exists()) {
-        const data = existingDoc.data();
-        const suspendedUntilMillis = data.suspendedUntil?.toMillis?.();
-        if (suspendedUntilMillis && suspendedUntilMillis > Date.now()) {
-          await signOut(auth);
-          showSuspensionOverlay(new Date(suspendedUntilMillis).toLocaleDateString(), data.suspensionReason || "");
-          return;
-        }
-
-        sessionStorage.setItem("almares_role", "admin");
-        showStatus("Signed in. Redirecting...", "success");
-        window.location.replace(ADMIN_REDIRECT_URL);
-        return;
-      }
-
-      await signOut(auth);
-      showStatus("Admin accounts can't be created this way. Ask an existing admin to add you from the Accounts page.", "error");
-    } catch (error) {
-      if (error.code === "auth/popup-closed-by-user" || error.code === "auth/cancelled-popup-request") {
-        // They just closed the popup — not a real error, nothing to show.
-      } else {
-        console.error("Google sign-in failed:", error);
-        showStatus("Google sign-in failed. Please try again.", "error");
-      }
-    } finally {
-      btn.disabled = false;
-    }
-  }
 
   formAdmin.addEventListener("submit", handleAdminLogin);
-  document.getElementById("admin-google-btn").addEventListener("click", handleAdminGoogleSignIn);
   formOtpVerify.addEventListener("submit", handleOtpVerifySubmit);
   document.getElementById("otp-resend-btn").addEventListener("click", handleOtpResend);
   document.getElementById("otp-cancel-btn").addEventListener("click", handleOtpCancel);
