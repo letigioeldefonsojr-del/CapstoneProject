@@ -63,6 +63,16 @@
                 <span class="nav-item__label">Orders</span>
             </a>
 
+            <a href="Sales.html" class="nav-item" hidden id="sales-nav-link">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path d="M3.5 19.5H20.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                    <rect x="5.5" y="13" width="3" height="6.5" rx="0.8" stroke="currentColor" stroke-width="1.6"/>
+                    <rect x="10.5" y="9" width="3" height="10.5" rx="0.8" stroke="currentColor" stroke-width="1.6"/>
+                    <rect x="15.5" y="5" width="3" height="14.5" rx="0.8" stroke="currentColor" stroke-width="1.6"/>
+                </svg>
+                <span class="nav-item__label">Sales</span>
+            </a>
+
             <a href="Forecast.html" class="nav-item">
                 <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                     <path d="M3.5 17L9 11L13 15L20.5 6.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
@@ -113,8 +123,10 @@
             if (sessionStorage.getItem("almares_role") === "admin") {
               var feedbackLink = document.getElementById("feedback-nav-link");
               var accountsLink = document.getElementById("accounts-nav-link");
+              var salesLink = document.getElementById("sales-nav-link");
               if (feedbackLink) feedbackLink.hidden = false;
               if (accountsLink) accountsLink.hidden = false;
+              if (salesLink) salesLink.hidden = false;
             }
           })();
         </script>

@@ -1427,7 +1427,8 @@ async function handleScannerAction() {
       variantName: result.variantName,
       type: scannerMode === "sale" ? "sale" : "count",
       previousStock: result.previousStock,
-      newStock: result.newStock
+      newStock: result.newStock,
+      unitPrice: scannerMode === "sale" ? result.unitPrice : null
     });
 
     scannerCurrentMatch = null;
@@ -1466,7 +1467,8 @@ async function performScanAction(productId, barcode, mode, value) {
         name: data[PRODUCT_NAME_FIELD] || "Product",
         productId,
         productName: data[PRODUCT_NAME_FIELD] || "Product",
-        variantName: null
+        variantName: null,
+        unitPrice: typeof data[PRODUCT_PRICE_FIELD] === "number" ? data[PRODUCT_PRICE_FIELD] : null
       };
     }
 
@@ -1489,7 +1491,8 @@ async function performScanAction(productId, barcode, mode, value) {
       name: `${data[PRODUCT_NAME_FIELD] || "Product"} — ${variant.name || "Variant"}`,
       productId,
       productName: data[PRODUCT_NAME_FIELD] || "Product",
-      variantName: variant.name || "Variant"
+      variantName: variant.name || "Variant",
+      unitPrice: typeof variant[PRODUCT_PRICE_FIELD] === "number" ? variant[PRODUCT_PRICE_FIELD] : null
     };
   });
 }
@@ -1602,7 +1605,7 @@ function logManualStockChanges(oldProduct, newProductData, productName, productI
   });
 }
 
-function logStockMovement({ productId, productName, variantName, type, previousStock, newStock }) {
+function logStockMovement({ productId, productName, variantName, type, previousStock, newStock, unitPrice }) {
   // Fire-and-forget on purpose — a failed log write shouldn't block
   // or roll back the actual stock change, which already succeeded.
   addDoc(collection(db, STOCK_MOVEMENTS_COLLECTION), {
@@ -1612,6 +1615,11 @@ function logStockMovement({ productId, productName, variantName, type, previousS
     type,
     previousStock,
     newStock,
+    // Only meaningful for sales — captured at the exact moment of
+    // sale so future sales reports can compute real revenue instead
+    // of estimating from whatever the CURRENT price happens to be,
+    // which could easily differ from what it was on the actual day.
+    unitPrice: typeof unitPrice === "number" ? unitPrice : null,
     performedByEmail: currentUser?.email || "unknown",
     performedByRole: currentUserRole,
     createdAt: serverTimestamp()

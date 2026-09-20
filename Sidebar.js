@@ -116,6 +116,8 @@ function applyRoleRestrictedNavItems(role) {
   if (feedbackLink) feedbackLink.hidden = false;
   const accountsLink = document.getElementById("accounts-nav-link");
   if (accountsLink) accountsLink.hidden = false;
+  const salesLink = document.getElementById("sales-nav-link");
+  if (salesLink) salesLink.hidden = false;
 }
 
 // ====================================================================
