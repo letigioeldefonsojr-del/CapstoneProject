@@ -37,6 +37,12 @@ const PRODUCT_PRICE_FIELD     = "price";
 const PRODUCT_AVAILABLE_FIELD = "available";
 const PRODUCT_IMAGE_FIELD     = "imageUrl";
 const PRODUCT_VARIANTS_FIELD  = "flavors";
+// How this product is sold — distinct from the free-text "unit" field
+// (which stays as-is, e.g. "pcs", "box"). Lives on the parent product,
+// not per-variant, since a product's packaging type is normally the
+// same across all its flavors.
+const PRODUCT_SELLING_TYPE_FIELD = "sellingType";
+const SELLING_TYPE_LABELS = { ream: "Ream", bulk: "Bulk", piece: "Piece" };
 const BARCODE_FIELD           = "barcode"; // same field name at parent and variant level
 const STOCK_MOVEMENTS_COLLECTION = "stockMovements";
 const STOCK_FIELD             = "stockCount"; // parent product's own stock field
@@ -345,7 +351,7 @@ function renderInventoryTable(products, stockFilter) {
   countLabel.textContent = `${products.length} product${products.length === 1 ? "" : "s"}`;
 
   if (products.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="${isAdmin ? 7 : 5}" class="inventory-empty">No products found.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${isAdmin ? 9 : 7}" class="inventory-empty">No products found.</td></tr>`;
     return;
   }
 
@@ -407,6 +413,8 @@ function buildProductRow(product, hasVariants, variants) {
     <td></td>
     <td></td>
     <td></td>
+    <td></td>
+    <td></td>
   `;
 
   const productCell = row.querySelector(".inventory-product");
@@ -440,18 +448,21 @@ function buildProductRow(product, hasVariants, variants) {
   const cells = row.querySelectorAll("td");
   const offset = isAdmin ? 1 : 0;
   cells[1 + offset].textContent = category;
+  cells[2 + offset].appendChild(buildSellingTypeBadge(product[PRODUCT_SELLING_TYPE_FIELD]));
 
   if (hasVariants) {
-    cells[2 + offset].textContent = `${variants.length} variant${variants.length === 1 ? "" : "s"}`;
-    cells[3 + offset].textContent = variantPriceRange(variants);
-    cells[4 + offset].appendChild(buildVariantSummaryBadge(variants));
+    cells[3 + offset].textContent = `${variants.length} variant${variants.length === 1 ? "" : "s"}`;
+    cells[4 + offset].textContent = variantPriceRange(variants);
+    cells[5 + offset].textContent = variantWholesaleRange(variants);
+    cells[6 + offset].appendChild(buildVariantSummaryBadge(variants));
   } else {
     const stock = product[STOCK_FIELD];
     const price = product[PRODUCT_PRICE_FIELD];
     const isAvailable = product[PRODUCT_AVAILABLE_FIELD];
-    cells[2 + offset].textContent = typeof stock === "number" ? stock : "—";
-    cells[3 + offset].textContent = price || "—";
-    cells[4 + offset].appendChild(buildStockBadge(stock, isAvailable));
+    cells[3 + offset].textContent = typeof stock === "number" ? stock : "—";
+    cells[4 + offset].textContent = price || "—";
+    cells[5 + offset].textContent = product.wholesalePrice || "—";
+    cells[6 + offset].appendChild(buildStockBadge(stock, isAvailable));
   }
 
   if (isAdmin) {
@@ -493,7 +504,7 @@ function buildVariantRow(variants) {
   row.hidden = true;
 
   const cell = document.createElement("td");
-  cell.colSpan = isAdmin ? 7 : 5;
+  cell.colSpan = isAdmin ? 9 : 7;
 
   const list = document.createElement("div");
   list.className = "variant-list";
@@ -503,6 +514,7 @@ function buildVariantRow(variants) {
     const variantName = isObject ? (variant.name || variant.flavor || variant.label || "Variant") : String(variant);
     const variantStock = isObject ? variant[VARIANT_STOCK_FIELD] : undefined;
     const variantPrice = isObject ? variant[PRODUCT_PRICE_FIELD] : undefined;
+    const variantWholesale = isObject ? variant.wholesalePrice : undefined;
     const variantAvailable = isObject ? variant[PRODUCT_AVAILABLE_FIELD] : undefined;
     const variantImage = isObject ? variant[PRODUCT_IMAGE_FIELD] : undefined;
 
@@ -512,6 +524,7 @@ function buildVariantRow(variants) {
       <span class="variant-list__name"></span>
       <span class="variant-list__stock"></span>
       <span class="variant-list__price"></span>
+      <span class="variant-list__wholesale"></span>
     `;
 
     const thumb = variantImage ? document.createElement("img") : document.createElement("span");
@@ -528,7 +541,8 @@ function buildVariantRow(variants) {
     item.querySelector(".variant-list__name").textContent = variantName;
     item.querySelector(".variant-list__stock").textContent =
       typeof variantStock === "number" ? `${variantStock} in stock` : "Stock not set";
-    item.querySelector(".variant-list__price").textContent = variantPrice || "—";
+    item.querySelector(".variant-list__price").textContent = `Retail ${variantPrice || "—"}`;
+    item.querySelector(".variant-list__wholesale").textContent = `Wholesale ${variantWholesale || "—"}`;
     item.appendChild(buildStockBadge(variantStock, variantAvailable));
 
     list.appendChild(item);
@@ -573,6 +587,36 @@ function buildStockBadge(stock, isAvailable) {
   badge.className = `stock-badge stock-badge--${status}`;
   badge.textContent = STATUS_LABELS[status];
   return badge;
+}
+
+function normalizeSellingType(raw) {
+  const value = String(raw || "").trim().toLowerCase();
+  return SELLING_TYPE_LABELS[value] ? value : null;
+}
+
+function buildSellingTypeBadge(sellingType) {
+  const badge = document.createElement("span");
+  if (!sellingType) {
+    badge.className = "type-badge type-badge--unknown";
+    badge.textContent = "—";
+    return badge;
+  }
+  badge.className = `type-badge type-badge--${sellingType}`;
+  badge.textContent = SELLING_TYPE_LABELS[sellingType] || sellingType;
+  return badge;
+}
+
+function variantWholesaleRange(variants) {
+  const parsed = variants
+    .map((v) => (v && typeof v === "object" ? v.wholesalePrice : null))
+    .filter(Boolean)
+    .map((p) => parseFloat(String(p).replace(/[^\d.]/g, "")))
+    .filter((n) => !isNaN(n));
+
+  if (parsed.length === 0) return "—";
+  const min = Math.min(...parsed);
+  const max = Math.max(...parsed);
+  return min === max ? `₱${min.toFixed(2)}` : `₱${min.toFixed(2)}–₱${max.toFixed(2)}`;
 }
 
 // ====================================================================
@@ -655,6 +699,7 @@ function openEditModal(product) {
   document.getElementById("pf-sku").value = product.sku || "";
   document.getElementById("pf-barcode").value = product[BARCODE_FIELD] || "";
   document.getElementById("pf-unit").value = product.unit || "";
+  document.getElementById("pf-selling-type").value = product[PRODUCT_SELLING_TYPE_FIELD] || "";
   document.getElementById("pf-principal").value = product.principal || "";
   document.getElementById("pf-wholesale").value = parsePriceNumber(product.wholesalePrice);
   setImagePreview(product[PRODUCT_IMAGE_FIELD] || "");
@@ -671,6 +716,7 @@ function openEditModal(product) {
         name: isObject ? (v.name || v.flavor || v.label || "") : String(v),
         stock: isObject && typeof v[VARIANT_STOCK_FIELD] === "number" ? v[VARIANT_STOCK_FIELD] : "",
         price: isObject ? parsePriceNumber(v[PRODUCT_PRICE_FIELD]) : "",
+        wholesale: isObject ? parsePriceNumber(v.wholesalePrice) : "",
         imageUrl: isObject ? (v[PRODUCT_IMAGE_FIELD] || "") : "",
         barcode: isObject ? (v[BARCODE_FIELD] || "") : ""
       });
@@ -712,6 +758,7 @@ function addVariantRow(prefill) {
     row.querySelector(".variant-editor__name").value = prefill.name || "";
     row.querySelector(".variant-editor__stock").value = prefill.stock ?? "";
     row.querySelector(".variant-editor__price").value = prefill.price ?? "";
+    row.querySelector(".variant-editor__wholesale").value = prefill.wholesale ?? "";
     row.querySelector(".variant-editor__barcode").value = prefill.barcode || "";
     if (prefill.imageUrl) {
       setVariantRowImage(row, prefill.imageUrl);
@@ -726,6 +773,7 @@ function readVariantRows() {
     name: row.querySelector(".variant-editor__name").value.trim(),
     stockRaw: row.querySelector(".variant-editor__stock").value,
     priceRaw: row.querySelector(".variant-editor__price").value,
+    wholesaleRaw: row.querySelector(".variant-editor__wholesale").value,
     imageUrl: row.querySelector(".variant-editor__image-url").value.trim(),
     barcode: row.querySelector(".variant-editor__barcode").value.trim()
   }));
@@ -805,6 +853,7 @@ async function handleProductFormSubmit(event) {
   const sku = document.getElementById("pf-sku").value.trim();
   const barcode = document.getElementById("pf-barcode").value.trim();
   const unit = document.getElementById("pf-unit").value.trim();
+  const sellingType = document.getElementById("pf-selling-type").value;
   const principal = document.getElementById("pf-principal").value.trim();
   const wholesaleInput = document.getElementById("pf-wholesale").value;
   const imageUrl = document.getElementById("pf-image").value.trim();
@@ -821,6 +870,7 @@ async function handleProductFormSubmit(event) {
     sku: sku || null,
     [BARCODE_FIELD]: barcode || null,
     unit: unit || null,
+    [PRODUCT_SELLING_TYPE_FIELD]: sellingType || null,
     principal: principal || null,
     wholesalePrice: wholesaleInput !== "" ? formatPrice(Number(wholesaleInput)) : null,
     [PRODUCT_IMAGE_FIELD]: imageUrl || null
@@ -846,10 +896,17 @@ async function handleProductFormSubmit(event) {
         return;
       }
 
+      const wholesale = row.wholesaleRaw === "" ? null : Number(row.wholesaleRaw);
+      if (row.wholesaleRaw !== "" && (isNaN(wholesale) || wholesale < 0)) {
+        showFormStatus(`Check the wholesale price for variant "${row.name}" — must be a valid, non-negative number.`, "error");
+        return;
+      }
+
       flavors.push({
         name: row.name,
         [VARIANT_STOCK_FIELD]: stockCount,
         [PRODUCT_PRICE_FIELD]: formatPrice(price),
+        wholesalePrice: wholesale != null ? formatPrice(wholesale) : null,
         [PRODUCT_IMAGE_FIELD]: row.imageUrl || null,
         [BARCODE_FIELD]: row.barcode || null,
         [PRODUCT_AVAILABLE_FIELD]: stockCount > 0
@@ -1115,6 +1172,10 @@ function csvRowToProduct(rawRow, ignoreQty) {
 
   const name = get("description");
   const category = get("category");
+  // Optional column — not in CSV_COLUMN_MAP/EXPECTED_CSV_HEADERS on
+  // purpose, so older CSV files without this column still import fine
+  // (sellingType just comes through as null/not set).
+  const sellingType = normalizeSellingType(get("selling_type"));
 
   return {
     [PRODUCT_NAME_FIELD]: name,
@@ -1122,6 +1183,7 @@ function csvRowToProduct(rawRow, ignoreQty) {
     sku: get("sku") || null,
     principal: get("principal") || null,
     unit: get("unit") || null,
+    [PRODUCT_SELLING_TYPE_FIELD]: sellingType,
     // When ignoreQty is true, stock is deliberately left unset (null)
     // rather than trusting a "qty" column that isn't confirmed
     // accurate — shows correctly as "Stock Not Set" instead of
@@ -1155,14 +1217,15 @@ function renderCsvPreview() {
     const tr = document.createElement("tr");
     if (!row._valid) tr.style.opacity = "0.45";
     tr.innerHTML = `
-      <td></td><td></td><td></td><td></td><td></td>
+      <td></td><td></td><td></td><td></td><td></td><td></td>
     `;
     const cells = tr.querySelectorAll("td");
     cells[0].textContent = row[PRODUCT_NAME_FIELD] || "(missing name)";
     cells[1].textContent = row[PRODUCT_CATEGORY_FIELD] || "(missing category)";
-    cells[2].textContent = typeof row[STOCK_FIELD] === "number" ? row[STOCK_FIELD] : "Not set";
-    cells[3].textContent = row[PRODUCT_PRICE_FIELD];
-    cells[4].textContent = row.sku || "—";
+    cells[2].textContent = row[PRODUCT_SELLING_TYPE_FIELD] ? SELLING_TYPE_LABELS[row[PRODUCT_SELLING_TYPE_FIELD]] : "—";
+    cells[3].textContent = typeof row[STOCK_FIELD] === "number" ? row[STOCK_FIELD] : "Not set";
+    cells[4].textContent = row[PRODUCT_PRICE_FIELD];
+    cells[5].textContent = row.sku || "—";
     tbody.appendChild(tr);
   });
 }

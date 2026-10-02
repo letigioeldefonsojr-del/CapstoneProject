@@ -243,14 +243,16 @@
                         </th>
                         <th>Product</th>
                         <th>Category</th>
+                        <th>Type</th>
                         <th>Stock</th>
-                        <th>Price</th>
+                        <th>Retail</th>
+                        <th>Wholesale</th>
                         <th>Status</th>
                         <th id="actions-header" hidden>Actions</th>
                     </tr>
                 </thead>
                 <tbody id="inventory-tbody">
-                    <tr><td colspan="5" class="inventory-empty">Loading products...</td></tr>
+                    <tr><td colspan="7" class="inventory-empty">Loading products...</td></tr>
                 </tbody>
             </table>
         </div>
@@ -308,6 +310,15 @@
                     <input type="text" id="pf-unit" placeholder="e.g. pcs, box">
                 </div>
                 <div class="form-field">
+                    <label for="pf-selling-type">Selling type</label>
+                    <select id="pf-selling-type">
+                        <option value="">— Not set —</option>
+                        <option value="ream">Ream</option>
+                        <option value="bulk">Bulk</option>
+                        <option value="piece">Piece</option>
+                    </select>
+                </div>
+                <div class="form-field">
                     <label for="pf-principal">Principal</label>
                     <input type="text" id="pf-principal">
                 </div>
@@ -350,7 +361,8 @@
                 <div class="variant-editor__fields">
                     <input type="text" class="variant-editor__name" placeholder="Variant name (e.g. Original)">
                     <input type="number" class="variant-editor__stock" placeholder="Stock" min="0" step="1">
-                    <input type="number" class="variant-editor__price" placeholder="Price (₱)" min="0" step="0.01">
+                    <input type="number" class="variant-editor__price" placeholder="Retail price (₱)" min="0" step="0.01">
+                    <input type="number" class="variant-editor__wholesale" placeholder="Wholesale price (₱)" min="0" step="0.01">
                     <input type="text" class="variant-editor__barcode" placeholder="Barcode (optional)">
                     <span class="variant-editor__image-status"></span>
                 </div>
@@ -394,6 +406,7 @@
                         <tr>
                             <th>Name</th>
                             <th>Category</th>
+                            <th>Type</th>
                             <th>Stock</th>
                             <th>Price</th>
                             <th>SKU</th>
