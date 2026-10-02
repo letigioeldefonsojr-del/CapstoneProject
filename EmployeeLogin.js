@@ -515,7 +515,7 @@ document.addEventListener("DOMContentLoaded", () => {
     setEmployeeMode("login");
   }
 
-  async function handleOAuthSignIn(role, provider, providerName, btnId) {
+  async function handleOAuthSignIn(role, provider, providerName, btnId, mode) {
     const btn = document.getElementById(btnId);
     btn.disabled = true;
     hideStatus();
@@ -526,6 +526,15 @@ document.addEventListener("DOMContentLoaded", () => {
       const existingDoc = await getDoc(doc(db, EMPLOYEE_COLLECTION, user.uid));
 
       if (existingDoc.exists()) {
+        // Someone clicked "Continue with Google" on the Register form, but
+        // this Google account is already an employee — don't let it
+        // silently re-login or duplicate anything, send them to Login.
+        if (mode === "register") {
+          await signOut(auth);
+          showStatus(`That Google account is already registered. Please use "Log in with Google" instead.`, "error");
+          return;
+        }
+
         const data = existingDoc.data();
 
         if (data[EMPLOYEE_ACTIVE_FIELD] !== true) {
@@ -546,6 +555,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
         showStatus("Signed in. Redirecting...", "success");
         window.location.replace(EMPLOYEE_REDIRECT_URL);
+        return;
+      }
+
+      // No employee record for this Google account yet.
+      if (mode === "login") {
+        // Someone clicked "Log in with Google" but there's no account —
+        // don't auto-create one here, send them to Register instead.
+        await signOut(auth);
+        showStatus(`No account found for that Google account. Please use "Register here" to create one.`, "error");
         return;
       }
 
@@ -662,7 +680,10 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("otp-resend-btn").addEventListener("click", handleOtpResend);
   document.getElementById("otp-cancel-btn").addEventListener("click", handleOtpCancel);
   document.getElementById("employee-google-btn").addEventListener("click", () =>
-    handleOAuthSignIn("employee", googleProvider, "Google", "employee-google-btn")
+    handleOAuthSignIn("employee", googleProvider, "Google", "employee-google-btn", "login")
+  );
+  document.getElementById("employee-google-signup-btn").addEventListener("click", () =>
+    handleOAuthSignIn("employee", googleProvider, "Google", "employee-google-signup-btn", "register")
   );
   formGoogleComplete.addEventListener("submit", handleGoogleCompleteProfileSubmit);
   document.getElementById("google-username-regenerate").addEventListener("click", handleGoogleUsernameRegenerate);
