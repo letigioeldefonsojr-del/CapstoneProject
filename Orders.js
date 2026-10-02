@@ -622,7 +622,7 @@ function buildActionsForOrder(order) {
     wrap.appendChild(buildActionButton("Approve", "btn-primary", () => handleApprove(order)));
     wrap.appendChild(buildActionButton("Reject", "btn-danger-outline", () => handleReject(order)));
   } else if (order.status === "approved") {
-    wrap.appendChild(buildActionButton("Mark On the Way", "btn-outline", () => handleMarkOnTheWay(order)));
+    wrap.appendChild(buildActionButton("Mark On the Way", "btn-outline btn-on-the-way", () => handleMarkOnTheWay(order)));
   } else if (order.status === "on_the_way" && !order.awaitingCustomerConfirmation) {
     wrap.appendChild(buildActionButton("Mark Delivered", "btn-primary", () => handleMarkDelivered(order)));
     wrap.appendChild(buildActionButton("Undeliverable", "btn-danger-outline", () => openUndeliverableModal(order)));

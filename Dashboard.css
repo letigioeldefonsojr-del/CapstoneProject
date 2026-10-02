@@ -532,6 +532,18 @@ button {
     border-color: var(--brand-green);
 }
 
+.btn-on-the-way {
+    background: var(--green-soft);
+    border-color: var(--green-soft);
+    color: var(--brand-green);
+}
+
+.btn-on-the-way:hover {
+    background: var(--brand-green);
+    border-color: var(--brand-green);
+    color: #fff;
+}
+
 .btn-danger-outline {
     border: 1px solid #f3b7b0;
     background: #fdecea;
