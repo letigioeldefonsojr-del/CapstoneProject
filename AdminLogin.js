@@ -3,8 +3,8 @@ import { promptForgotPassword } from "./ForgotPassword.js";
 import { checkLoginAllowed, recordFailedAttempt, resetAttempts } from "./LoginAttempts.js";
 import { sendOtpCode, verifyOtpCode } from "./OtpVerification.js";
 import {
-  signInWithEmailAndPassword, onAuthStateChanged, signOut,
-  setPersistence, browserLocalPersistence, browserSessionPersistence
+  signInWithEmailAndPassword, signOut,
+  setPersistence, browserSessionPersistence
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import {
   collection, query, where, getDocs, limit, doc, getDoc, updateDoc
@@ -16,24 +16,6 @@ const LOGIN_PAGE_URL = "AdminLogin.html";
 
 const EYE_OPEN_INNER = '<path d="M2 12C4 7.5 7.8 5 12 5C16.2 5 20 7.5 22 12C20 16.5 16.2 19 12 19C7.8 19 4 16.5 2 12Z" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/>';
 const EYE_SLASH_INNER = EYE_OPEN_INNER + '<line x1="3.5" y1="20.5" x2="20.5" y2="3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>';
-
-// If already signed in (and genuinely a valid admin), skip straight
-// past the login form instead of making them log in again.
-onAuthStateChanged(auth, async (user) => {
-  if (!user) return;
-  try {
-    const snap = await getDoc(doc(db, ADMIN_COLLECTION, user.uid));
-    // emailVerified === false specifically (not just falsy) — existing
-    // admin accounts predate this field entirely and have it as
-    // undefined, which correctly means "already verified, nothing to
-    // check" rather than accidentally blocking every existing admin.
-    if (snap.exists() && snap.data().emailVerified !== false) {
-      window.location.replace(ADMIN_REDIRECT_URL);
-    }
-  } catch (error) {
-    console.error("Couldn't check existing session:", error);
-  }
-});
 
 document.addEventListener("DOMContentLoaded", () => {
   const formAdmin = document.getElementById("form-admin");
@@ -217,8 +199,9 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
-      const rememberMe = document.getElementById("admin-remember-me").checked;
-      await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
+      // Always session-only: the admin must sign in again every time they
+      // land on this page, even within the same browser.
+      await setPersistence(auth, browserSessionPersistence);
 
       await signInWithEmailAndPassword(auth, email, password);
 
@@ -331,9 +314,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Abandoning this step leaves a signed-in Firebase Auth user with an
   // unverified account — sign them back out so they're not left in
-  // that half-finished state, and so the top-level onAuthStateChanged
-  // check (which also respects emailVerified) doesn't need to handle
-  // an in-between case.
+  // that half-finished state.
   async function handleOtpCancel() {
     pendingVerification = null;
     clearOtpDigitInputs();
