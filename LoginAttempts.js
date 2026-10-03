@@ -60,6 +60,7 @@ export async function checkLoginAllowed(identifier) {
     if (data.permanentlyLocked) {
       return {
         allowed: false,
+        locked: true,
         message: "This account has been locked after too many failed attempts. Contact an administrator to unlock it."
       };
     }
@@ -138,7 +139,7 @@ export async function recordFailedAttempt(identifier) {
     });
 
     if (permanentlyLocked) {
-      return { message: "This account has been locked after too many failed attempts. Contact an administrator to unlock it." };
+      return { locked: true, message: "This account has been locked after too many failed attempts. Contact an administrator to unlock it." };
     }
     return {
       secondsLeft: lockoutSeconds,

@@ -971,6 +971,57 @@ input:focus-visible {
 }
 
 /* ===========================
+   LOCKED ACCOUNT GLASS OVERLAY
+   =========================== */
+.lock-overlay {
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(4px);
+}
+
+.lock-card {
+    background: rgba(255, 255, 255, 0.18);
+    backdrop-filter: blur(20px) saturate(150%);
+    -webkit-backdrop-filter: blur(20px) saturate(150%);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 18px;
+    padding: 32px 28px;
+    max-width: 360px;
+    width: 90%;
+    text-align: center;
+    color: #ffffff;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.lock-card__icon {
+    color: #ff8a80;
+    display: flex;
+    justify-content: center;
+    margin-bottom: 12px;
+}
+
+.lock-card__icon svg {
+    width: 40px;
+    height: 40px;
+}
+
+.lock-card h3 {
+    font-family: var(--font-display);
+    font-size: 1.3rem;
+    margin-bottom: 16px;
+}
+
+.lock-card__note {
+    font-size: 13.5px;
+    line-height: 1.6;
+    opacity: 0.9;
+    margin: 4px 0 18px;
+}
+
+.lock-card .btn-primary {
+    width: 100%;
+}
+
+/* ===========================
    AUTOFILL DETECTION (signup password fields)
    ----------------------------------------------------------------
    No native JS event fires when a browser autofills a field — this

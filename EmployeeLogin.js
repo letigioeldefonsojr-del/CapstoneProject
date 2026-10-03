@@ -307,6 +307,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!lockStatus.allowed) {
       if (lockStatus.secondsLeft) {
         showLockoutCountdown(submitBtn, lockStatus.secondsLeft);
+      } else if (lockStatus.locked) {
+        showLockedOverlay();
       } else {
         showStatus(lockStatus.message, "error");
       }
@@ -322,6 +324,8 @@ document.addEventListener("DOMContentLoaded", () => {
         const result = await recordFailedAttempt(rawInput);
         if (result.secondsLeft) {
           showLockoutCountdown(submitBtn, result.secondsLeft);
+        } else if (result.locked) {
+          showLockedOverlay();
         } else {
           showStatus("No account with that email or username found.", "error");
         }
@@ -364,6 +368,8 @@ document.addEventListener("DOMContentLoaded", () => {
         const result = await recordFailedAttempt(rawInput);
         if (result.secondsLeft) {
           showLockoutCountdown(submitBtn, result.secondsLeft);
+        } else if (result.locked) {
+          showLockedOverlay();
         } else {
           showStatus(result.message, "error");
         }
@@ -734,4 +740,32 @@ function escapeHtmlSuspension(text) {
   const div = document.createElement("div");
   div.textContent = text;
   return div.innerHTML;
+}
+
+// Permanent lockout (15+ failed attempts — see LoginAttempts.js) gets
+// this glass overlay instead of an inline form error, matching the
+// suspension overlay's treatment: this isn't a "try again shortly"
+// state, it needs an admin to actually clear it.
+function showLockedOverlay() {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay lock-overlay";
+  overlay.innerHTML = `
+    <div class="lock-card">
+      <div class="lock-card__icon">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <rect x="5" y="11" width="14" height="9" rx="1.6" stroke="currentColor" stroke-width="1.8"/>
+          <path d="M8 11V7.5A4 4 0 0 1 16 7.5V11" stroke="currentColor" stroke-width="1.8"/>
+        </svg>
+      </div>
+      <h3>This Account is Locked</h3>
+      <p class="lock-card__note">Too many failed login attempts. Contact an administrator to unlock it.</p>
+      <button type="button" class="btn-primary" id="lock-dismiss-btn">Okay</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  overlay.querySelector("#lock-dismiss-btn").addEventListener("click", () => overlay.remove());
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) overlay.remove();
+  });
 }
