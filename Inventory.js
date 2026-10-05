@@ -1,7 +1,7 @@
 import { db } from "./firebase-config.js";
 import {
   collection, addDoc, updateDoc, doc, writeBatch, serverTimestamp, runTransaction,
-  getDocs, query, orderBy, limit
+  getDocs, query, orderBy, limit, deleteField
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getProducts, invalidateProductsCache } from "./ProductCache.js";
 import { confirmDialog } from "./ConfirmDialog.js";
@@ -453,6 +453,7 @@ function buildProductRow(product, hasVariants, variants) {
   if (hasVariants) {
     cells[3 + offset].textContent = `${variants.length} variant${variants.length === 1 ? "" : "s"}`;
     cells[4 + offset].textContent = variantPriceRange(variants);
+    appendDiscountPill(cells[4 + offset], product);
     cells[5 + offset].textContent = variantWholesaleRange(variants);
     cells[6 + offset].appendChild(buildVariantSummaryBadge(variants));
   } else {
@@ -461,6 +462,7 @@ function buildProductRow(product, hasVariants, variants) {
     const isAvailable = product[PRODUCT_AVAILABLE_FIELD];
     cells[3 + offset].textContent = typeof stock === "number" ? stock : "—";
     cells[4 + offset].textContent = price || "—";
+    appendDiscountPill(cells[4 + offset], product);
     cells[5 + offset].textContent = product.wholesalePrice || "—";
     cells[6 + offset].appendChild(buildStockBadge(stock, isAvailable));
   }
@@ -542,6 +544,12 @@ function buildVariantRow(variants) {
     item.querySelector(".variant-list__stock").textContent =
       typeof variantStock === "number" ? `${variantStock} in stock` : "Stock not set";
     item.querySelector(".variant-list__price").textContent = `Retail ${variantPrice || "—"}`;
+    if (isObject && variant.originalPrice) {
+      const was = document.createElement("span");
+      was.className = "discount-was";
+      was.textContent = variant.originalPrice;
+      item.querySelector(".variant-list__price").append(" ", was);
+    }
     item.querySelector(".variant-list__wholesale").textContent = `Wholesale ${variantWholesale || "—"}`;
     item.appendChild(buildStockBadge(variantStock, variantAvailable));
 
@@ -627,6 +635,8 @@ function wireAdminControls() {
 
   document.getElementById("select-all-checkbox").addEventListener("change", handleSelectAllToggle);
   document.getElementById("bulk-delete-btn").addEventListener("click", handleBulkDelete);
+
+  wireDiscountControls();
 
   document.getElementById("add-product-btn").addEventListener("click", () => openAddModal());
   document.getElementById("product-modal-close").addEventListener("click", closeProductModal);
@@ -964,6 +974,7 @@ async function handleProductFormSubmit(event) {
 
   try {
     if (isEditing) {
+      carryDiscountOver(editOriginalProduct, productData);
       await updateDoc(doc(db, PRODUCTS_COLLECTION, editingProductId), productData);
       logManualStockChanges(editOriginalProduct, productData, name, editingProductId);
     } else {
@@ -1828,5 +1839,371 @@ async function handleBulkDelete() {
     deleteBtn.disabled = false;
     deleteBtn.textContent = "Delete Selected";
     updateBulkDeleteBar();
+  }
+}
+
+// ====================================================================
+// DISCOUNTS (admin only)
+// ----------------------------------------------------------------
+// HOW IT'S STORED: the mobile app and every other page read `price` as
+// the selling price, so applying a discount rewrites `price` to the
+// discounted amount. The pre-discount price is kept in `originalPrice`
+// (per variant for variant products) and the percentage in
+// `discountPercent`, which is what lets "Remove Discount" restore the
+// exact original. Re-applying a discount always works from
+// `originalPrice`, so discounts replace each other and never stack.
+// Only retail prices are discounted — wholesale is left alone.
+//
+// Editing a discounted product keeps the discount only if its price
+// wasn't changed in the form; typing a new price makes that the new
+// regular price (see carryDiscountOver).
+// ====================================================================
+const DISCOUNT_PERCENT_FIELD = "discountPercent";
+const ORIGINAL_PRICE_FIELD   = "originalPrice";
+const DISCOUNT_BATCH_LIMIT   = 450;
+let discountPickedIds = new Set();
+
+function hasDiscount(product) {
+  return typeof product[DISCOUNT_PERCENT_FIELD] === "number" && product[DISCOUNT_PERCENT_FIELD] > 0;
+}
+
+function hasAnyDiscountData(product) {
+  if (hasDiscount(product) || product[ORIGINAL_PRICE_FIELD]) return true;
+  return getVariants(product).some((v) => v && typeof v === "object" && v[ORIGINAL_PRICE_FIELD]);
+}
+
+function formatPercent(value) {
+  return String(Number(Number(value).toFixed(2)));
+}
+
+function appendDiscountPill(cell, product) {
+  if (!hasDiscount(product)) return;
+  const pill = document.createElement("span");
+  pill.className = "discount-pill";
+  pill.textContent = `-${formatPercent(product[DISCOUNT_PERCENT_FIELD])}%`;
+  cell.append(" ", pill);
+}
+
+// Called when saving an Edit: keeps discount info only for prices the
+// admin didn't touch, otherwise the stored originalPrice would be stale.
+function carryDiscountOver(oldProduct, newData) {
+  if (!oldProduct || !hasAnyDiscountData(oldProduct)) return;
+
+  let keep = false;
+  const newVariants = Array.isArray(newData[PRODUCT_VARIANTS_FIELD]) ? newData[PRODUCT_VARIANTS_FIELD] : [];
+
+  if (newVariants.length > 0) {
+    const oldVariants = getVariants(oldProduct);
+    newVariants.forEach((newVariant) => {
+      const oldVariant = oldVariants.find((v) => v && typeof v === "object" && v.name === newVariant.name);
+      if (oldVariant && oldVariant[ORIGINAL_PRICE_FIELD] && oldVariant[PRODUCT_PRICE_FIELD] === newVariant[PRODUCT_PRICE_FIELD]) {
+        newVariant[ORIGINAL_PRICE_FIELD] = oldVariant[ORIGINAL_PRICE_FIELD];
+        keep = true;
+      }
+    });
+    newData[ORIGINAL_PRICE_FIELD] = deleteField(); // top-level one only applies to non-variant products
+  } else if (oldProduct[ORIGINAL_PRICE_FIELD] && oldProduct[PRODUCT_PRICE_FIELD] === newData[PRODUCT_PRICE_FIELD]) {
+    newData[ORIGINAL_PRICE_FIELD] = oldProduct[ORIGINAL_PRICE_FIELD];
+    keep = true;
+  }
+
+  if (keep) {
+    newData[DISCOUNT_PERCENT_FIELD] = oldProduct[DISCOUNT_PERCENT_FIELD];
+  } else {
+    newData[DISCOUNT_PERCENT_FIELD] = deleteField();
+    newData[ORIGINAL_PRICE_FIELD] = deleteField();
+  }
+}
+
+function discountedPrice(baseValue, percent) {
+  const base = parsePriceNumber(baseValue);
+  if (base === "" || base <= 0) return null;
+  return formatPrice(Math.round(base * (100 - percent)) / 100);
+}
+
+// Returns the Firestore update for applying `percent` to this product,
+// or null if it has no usable price to discount.
+function buildApplyUpdate(product, percent) {
+  const variants = getVariants(product);
+
+  if (variants.length > 0) {
+    let changed = false;
+    const flavors = variants.map((variant) => {
+      if (!variant || typeof variant !== "object") return variant;
+      const base = variant[ORIGINAL_PRICE_FIELD] || variant[PRODUCT_PRICE_FIELD];
+      const newPrice = discountedPrice(base, percent);
+      if (!newPrice) return variant;
+      changed = true;
+      return { ...variant, [ORIGINAL_PRICE_FIELD]: base, [PRODUCT_PRICE_FIELD]: newPrice };
+    });
+    return changed ? { [PRODUCT_VARIANTS_FIELD]: flavors, [DISCOUNT_PERCENT_FIELD]: percent } : null;
+  }
+
+  const base = product[ORIGINAL_PRICE_FIELD] || product[PRODUCT_PRICE_FIELD];
+  const newPrice = discountedPrice(base, percent);
+  if (!newPrice) return null;
+  return {
+    [PRODUCT_PRICE_FIELD]: newPrice,
+    [ORIGINAL_PRICE_FIELD]: base,
+    [DISCOUNT_PERCENT_FIELD]: percent
+  };
+}
+
+function buildRemoveUpdate(product) {
+  if (!hasAnyDiscountData(product)) return null;
+  const variants = getVariants(product);
+
+  if (variants.length > 0) {
+    const flavors = variants.map((variant) => {
+      if (!variant || typeof variant !== "object" || !variant[ORIGINAL_PRICE_FIELD]) return variant;
+      const { [ORIGINAL_PRICE_FIELD]: original, ...rest } = variant;
+      return { ...rest, [PRODUCT_PRICE_FIELD]: original };
+    });
+    return { [PRODUCT_VARIANTS_FIELD]: flavors, [DISCOUNT_PERCENT_FIELD]: deleteField() };
+  }
+
+  const update = { [DISCOUNT_PERCENT_FIELD]: deleteField(), [ORIGINAL_PRICE_FIELD]: deleteField() };
+  if (product[ORIGINAL_PRICE_FIELD]) update[PRODUCT_PRICE_FIELD] = product[ORIGINAL_PRICE_FIELD];
+  return update;
+}
+
+function getDiscountScope() {
+  return document.querySelector('input[name="discount-scope"]:checked').value;
+}
+
+function getDiscountTargets() {
+  const scope = getDiscountScope();
+  if (scope === "category") {
+    const category = document.getElementById("discount-category-select").value;
+    return allProducts.filter((p) => p[PRODUCT_CATEGORY_FIELD] === category);
+  }
+  if (scope === "selected") {
+    return allProducts.filter((p) => discountPickedIds.has(p.id));
+  }
+  return allProducts;
+}
+
+function readDiscountPercent() {
+  const raw = document.getElementById("discount-percent").value;
+  const percent = Number(raw);
+  if (raw === "" || isNaN(percent) || percent <= 0 || percent > 99) return null;
+  return percent;
+}
+
+function showDiscountStatus(message, kind) {
+  const el = document.getElementById("discount-status");
+  el.textContent = message;
+  el.dataset.kind = kind;
+  el.hidden = false;
+}
+
+function hideDiscountStatus() {
+  document.getElementById("discount-status").hidden = true;
+}
+
+function updateDiscountSummary() {
+  const scope = getDiscountScope();
+  document.getElementById("discount-panel-category").hidden = scope !== "category";
+  document.getElementById("discount-panel-selected").hidden = scope !== "selected";
+
+  const targets = getDiscountTargets();
+  const percent = readDiscountPercent();
+  const summary = document.getElementById("discount-summary");
+  const count = `${targets.length} product${targets.length === 1 ? "" : "s"}`;
+
+  if (scope === "selected") {
+    document.getElementById("discount-picked-count").textContent =
+      `${discountPickedIds.size} product${discountPickedIds.size === 1 ? "" : "s"} selected`;
+  }
+
+  if (targets.length === 0) {
+    summary.textContent = scope === "selected" ? "Pick at least one product." : "No products in this selection.";
+    return;
+  }
+
+  let text = percent ? `${formatPercent(percent)}% off ${count}.` : `Applies to ${count}.`;
+  if (percent) {
+    const sample = targets.map((p) => ({ p, update: buildApplyUpdate(p, percent) })).find((x) => x.update);
+    if (sample) {
+      const priced = sample.update[PRODUCT_VARIANTS_FIELD]
+        ? sample.update[PRODUCT_VARIANTS_FIELD].find((v) => v && v[ORIGINAL_PRICE_FIELD])
+        : sample.update;
+      if (priced) {
+        text += ` e.g. ${sample.p[PRODUCT_NAME_FIELD] || "Product"}: ${priced[ORIGINAL_PRICE_FIELD]} → ${priced[PRODUCT_PRICE_FIELD]}`;
+      }
+    }
+  }
+  summary.textContent = text;
+}
+
+function renderDiscountPicker() {
+  const list = document.getElementById("discount-picker-list");
+  const term = document.getElementById("discount-product-search").value.trim().toLowerCase();
+  list.innerHTML = "";
+
+  const matches = allProducts
+    .filter((p) => fuzzyMatch(term, p[PRODUCT_NAME_FIELD] || ""))
+    .sort((a, b) => (a[PRODUCT_NAME_FIELD] || "").localeCompare(b[PRODUCT_NAME_FIELD] || ""));
+
+  if (matches.length === 0) {
+    list.innerHTML = `<p class="discount-picker__empty">No products match.</p>`;
+    return;
+  }
+
+  matches.forEach((product) => {
+    const label = document.createElement("label");
+    label.className = "discount-picker__item";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = discountPickedIds.has(product.id);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) discountPickedIds.add(product.id);
+      else discountPickedIds.delete(product.id);
+      updateDiscountSummary();
+    });
+
+    const name = document.createElement("span");
+    name.className = "discount-picker__name";
+    name.textContent = product[PRODUCT_NAME_FIELD] || "Unnamed product";
+
+    const meta = document.createElement("span");
+    meta.className = "discount-picker__meta";
+    const variants = getVariants(product);
+    meta.textContent = `${product[PRODUCT_CATEGORY_FIELD] || "—"} · ${variants.length > 0 ? variantPriceRange(variants) : (product[PRODUCT_PRICE_FIELD] || "—")}`;
+
+    label.append(checkbox, name, meta);
+    if (hasDiscount(product)) {
+      const pill = document.createElement("span");
+      pill.className = "discount-pill";
+      pill.textContent = `-${formatPercent(product[DISCOUNT_PERCENT_FIELD])}%`;
+      label.append(pill);
+    }
+    list.appendChild(label);
+  });
+}
+
+function openDiscountModal() {
+  hideDiscountStatus();
+  document.getElementById("discount-percent").value = "";
+  document.getElementById("discount-product-search").value = "";
+
+  const categorySelect = document.getElementById("discount-category-select");
+  const categories = [...new Set(allProducts.map((p) => p[PRODUCT_CATEGORY_FIELD]).filter(Boolean))].sort();
+  categorySelect.innerHTML = "";
+  categories.forEach((category) => {
+    const option = document.createElement("option");
+    option.value = category;
+    option.textContent = category;
+    categorySelect.appendChild(option);
+  });
+
+  // Anything already ticked in the table carries over as the starting selection.
+  discountPickedIds = new Set(selectedProductIds);
+  const startScope = discountPickedIds.size > 0 ? "selected" : "all";
+  document.querySelector(`input[name="discount-scope"][value="${startScope}"]`).checked = true;
+
+  renderDiscountPicker();
+  updateDiscountSummary();
+  document.getElementById("discount-modal-overlay").hidden = false;
+  document.getElementById("discount-percent").focus();
+}
+
+function closeDiscountModal() {
+  document.getElementById("discount-modal-overlay").hidden = true;
+}
+
+function wireDiscountControls() {
+  document.getElementById("discount-btn").addEventListener("click", openDiscountModal);
+  document.getElementById("discount-modal-close").addEventListener("click", closeDiscountModal);
+  document.getElementById("discount-cancel").addEventListener("click", closeDiscountModal);
+
+  document.querySelectorAll('input[name="discount-scope"]').forEach((radio) => {
+    radio.addEventListener("change", () => { hideDiscountStatus(); updateDiscountSummary(); });
+  });
+  document.getElementById("discount-percent").addEventListener("input", () => { hideDiscountStatus(); updateDiscountSummary(); });
+  document.getElementById("discount-category-select").addEventListener("change", updateDiscountSummary);
+  document.getElementById("discount-product-search").addEventListener("input", renderDiscountPicker);
+
+  document.getElementById("discount-apply").addEventListener("click", () => runDiscountAction("apply"));
+  document.getElementById("discount-remove").addEventListener("click", () => runDiscountAction("remove"));
+}
+
+async function runDiscountAction(action) {
+  hideDiscountStatus();
+  const targets = getDiscountTargets();
+
+  if (targets.length === 0) {
+    showDiscountStatus(getDiscountScope() === "selected" ? "Pick at least one product first." : "There are no products in this selection.", "error");
+    return;
+  }
+
+  let percent = null;
+  let updates;
+
+  if (action === "apply") {
+    percent = readDiscountPercent();
+    if (percent === null) {
+      showDiscountStatus("Enter a discount between 0.01 and 99%.", "error");
+      return;
+    }
+    updates = targets
+      .map((product) => ({ id: product.id, update: buildApplyUpdate(product, percent) }))
+      .filter((x) => x.update);
+    if (updates.length === 0) {
+      showDiscountStatus("None of these products have a retail price to discount.", "error");
+      return;
+    }
+  } else {
+    updates = targets
+      .map((product) => ({ id: product.id, update: buildRemoveUpdate(product) }))
+      .filter((x) => x.update);
+    if (updates.length === 0) {
+      showDiscountStatus("None of these products currently have a discount.", "error");
+      return;
+    }
+  }
+
+  const noun = `${updates.length} product${updates.length === 1 ? "" : "s"}`;
+  const skipped = targets.length - updates.length;
+  const skippedNote = action === "apply" && skipped > 0 ? `\n${skipped} skipped (no retail price).` : "";
+
+  const confirmed = await confirmDialog(
+    action === "apply"
+      ? `${formatPercent(percent)}% off retail price on ${noun}.\nAny existing discount on these is replaced, not stacked.${skippedNote}`
+      : `Restore the original retail price on ${noun}?`,
+    {
+      title: action === "apply" ? "Apply discount?" : "Remove discount?",
+      confirmLabel: action === "apply" ? "Apply Discount" : "Remove Discount"
+    }
+  );
+  if (!confirmed) return;
+
+  const applyBtn = document.getElementById("discount-apply");
+  const removeBtn = document.getElementById("discount-remove");
+  const activeBtn = action === "apply" ? applyBtn : removeBtn;
+  const activeLabel = activeBtn.textContent;
+  applyBtn.disabled = true;
+  removeBtn.disabled = true;
+  activeBtn.textContent = action === "apply" ? "Applying..." : "Removing...";
+
+  try {
+    for (let i = 0; i < updates.length; i += DISCOUNT_BATCH_LIMIT) {
+      const batch = writeBatch(db);
+      updates.slice(i, i + DISCOUNT_BATCH_LIMIT).forEach(({ id, update }) => {
+        batch.update(doc(db, PRODUCTS_COLLECTION, id), update);
+      });
+      await batch.commit();
+    }
+
+    await reloadAfterWrite();
+    closeDiscountModal();
+  } catch (error) {
+    console.error("Couldn't update discounts:", error);
+    showDiscountStatus("Something went wrong. Some products may have been updated — check the list and try again.", "error");
+  } finally {
+    applyBtn.disabled = false;
+    removeBtn.disabled = false;
+    activeBtn.textContent = activeLabel;
   }
 }

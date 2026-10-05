@@ -544,6 +544,102 @@ button {
     color: #fff;
 }
 
+/* ===========================
+   DISCOUNTS (Inventory)
+   =========================== */
+.discount-pill {
+    display: inline-block;
+    background: #fdecea;
+    color: #b3261e;
+    font-size: 11px;
+    font-weight: 800;
+    padding: 2px 7px;
+    border-radius: 999px;
+    vertical-align: middle;
+}
+
+.discount-was {
+    color: var(--muted);
+    text-decoration: line-through;
+    font-size: 12px;
+}
+
+.discount-hint {
+    font-size: 11.5px;
+    color: var(--muted);
+    margin: 6px 0 0;
+}
+
+.discount-scope {
+    margin-top: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.discount-scope__option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13.5px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.discount-scope__panel {
+    margin: 0 0 6px 24px;
+}
+
+.discount-scope__panel select,
+.discount-scope__panel input[type="text"] {
+    width: 100%;
+}
+
+.discount-picker {
+    margin-top: 8px;
+    max-height: 220px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+
+.discount-picker__item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    font-size: 13px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+}
+
+.discount-picker__item:last-child { border-bottom: none; }
+.discount-picker__item:hover { background: var(--brand-green-soft); }
+
+.discount-picker__name {
+    flex: 1;
+    font-weight: 600;
+}
+
+.discount-picker__meta {
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.discount-picker__empty {
+    padding: 14px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.discount-summary {
+    margin: 16px 0 0;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--brand-green);
+}
+
 .btn-danger-outline {
     border: 1px solid #f3b7b0;
     background: #fdecea;
