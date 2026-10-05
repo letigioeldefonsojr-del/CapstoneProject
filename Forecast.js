@@ -1,8 +1,8 @@
 import { db } from "./firebase-config.js";
 import {
-  collection, getDocs, query, where, Timestamp
+  collection, getDocs, query, where, Timestamp, writeBatch, doc, deleteField, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
-import { getProducts } from "./ProductCache.js";
+import { getProducts, invalidateProductsCache } from "./ProductCache.js";
 import { kMeansCluster, normalizeFeatures } from "./KMeans.js";
 
 // ====================================================================
@@ -53,9 +53,75 @@ const GEMINI_WORKER_URL = "https://gemini-forecast-proxy.eldefonsojrletigio.work
 let allProducts = [];
 let velocityByProductId = new Map();
 
-document.addEventListener("sidebar:ready", () => {
+let isAdminUser = false;
+
+document.addEventListener("sidebar:ready", (event) => {
+  isAdminUser = event.detail.role === "admin";
   loadForecast();
 });
+
+// ====================================================================
+// PUBLISHING SALES TIERS TO PRODUCTS (for the mobile app)
+// ----------------------------------------------------------------
+// The mobile app can't work out best sellers itself: customers can only
+// read their own orders (see firestore.rules), and the stock movement
+// log is staff-only. So whenever an ADMIN opens this page, the result
+// of the clustering below is saved onto each product:
+//   salesTier          "fast" | "moderate" | "slow"   (removed if no sales data)
+//   bestSeller         true for the Fast-Moving group, otherwise false
+//   salesTierUpdatedAt when it last changed
+// Only products whose tier actually changed are written. Employees
+// can't write products (rules), so for them this is skipped.
+//
+// HONEST LIMITS: there's no server, so this only refreshes when an
+// admin opens Forecast — the app can show a slightly stale tier. And
+// "fast" is relative (k-means groups), so with fewer than
+// MIN_PRODUCTS_FOR_BEST_SELLER products that have sales data, nothing is
+// flagged as a best seller, otherwise everything would be.
+// ====================================================================
+const MIN_PRODUCTS_FOR_BEST_SELLER = 3;
+const PRODUCT_WRITE_BATCH_LIMIT = 450;
+
+async function syncSalesTiersToProducts(productsWithData, productsWithoutData) {
+  try {
+    const canFlagBestSellers = productsWithData.length >= MIN_PRODUCTS_FOR_BEST_SELLER;
+    const updates = [];
+
+    productsWithData.forEach(({ product, velocityTier }) => {
+      const isBestSeller = canFlagBestSellers && velocityTier === "fast";
+      if (product.salesTier !== velocityTier || (product.bestSeller === true) !== isBestSeller) {
+        updates.push({
+          id: product.id,
+          data: { salesTier: velocityTier, bestSeller: isBestSeller, salesTierUpdatedAt: serverTimestamp() }
+        });
+      }
+    });
+
+    // Sold before but nothing in the last 90 days anymore — clear the tag.
+    productsWithoutData.forEach(({ product }) => {
+      if (product.salesTier !== undefined || product.bestSeller === true) {
+        updates.push({
+          id: product.id,
+          data: { salesTier: deleteField(), bestSeller: false, salesTierUpdatedAt: serverTimestamp() }
+        });
+      }
+    });
+
+    if (updates.length === 0) return;
+
+    for (let i = 0; i < updates.length; i += PRODUCT_WRITE_BATCH_LIMIT) {
+      const batch = writeBatch(db);
+      updates.slice(i, i + PRODUCT_WRITE_BATCH_LIMIT).forEach(({ id, data }) => {
+        batch.update(doc(db, "products", id), data);
+      });
+      await batch.commit();
+    }
+    invalidateProductsCache();
+  } catch (error) {
+    // Never block the Forecast page over this — it's a background sync.
+    console.error("Couldn't publish sales tiers to products:", error);
+  }
+}
 
 async function loadForecast() {
   showLoadingState();
@@ -90,6 +156,10 @@ async function loadForecast() {
     });
 
     const clustered = clusterByVelocity(productsWithData);
+
+    // Background — doesn't delay rendering. clusterByVelocity() just
+    // tagged each productsWithData entry with its velocityTier.
+    if (isAdminUser) syncSalesTiersToProducts(productsWithData, productsWithoutData);
 
     renderResults(clustered, productsWithoutData);
   } catch (error) {
