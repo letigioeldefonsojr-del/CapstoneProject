@@ -1,7 +1,7 @@
 import { db } from "./firebase-config.js";
 import {
   collection, addDoc, updateDoc, doc, writeBatch, serverTimestamp, runTransaction,
-  getDocs, query, orderBy, limit, deleteField
+  getDocs, query, orderBy, limit, deleteField, Timestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getProducts, invalidateProductsCache } from "./ProductCache.js";
 import { confirmDialog } from "./ConfirmDialog.js";
@@ -367,7 +367,7 @@ function renderInventoryTable(products, stockFilter) {
     tbody.appendChild(mainRow);
 
     if (hasVariants) {
-      const variantRow = buildVariantRow(visibleVariants);
+      const variantRow = buildVariantRow(visibleVariants, product);
       tbody.appendChild(variantRow);
 
       mainRow.addEventListener("click", (event) => {
@@ -452,8 +452,7 @@ function buildProductRow(product, hasVariants, variants) {
 
   if (hasVariants) {
     cells[3 + offset].textContent = `${variants.length} variant${variants.length === 1 ? "" : "s"}`;
-    cells[4 + offset].textContent = variantPriceRange(variants);
-    appendDiscountPill(cells[4 + offset], product);
+    renderRetailVariantRange(cells[4 + offset], variants, product);
     cells[5 + offset].textContent = variantWholesaleRange(variants);
     cells[6 + offset].appendChild(buildVariantSummaryBadge(variants));
   } else {
@@ -461,8 +460,7 @@ function buildProductRow(product, hasVariants, variants) {
     const price = product[PRODUCT_PRICE_FIELD];
     const isAvailable = product[PRODUCT_AVAILABLE_FIELD];
     cells[3 + offset].textContent = typeof stock === "number" ? stock : "—";
-    cells[4 + offset].textContent = price || "—";
-    appendDiscountPill(cells[4 + offset], product);
+    renderRetailPrice(cells[4 + offset], price, product);
     cells[5 + offset].textContent = product.wholesalePrice || "—";
     cells[6 + offset].appendChild(buildStockBadge(stock, isAvailable));
   }
@@ -500,7 +498,7 @@ function buildProductRow(product, hasVariants, variants) {
 // ====================================================================
 // CHUNK 4C — VARIANT BREAKDOWN ROW
 // ====================================================================
-function buildVariantRow(variants) {
+function buildVariantRow(variants, product) {
   const row = document.createElement("tr");
   row.className = "inventory-variant-row";
   row.hidden = true;
@@ -543,13 +541,7 @@ function buildVariantRow(variants) {
     item.querySelector(".variant-list__name").textContent = variantName;
     item.querySelector(".variant-list__stock").textContent =
       typeof variantStock === "number" ? `${variantStock} in stock` : "Stock not set";
-    item.querySelector(".variant-list__price").textContent = `Retail ${variantPrice || "—"}`;
-    if (isObject && variant.originalPrice) {
-      const was = document.createElement("span");
-      was.className = "discount-was";
-      was.textContent = variant.originalPrice;
-      item.querySelector(".variant-list__price").append(" ", was);
-    }
+    renderVariantRetail(item.querySelector(".variant-list__price"), variantPrice, product);
     item.querySelector(".variant-list__wholesale").textContent = `Wholesale ${variantWholesale || "—"}`;
     item.appendChild(buildStockBadge(variantStock, variantAvailable));
 
@@ -974,7 +966,6 @@ async function handleProductFormSubmit(event) {
 
   try {
     if (isEditing) {
-      carryDiscountOver(editOriginalProduct, productData);
       await updateDoc(doc(db, PRODUCTS_COLLECTION, editingProductId), productData);
       logManualStockChanges(editOriginalProduct, productData, name, editingProductId);
     } else {
@@ -1845,74 +1836,67 @@ async function handleBulkDelete() {
 // ====================================================================
 // DISCOUNTS (admin only)
 // ----------------------------------------------------------------
-// HOW IT'S STORED: the mobile app and every other page read `price` as
-// the selling price, so applying a discount rewrites `price` to the
-// discounted amount. The pre-discount price is kept in `originalPrice`
-// (per variant for variant products) and the percentage in
-// `discountPercent`, which is what lets "Remove Discount" restore the
-// exact original. Re-applying a discount always works from
-// `originalPrice`, so discounts replace each other and never stack.
+// HOW IT'S STORED: a product's `price` (and each variant's `price`)
+// ALWAYS stays the regular price. A discount is three extra fields on
+// the product:
+//   discountPercent — number, e.g. 10
+//   discountStart   — Timestamp, 12:00 AM on the first day (local time)
+//   discountEnd     — Timestamp, 11:59 PM on the last day; absent = no end
+// Whoever shows or charges a price (this page, the mobile app) works
+// out the effective price from those fields and the current time.
+// That's deliberate: there's no server here to change prices when a
+// sale starts or ends, so the dates themselves decide. The mobile app
+// has to apply the same rule or it will keep showing the regular price.
 // Only retail prices are discounted — wholesale is left alone.
 //
-// Editing a discounted product keeps the discount only if its price
-// wasn't changed in the form; typing a new price makes that the new
-// regular price (see carryDiscountOver).
+// LEGACY: an earlier version rewrote `price` and kept the old one in
+// `originalPrice`. Those products still display correctly, and
+// applying or removing a discount converts them to the format above.
 // ====================================================================
 const DISCOUNT_PERCENT_FIELD = "discountPercent";
-const ORIGINAL_PRICE_FIELD   = "originalPrice";
+const DISCOUNT_START_FIELD   = "discountStart";
+const DISCOUNT_END_FIELD     = "discountEnd";
+const LEGACY_ORIGINAL_PRICE_FIELD = "originalPrice";
 const DISCOUNT_BATCH_LIMIT   = 450;
 let discountPickedIds = new Set();
 
-function hasDiscount(product) {
-  return typeof product[DISCOUNT_PERCENT_FIELD] === "number" && product[DISCOUNT_PERCENT_FIELD] > 0;
+// Handles a real Timestamp, and the {seconds, nanoseconds} plain object
+// a Timestamp turns into after a trip through the sessionStorage cache.
+function timeValueToMillis(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (typeof value.seconds === "number") return value.seconds * 1000;
+  if (typeof value === "number") return value;
+  const parsed = Date.parse(value);
+  return isNaN(parsed) ? null : parsed;
 }
 
-function hasAnyDiscountData(product) {
-  if (hasDiscount(product) || product[ORIGINAL_PRICE_FIELD]) return true;
-  return getVariants(product).some((v) => v && typeof v === "object" && v[ORIGINAL_PRICE_FIELD]);
+// "none" | "scheduled" | "active" | "ended"
+function getDiscountState(product, now = Date.now()) {
+  const percent = product[DISCOUNT_PERCENT_FIELD];
+  if (typeof percent !== "number" || percent <= 0) return "none";
+  const start = timeValueToMillis(product[DISCOUNT_START_FIELD]);
+  const end = timeValueToMillis(product[DISCOUNT_END_FIELD]);
+  if (start !== null && now < start) return "scheduled";
+  if (end !== null && now > end) return "ended";
+  return "active";
+}
+
+function isLegacyDiscounted(product) {
+  return Boolean(product[LEGACY_ORIGINAL_PRICE_FIELD])
+    || getVariants(product).some((v) => v && typeof v === "object" && v[LEGACY_ORIGINAL_PRICE_FIELD]);
 }
 
 function formatPercent(value) {
   return String(Number(Number(value).toFixed(2)));
 }
 
-function appendDiscountPill(cell, product) {
-  if (!hasDiscount(product)) return;
-  const pill = document.createElement("span");
-  pill.className = "discount-pill";
-  pill.textContent = `-${formatPercent(product[DISCOUNT_PERCENT_FIELD])}%`;
-  cell.append(" ", pill);
+function formatShortDate(millis) {
+  return new Date(millis).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-// Called when saving an Edit: keeps discount info only for prices the
-// admin didn't touch, otherwise the stored originalPrice would be stale.
-function carryDiscountOver(oldProduct, newData) {
-  if (!oldProduct || !hasAnyDiscountData(oldProduct)) return;
-
-  let keep = false;
-  const newVariants = Array.isArray(newData[PRODUCT_VARIANTS_FIELD]) ? newData[PRODUCT_VARIANTS_FIELD] : [];
-
-  if (newVariants.length > 0) {
-    const oldVariants = getVariants(oldProduct);
-    newVariants.forEach((newVariant) => {
-      const oldVariant = oldVariants.find((v) => v && typeof v === "object" && v.name === newVariant.name);
-      if (oldVariant && oldVariant[ORIGINAL_PRICE_FIELD] && oldVariant[PRODUCT_PRICE_FIELD] === newVariant[PRODUCT_PRICE_FIELD]) {
-        newVariant[ORIGINAL_PRICE_FIELD] = oldVariant[ORIGINAL_PRICE_FIELD];
-        keep = true;
-      }
-    });
-    newData[ORIGINAL_PRICE_FIELD] = deleteField(); // top-level one only applies to non-variant products
-  } else if (oldProduct[ORIGINAL_PRICE_FIELD] && oldProduct[PRODUCT_PRICE_FIELD] === newData[PRODUCT_PRICE_FIELD]) {
-    newData[ORIGINAL_PRICE_FIELD] = oldProduct[ORIGINAL_PRICE_FIELD];
-    keep = true;
-  }
-
-  if (keep) {
-    newData[DISCOUNT_PERCENT_FIELD] = oldProduct[DISCOUNT_PERCENT_FIELD];
-  } else {
-    newData[DISCOUNT_PERCENT_FIELD] = deleteField();
-    newData[ORIGINAL_PRICE_FIELD] = deleteField();
-  }
+function formatLongDate(date) {
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
 function discountedPrice(baseValue, percent) {
@@ -1921,50 +1905,141 @@ function discountedPrice(baseValue, percent) {
   return formatPrice(Math.round(base * (100 - percent)) / 100);
 }
 
-// Returns the Firestore update for applying `percent` to this product,
-// or null if it has no usable price to discount.
-function buildApplyUpdate(product, percent) {
+// The price a customer pays right now for an item whose regular price
+// is `regularPrice` (a "₱45.00" string).
+function effectivePriceString(regularPrice, product) {
+  if (isLegacyDiscounted(product)) return regularPrice; // already rewritten by the old version
+  if (getDiscountState(product) !== "active") return regularPrice;
+  return discountedPrice(regularPrice, product[DISCOUNT_PERCENT_FIELD]) || regularPrice;
+}
+
+function buildDiscountPill(product) {
+  const state = getDiscountState(product);
+  if (state === "none") return null;
+
+  const percentText = `${formatPercent(product[DISCOUNT_PERCENT_FIELD])}%`;
+  const start = timeValueToMillis(product[DISCOUNT_START_FIELD]);
+  const end = timeValueToMillis(product[DISCOUNT_END_FIELD]);
+
+  const pill = document.createElement("span");
+  pill.className = `discount-pill discount-pill--${state}`;
+
+  if (state === "active") {
+    pill.textContent = `Discounted -${percentText}`;
+    if (end !== null) pill.title = `Until ${formatShortDate(end)}`;
+  } else if (state === "scheduled") {
+    pill.textContent = `-${percentText} starts ${formatShortDate(start)}`;
+  } else {
+    pill.textContent = `-${percentText} ended`;
+  }
+  return pill;
+}
+
+function appendDiscountPill(cell, product) {
+  const pill = buildDiscountPill(product);
+  if (pill) cell.append(" ", pill);
+}
+
+function makeWasElement(text) {
+  const was = document.createElement("span");
+  was.className = "discount-was";
+  was.textContent = text;
+  return was;
+}
+
+function renderRetailPrice(cell, regularPrice, product) {
+  cell.textContent = "";
+  const effective = effectivePriceString(regularPrice, product);
+  cell.append(effective || "—");
+
+  const was = product[LEGACY_ORIGINAL_PRICE_FIELD] || (effective !== regularPrice ? regularPrice : null);
+  if (was) cell.append(" ", makeWasElement(was));
+  appendDiscountPill(cell, product);
+}
+
+function renderRetailVariantRange(cell, variants, product) {
+  const shown = variants.map((v) =>
+    v && typeof v === "object"
+      ? { ...v, [PRODUCT_PRICE_FIELD]: effectivePriceString(v[PRODUCT_PRICE_FIELD], product) }
+      : v
+  );
+  cell.textContent = variantPriceRange(shown);
+  appendDiscountPill(cell, product);
+}
+
+function renderVariantRetail(el, regularPrice, product) {
+  el.textContent = "";
+  const effective = effectivePriceString(regularPrice, product);
+  el.append(`Retail ${effective || "—"}`);
+  if (effective && effective !== regularPrice) el.append(" ", makeWasElement(regularPrice));
+}
+
+function hasUsablePrice(value) {
+  return parsePriceNumber(value) > 0;
+}
+
+// The regular price of the first priced item (variant or product), or
+// null if there is nothing to discount.
+function firstRegularPrice(product) {
+  const variants = getVariants(product);
+  if (variants.length > 0) {
+    const variant = variants.find(
+      (v) => v && typeof v === "object" && hasUsablePrice(v[LEGACY_ORIGINAL_PRICE_FIELD] || v[PRODUCT_PRICE_FIELD])
+    );
+    return variant ? (variant[LEGACY_ORIGINAL_PRICE_FIELD] || variant[PRODUCT_PRICE_FIELD]) : null;
+  }
+  const regular = product[LEGACY_ORIGINAL_PRICE_FIELD] || product[PRODUCT_PRICE_FIELD];
+  return hasUsablePrice(regular) ? regular : null;
+}
+
+// Puts a legacy (price-rewritten) product back to its regular price.
+function legacyRestoreUpdate(product) {
   const variants = getVariants(product);
 
   if (variants.length > 0) {
-    let changed = false;
-    const flavors = variants.map((variant) => {
-      if (!variant || typeof variant !== "object") return variant;
-      const base = variant[ORIGINAL_PRICE_FIELD] || variant[PRODUCT_PRICE_FIELD];
-      const newPrice = discountedPrice(base, percent);
-      if (!newPrice) return variant;
-      changed = true;
-      return { ...variant, [ORIGINAL_PRICE_FIELD]: base, [PRODUCT_PRICE_FIELD]: newPrice };
-    });
-    return changed ? { [PRODUCT_VARIANTS_FIELD]: flavors, [DISCOUNT_PERCENT_FIELD]: percent } : null;
+    const isLegacyVariant = (v) => v && typeof v === "object" && v[LEGACY_ORIGINAL_PRICE_FIELD];
+    if (!variants.some(isLegacyVariant)) return {};
+    return {
+      [PRODUCT_VARIANTS_FIELD]: variants.map((variant) => {
+        if (!isLegacyVariant(variant)) return variant;
+        const { [LEGACY_ORIGINAL_PRICE_FIELD]: original, ...rest } = variant;
+        return { ...rest, [PRODUCT_PRICE_FIELD]: original };
+      })
+    };
   }
 
-  const base = product[ORIGINAL_PRICE_FIELD] || product[PRODUCT_PRICE_FIELD];
-  const newPrice = discountedPrice(base, percent);
-  if (!newPrice) return null;
+  if (product[LEGACY_ORIGINAL_PRICE_FIELD]) {
+    return {
+      [PRODUCT_PRICE_FIELD]: product[LEGACY_ORIGINAL_PRICE_FIELD],
+      [LEGACY_ORIGINAL_PRICE_FIELD]: deleteField()
+    };
+  }
+  return {};
+}
+
+// Firestore update for applying the discount, or null if the product
+// has no retail price to discount.
+function buildApplyUpdate(product, percent, startTimestamp, endTimestamp) {
+  if (firstRegularPrice(product) === null) return null;
   return {
-    [PRODUCT_PRICE_FIELD]: newPrice,
-    [ORIGINAL_PRICE_FIELD]: base,
-    [DISCOUNT_PERCENT_FIELD]: percent
+    ...legacyRestoreUpdate(product),
+    [DISCOUNT_PERCENT_FIELD]: percent,
+    [DISCOUNT_START_FIELD]: startTimestamp,
+    [DISCOUNT_END_FIELD]: endTimestamp || deleteField()
   };
 }
 
 function buildRemoveUpdate(product) {
-  if (!hasAnyDiscountData(product)) return null;
-  const variants = getVariants(product);
+  const hasDiscountData = [DISCOUNT_PERCENT_FIELD, DISCOUNT_START_FIELD, DISCOUNT_END_FIELD]
+    .some((field) => product[field] !== undefined && product[field] !== null);
+  if (!hasDiscountData && !isLegacyDiscounted(product)) return null;
 
-  if (variants.length > 0) {
-    const flavors = variants.map((variant) => {
-      if (!variant || typeof variant !== "object" || !variant[ORIGINAL_PRICE_FIELD]) return variant;
-      const { [ORIGINAL_PRICE_FIELD]: original, ...rest } = variant;
-      return { ...rest, [PRODUCT_PRICE_FIELD]: original };
-    });
-    return { [PRODUCT_VARIANTS_FIELD]: flavors, [DISCOUNT_PERCENT_FIELD]: deleteField() };
-  }
-
-  const update = { [DISCOUNT_PERCENT_FIELD]: deleteField(), [ORIGINAL_PRICE_FIELD]: deleteField() };
-  if (product[ORIGINAL_PRICE_FIELD]) update[PRODUCT_PRICE_FIELD] = product[ORIGINAL_PRICE_FIELD];
-  return update;
+  return {
+    ...legacyRestoreUpdate(product),
+    [DISCOUNT_PERCENT_FIELD]: deleteField(),
+    [DISCOUNT_START_FIELD]: deleteField(),
+    [DISCOUNT_END_FIELD]: deleteField()
+  };
 }
 
 function getDiscountScope() {
@@ -1988,6 +2063,41 @@ function readDiscountPercent() {
   const percent = Number(raw);
   if (raw === "" || isNaN(percent) || percent <= 0 || percent > 99) return null;
   return percent;
+}
+
+// Date inputs give "YYYY-MM-DD"; build local-time Dates from the parts
+// (Date.parse on that string would read it as UTC and shift the day).
+function dateFromInput(value, endOfDay) {
+  if (!value) return null;
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  return endOfDay
+    ? new Date(year, month - 1, day, 23, 59, 59, 999)
+    : new Date(year, month - 1, day, 0, 0, 0, 0);
+}
+
+function toDateInputValue(date) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+// Returns { start, end } (end may be null = no end date) or { error }.
+function readDiscountDates() {
+  const start = dateFromInput(document.getElementById("discount-start").value, false);
+  if (!start) return { error: "Pick a start date." };
+
+  const endRaw = document.getElementById("discount-end").value;
+  const end = dateFromInput(endRaw, true);
+  if (endRaw && !end) return { error: "That end date isn't valid." };
+  if (end && end < start) return { error: "The end date can't be before the start date." };
+
+  return { start, end };
+}
+
+function describeDiscountPeriod(dates) {
+  return dates.end
+    ? `${formatLongDate(dates.start)} to ${formatLongDate(dates.end)}`
+    : `${formatLongDate(dates.start)}, no end date`;
 }
 
 function showDiscountStatus(message, kind) {
@@ -2023,14 +2133,13 @@ function updateDiscountSummary() {
 
   let text = percent ? `${formatPercent(percent)}% off ${count}.` : `Applies to ${count}.`;
   if (percent) {
-    const sample = targets.map((p) => ({ p, update: buildApplyUpdate(p, percent) })).find((x) => x.update);
-    if (sample) {
-      const priced = sample.update[PRODUCT_VARIANTS_FIELD]
-        ? sample.update[PRODUCT_VARIANTS_FIELD].find((v) => v && v[ORIGINAL_PRICE_FIELD])
-        : sample.update;
-      if (priced) {
-        text += ` e.g. ${sample.p[PRODUCT_NAME_FIELD] || "Product"}: ${priced[ORIGINAL_PRICE_FIELD]} → ${priced[PRODUCT_PRICE_FIELD]}`;
-      }
+    const dates = readDiscountDates();
+    if (!dates.error) text += ` ${describeDiscountPeriod(dates)}.`;
+
+    const sampleProduct = targets.find((p) => firstRegularPrice(p) !== null);
+    if (sampleProduct) {
+      const regular = firstRegularPrice(sampleProduct);
+      text += ` e.g. ${sampleProduct[PRODUCT_NAME_FIELD] || "Product"}: ${regular} → ${discountedPrice(regular, percent)}`;
     }
   }
   summary.textContent = text;
@@ -2073,12 +2182,8 @@ function renderDiscountPicker() {
     meta.textContent = `${product[PRODUCT_CATEGORY_FIELD] || "—"} · ${variants.length > 0 ? variantPriceRange(variants) : (product[PRODUCT_PRICE_FIELD] || "—")}`;
 
     label.append(checkbox, name, meta);
-    if (hasDiscount(product)) {
-      const pill = document.createElement("span");
-      pill.className = "discount-pill";
-      pill.textContent = `-${formatPercent(product[DISCOUNT_PERCENT_FIELD])}%`;
-      label.append(pill);
-    }
+    const pill = buildDiscountPill(product);
+    if (pill) label.append(pill);
     list.appendChild(label);
   });
 }
@@ -2086,6 +2191,8 @@ function renderDiscountPicker() {
 function openDiscountModal() {
   hideDiscountStatus();
   document.getElementById("discount-percent").value = "";
+  document.getElementById("discount-start").value = toDateInputValue(new Date());
+  document.getElementById("discount-end").value = "";
   document.getElementById("discount-product-search").value = "";
 
   const categorySelect = document.getElementById("discount-category-select");
@@ -2118,15 +2225,67 @@ function wireDiscountControls() {
   document.getElementById("discount-modal-close").addEventListener("click", closeDiscountModal);
   document.getElementById("discount-cancel").addEventListener("click", closeDiscountModal);
 
-  document.querySelectorAll('input[name="discount-scope"]').forEach((radio) => {
-    radio.addEventListener("change", () => { hideDiscountStatus(); updateDiscountSummary(); });
-  });
-  document.getElementById("discount-percent").addEventListener("input", () => { hideDiscountStatus(); updateDiscountSummary(); });
+  const refresh = () => { hideDiscountStatus(); updateDiscountSummary(); };
+  document.querySelectorAll('input[name="discount-scope"]').forEach((radio) => radio.addEventListener("change", refresh));
+  document.getElementById("discount-percent").addEventListener("input", refresh);
+  document.getElementById("discount-start").addEventListener("input", refresh);
+  document.getElementById("discount-end").addEventListener("input", refresh);
   document.getElementById("discount-category-select").addEventListener("change", updateDiscountSummary);
   document.getElementById("discount-product-search").addEventListener("input", renderDiscountPicker);
 
   document.getElementById("discount-apply").addEventListener("click", () => runDiscountAction("apply"));
   document.getElementById("discount-remove").addEventListener("click", () => runDiscountAction("remove"));
+}
+
+// "all products" | 'the "Paper" category' | "3 selected products"
+function describeDiscountScope() {
+  const scope = getDiscountScope();
+  if (scope === "category") {
+    return `the "${document.getElementById("discount-category-select").value}" category`;
+  }
+  if (scope === "selected") {
+    const n = discountPickedIds.size;
+    return `${n} selected product${n === 1 ? "" : "s"}`;
+  }
+  return "all products";
+}
+
+// Frosted-glass confirmation shown after Apply / Remove succeeds.
+function showDiscountResultOverlay({ action, scopeLabel, percent, dates, count }) {
+  const isApply = action === "apply";
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay glass-overlay";
+
+  const detail = isApply
+    ? `${formatPercent(percent)}% off · ${describeDiscountPeriod(dates)}`
+    : "Prices are back to regular.";
+
+  overlay.innerHTML = `
+    <div class="glass-card" role="status">
+      <div class="glass-card__icon">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/>
+          <path d="M8 12.5L10.8 15.3L16 9.6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <h3></h3>
+      <p class="glass-card__message"></p>
+      <p class="glass-card__detail"></p>
+      <button type="button" class="btn-primary" id="discount-result-dismiss">Okay</button>
+    </div>
+  `;
+
+  overlay.querySelector("h3").textContent = isApply ? "Discount Applied" : "Discount Removed";
+  overlay.querySelector(".glass-card__message").textContent = isApply
+    ? `Discount applied to ${scopeLabel}.`
+    : `Discount removed from ${scopeLabel}.`;
+  overlay.querySelector(".glass-card__detail").textContent =
+    `${count} product${count === 1 ? "" : "s"} updated · ${detail}`;
+
+  document.body.appendChild(overlay);
+  const dismiss = () => overlay.remove();
+  overlay.querySelector("#discount-result-dismiss").addEventListener("click", dismiss);
+  overlay.addEventListener("click", (event) => { if (event.target === overlay) dismiss(); });
 }
 
 async function runDiscountAction(action) {
@@ -2139,6 +2298,7 @@ async function runDiscountAction(action) {
   }
 
   let percent = null;
+  let dates = null;
   let updates;
 
   if (action === "apply") {
@@ -2147,8 +2307,16 @@ async function runDiscountAction(action) {
       showDiscountStatus("Enter a discount between 0.01 and 99%.", "error");
       return;
     }
+    dates = readDiscountDates();
+    if (dates.error) {
+      showDiscountStatus(dates.error, "error");
+      return;
+    }
+
+    const startTimestamp = Timestamp.fromDate(dates.start);
+    const endTimestamp = dates.end ? Timestamp.fromDate(dates.end) : null;
     updates = targets
-      .map((product) => ({ id: product.id, update: buildApplyUpdate(product, percent) }))
+      .map((product) => ({ id: product.id, update: buildApplyUpdate(product, percent, startTimestamp, endTimestamp) }))
       .filter((x) => x.update);
     if (updates.length === 0) {
       showDiscountStatus("None of these products have a retail price to discount.", "error");
@@ -2165,13 +2333,14 @@ async function runDiscountAction(action) {
   }
 
   const noun = `${updates.length} product${updates.length === 1 ? "" : "s"}`;
+  const scopeLabel = describeDiscountScope();
   const skipped = targets.length - updates.length;
   const skippedNote = action === "apply" && skipped > 0 ? `\n${skipped} skipped (no retail price).` : "";
 
   const confirmed = await confirmDialog(
     action === "apply"
-      ? `${formatPercent(percent)}% off retail price on ${noun}.\nAny existing discount on these is replaced, not stacked.${skippedNote}`
-      : `Restore the original retail price on ${noun}?`,
+      ? `${formatPercent(percent)}% off retail price on ${noun}.\n${describeDiscountPeriod(dates)}.\nAny existing discount on these is replaced, not stacked.${skippedNote}`
+      : `Remove the discount (including any scheduled or ended one) from ${noun}?`,
     {
       title: action === "apply" ? "Apply discount?" : "Remove discount?",
       confirmLabel: action === "apply" ? "Apply Discount" : "Remove Discount"
@@ -2198,6 +2367,7 @@ async function runDiscountAction(action) {
 
     await reloadAfterWrite();
     closeDiscountModal();
+    showDiscountResultOverlay({ action, scopeLabel, percent, dates, count: updates.length });
   } catch (error) {
     console.error("Couldn't update discounts:", error);
     showDiscountStatus("Something went wrong. Some products may have been updated — check the list and try again.", "error");

@@ -286,6 +286,18 @@
                 <p class="discount-hint">Taken off the retail price (and each variant's retail price). Wholesale prices aren't changed.</p>
             </div>
 
+            <div class="discount-dates">
+                <div class="form-field">
+                    <label for="discount-start">Start date</label>
+                    <input type="date" id="discount-start">
+                </div>
+                <div class="form-field">
+                    <label for="discount-end">End date <span class="discount-optional">(optional)</span></label>
+                    <input type="date" id="discount-end">
+                </div>
+            </div>
+            <p class="discount-hint">The discount starts at 12:00 AM on the start date and ends at 11:59 PM on the end date. Leave the end date empty to keep it until you remove it.</p>
+
             <div class="discount-scope" role="radiogroup" aria-label="Apply to">
                 <label class="discount-scope__option">
                     <input type="radio" name="discount-scope" value="all" checked>
