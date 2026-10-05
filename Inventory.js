@@ -1858,7 +1858,8 @@ const DISCOUNT_START_FIELD   = "discountStart";
 const DISCOUNT_END_FIELD     = "discountEnd";
 const LEGACY_ORIGINAL_PRICE_FIELD = "originalPrice";
 const DISCOUNT_BATCH_LIMIT   = 450;
-let discountPickedIds = new Set();
+let discountPickedIds = new Map();     // product id -> its own % ("" = use the main Discount box)
+let discountCategoryPicks = new Map(); // category -> its own % ("" = use the main Discount box)
 
 // Handles a real Timestamp, and the {seconds, nanoseconds} plain object
 // a Timestamp turns into after a trip through the sessionStorage cache.
@@ -2046,23 +2047,71 @@ function getDiscountScope() {
   return document.querySelector('input[name="discount-scope"]:checked').value;
 }
 
-function getDiscountTargets() {
-  const scope = getDiscountScope();
-  if (scope === "category") {
-    const category = document.getElementById("discount-category-select").value;
-    return allProducts.filter((p) => p[PRODUCT_CATEGORY_FIELD] === category);
-  }
-  if (scope === "selected") {
-    return allProducts.filter((p) => discountPickedIds.has(p.id));
-  }
-  return allProducts;
+// The top "Discount (%)" box: the default used wherever a category or
+// product row doesn't have its own %. null when empty or out of range.
+function parseDiscountPercent(raw) {
+  const text = String(raw ?? "").trim();
+  if (text === "") return null;
+  const n = Number(text);
+  return !isNaN(n) && n > 0 && n <= 99 ? n : null;
 }
 
-function readDiscountPercent() {
-  const raw = document.getElementById("discount-percent").value;
-  const percent = Number(raw);
-  if (raw === "" || isNaN(percent) || percent <= 0 || percent > 99) return null;
-  return percent;
+function readDefaultPercent() {
+  return parseDiscountPercent(document.getElementById("discount-percent").value);
+}
+
+// Who the action applies to, and each one's percentage.
+// Returns { entries: [{ product, percent }], problem } — `problem` is a
+// message about the first row that has no usable percentage (only
+// checked when needPercent is true, i.e. for Apply, not Remove).
+function getDiscountPlan(needPercent) {
+  const scope = getDiscountScope();
+  const defaultPercent = readDefaultPercent();
+  const entries = [];
+  let problem = null;
+
+  const resolve = (overrideRaw, label) => {
+    if (!needPercent) return null;
+    const hasOverride = String(overrideRaw ?? "").trim() !== "";
+    const percent = hasOverride ? parseDiscountPercent(overrideRaw) : defaultPercent;
+    if (percent === null && !problem) {
+      if (hasOverride) problem = `${label}: enter a discount between 0.01 and 99%.`;
+      else if (scope === "all") problem = "Enter a discount between 0.01 and 99%.";
+      else problem = `Set a discount % for ${label}, or fill in the main Discount box.`;
+    }
+    return percent;
+  };
+
+  if (scope === "category") {
+    discountCategoryPicks.forEach((overrideRaw, category) => {
+      const percent = resolve(overrideRaw, `"${category}"`);
+      allProducts
+        .filter((p) => p[PRODUCT_CATEGORY_FIELD] === category)
+        .forEach((product) => entries.push({ product, percent }));
+    });
+  } else if (scope === "selected") {
+    allProducts.forEach((product) => {
+      if (!discountPickedIds.has(product.id)) return;
+      const percent = resolve(discountPickedIds.get(product.id), `"${product[PRODUCT_NAME_FIELD] || "Unnamed product"}"`);
+      entries.push({ product, percent });
+    });
+  } else {
+    const percent = resolve("", "all products");
+    allProducts.forEach((product) => entries.push({ product, percent }));
+  }
+
+  return { entries, problem };
+}
+
+// "10%" when everything gets the same %, "5%–40%" when it varies.
+function describePercents(percents) {
+  const valid = percents.filter((p) => typeof p === "number");
+  if (valid.length === 0) return { label: "", varies: false };
+  const min = Math.min(...valid);
+  const max = Math.max(...valid);
+  return min === max
+    ? { label: `${formatPercent(min)}%`, varies: false }
+    : { label: `${formatPercent(min)}%–${formatPercent(max)}%`, varies: true };
 }
 
 // Date inputs give "YYYY-MM-DD"; build local-time Dates from the parts
@@ -2111,38 +2160,127 @@ function hideDiscountStatus() {
   document.getElementById("discount-status").hidden = true;
 }
 
+function emptySelectionMessage() {
+  const scope = getDiscountScope();
+  if (scope === "category") return "Tick at least one category first.";
+  if (scope === "selected") return "Pick at least one product first.";
+  return "There are no products.";
+}
+
 function updateDiscountSummary() {
   const scope = getDiscountScope();
   document.getElementById("discount-panel-category").hidden = scope !== "category";
   document.getElementById("discount-panel-selected").hidden = scope !== "selected";
 
-  const targets = getDiscountTargets();
-  const percent = readDiscountPercent();
+  const { entries } = getDiscountPlan(true);
   const summary = document.getElementById("discount-summary");
-  const count = `${targets.length} product${targets.length === 1 ? "" : "s"}`;
+  const count = `${entries.length} product${entries.length === 1 ? "" : "s"}`;
 
   if (scope === "selected") {
     document.getElementById("discount-picked-count").textContent =
       `${discountPickedIds.size} product${discountPickedIds.size === 1 ? "" : "s"} selected`;
   }
 
-  if (targets.length === 0) {
-    summary.textContent = scope === "selected" ? "Pick at least one product." : "No products in this selection.";
+  if (entries.length === 0) {
+    summary.textContent = emptySelectionMessage().replace(" first.", ".");
     return;
   }
 
-  let text = percent ? `${formatPercent(percent)}% off ${count}.` : `Applies to ${count}.`;
-  if (percent) {
+  const { label, varies } = describePercents(entries.map((e) => e.percent));
+  let text = label
+    ? `${label} off ${count}${varies ? " (varies by row)" : ""}.`
+    : `Applies to ${count}.`;
+
+  if (label) {
     const dates = readDiscountDates();
     if (!dates.error) text += ` ${describeDiscountPeriod(dates)}.`;
 
-    const sampleProduct = targets.find((p) => firstRegularPrice(p) !== null);
-    if (sampleProduct) {
-      const regular = firstRegularPrice(sampleProduct);
-      text += ` e.g. ${sampleProduct[PRODUCT_NAME_FIELD] || "Product"}: ${regular} → ${discountedPrice(regular, percent)}`;
+    const sample = entries.find((e) => e.percent !== null && firstRegularPrice(e.product) !== null);
+    if (sample) {
+      const regular = firstRegularPrice(sample.product);
+      text += ` e.g. ${sample.product[PRODUCT_NAME_FIELD] || "Product"}: ${regular} → ${discountedPrice(regular, sample.percent)}`;
     }
   }
   summary.textContent = text;
+}
+
+function defaultPercentPlaceholder() {
+  const percent = readDefaultPercent();
+  return percent ? `${formatPercent(percent)}%` : "%";
+}
+
+function refreshOverridePlaceholders() {
+  const placeholder = defaultPercentPlaceholder();
+  document.querySelectorAll(".discount-override").forEach((input) => { input.placeholder = placeholder; });
+}
+
+// The small per-row % box. Only visible while the row is ticked; empty
+// means "use the main Discount (%)".
+function createOverrideInput(value, hidden, onChange) {
+  const input = document.createElement("input");
+  input.type = "number";
+  input.min = "0.01";
+  input.max = "99";
+  input.step = "0.01";
+  input.className = "discount-override";
+  input.placeholder = defaultPercentPlaceholder();
+  input.value = value;
+  input.hidden = hidden;
+  input.setAttribute("aria-label", "Discount percent for this row");
+  input.addEventListener("click", (event) => event.stopPropagation());
+  input.addEventListener("input", () => { hideDiscountStatus(); onChange(input.value); });
+  return input;
+}
+
+function renderDiscountCategoryList() {
+  const list = document.getElementById("discount-category-list");
+  list.innerHTML = "";
+
+  const counts = new Map();
+  allProducts.forEach((p) => {
+    const category = p[PRODUCT_CATEGORY_FIELD];
+    if (category) counts.set(category, (counts.get(category) || 0) + 1);
+  });
+  const categories = [...counts.keys()].sort();
+
+  if (categories.length === 0) {
+    list.innerHTML = `<p class="discount-picker__empty">No categories yet.</p>`;
+    return;
+  }
+
+  categories.forEach((category) => {
+    const label = document.createElement("label");
+    label.className = "discount-picker__item";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = discountCategoryPicks.has(category);
+
+    const name = document.createElement("span");
+    name.className = "discount-picker__name";
+    name.textContent = category;
+
+    const meta = document.createElement("span");
+    meta.className = "discount-picker__meta";
+    meta.textContent = `${counts.get(category)} product${counts.get(category) === 1 ? "" : "s"}`;
+
+    const input = createOverrideInput(
+      discountCategoryPicks.get(category) ?? "",
+      !checkbox.checked,
+      (value) => { discountCategoryPicks.set(category, value); updateDiscountSummary(); }
+    );
+
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) discountCategoryPicks.set(category, input.value);
+      else discountCategoryPicks.delete(category);
+      input.hidden = !checkbox.checked;
+      hideDiscountStatus();
+      updateDiscountSummary();
+    });
+
+    label.append(checkbox, name, meta, input);
+    list.appendChild(label);
+  });
 }
 
 function renderDiscountPicker() {
@@ -2166,11 +2304,6 @@ function renderDiscountPicker() {
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.checked = discountPickedIds.has(product.id);
-    checkbox.addEventListener("change", () => {
-      if (checkbox.checked) discountPickedIds.add(product.id);
-      else discountPickedIds.delete(product.id);
-      updateDiscountSummary();
-    });
 
     const name = document.createElement("span");
     name.className = "discount-picker__name";
@@ -2181,9 +2314,24 @@ function renderDiscountPicker() {
     const variants = getVariants(product);
     meta.textContent = `${product[PRODUCT_CATEGORY_FIELD] || "—"} · ${variants.length > 0 ? variantPriceRange(variants) : (product[PRODUCT_PRICE_FIELD] || "—")}`;
 
+    const input = createOverrideInput(
+      discountPickedIds.get(product.id) ?? "",
+      !checkbox.checked,
+      (value) => { discountPickedIds.set(product.id, value); updateDiscountSummary(); }
+    );
+
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) discountPickedIds.set(product.id, input.value);
+      else discountPickedIds.delete(product.id);
+      input.hidden = !checkbox.checked;
+      hideDiscountStatus();
+      updateDiscountSummary();
+    });
+
     label.append(checkbox, name, meta);
     const pill = buildDiscountPill(product);
     if (pill) label.append(pill);
+    label.append(input);
     list.appendChild(label);
   });
 }
@@ -2195,21 +2343,13 @@ function openDiscountModal() {
   document.getElementById("discount-end").value = "";
   document.getElementById("discount-product-search").value = "";
 
-  const categorySelect = document.getElementById("discount-category-select");
-  const categories = [...new Set(allProducts.map((p) => p[PRODUCT_CATEGORY_FIELD]).filter(Boolean))].sort();
-  categorySelect.innerHTML = "";
-  categories.forEach((category) => {
-    const option = document.createElement("option");
-    option.value = category;
-    option.textContent = category;
-    categorySelect.appendChild(option);
-  });
-
+  discountCategoryPicks = new Map();
   // Anything already ticked in the table carries over as the starting selection.
-  discountPickedIds = new Set(selectedProductIds);
+  discountPickedIds = new Map([...selectedProductIds].map((id) => [id, ""]));
   const startScope = discountPickedIds.size > 0 ? "selected" : "all";
   document.querySelector(`input[name="discount-scope"][value="${startScope}"]`).checked = true;
 
+  renderDiscountCategoryList();
   renderDiscountPicker();
   updateDiscountSummary();
   document.getElementById("discount-modal-overlay").hidden = false;
@@ -2227,21 +2367,29 @@ function wireDiscountControls() {
 
   const refresh = () => { hideDiscountStatus(); updateDiscountSummary(); };
   document.querySelectorAll('input[name="discount-scope"]').forEach((radio) => radio.addEventListener("change", refresh));
-  document.getElementById("discount-percent").addEventListener("input", refresh);
+  document.getElementById("discount-percent").addEventListener("input", () => { refreshOverridePlaceholders(); refresh(); });
   document.getElementById("discount-start").addEventListener("input", refresh);
   document.getElementById("discount-end").addEventListener("input", refresh);
-  document.getElementById("discount-category-select").addEventListener("change", updateDiscountSummary);
   document.getElementById("discount-product-search").addEventListener("input", renderDiscountPicker);
 
   document.getElementById("discount-apply").addEventListener("click", () => runDiscountAction("apply"));
   document.getElementById("discount-remove").addEventListener("click", () => runDiscountAction("remove"));
 }
 
-// "all products" | 'the "Paper" category' | "3 selected products"
+function quotedList(names) {
+  const quoted = names.map((n) => `"${n}"`);
+  return quoted.length <= 1 ? quoted.join("") : `${quoted.slice(0, -1).join(", ")} and ${quoted[quoted.length - 1]}`;
+}
+
+// "all products" | 'the "Paper" category' | '"Paper" and "Snacks" categories'
+// | "3 selected products"
 function describeDiscountScope() {
   const scope = getDiscountScope();
   if (scope === "category") {
-    return `the "${document.getElementById("discount-category-select").value}" category`;
+    const names = [...discountCategoryPicks.keys()].sort();
+    if (names.length === 1) return `the "${names[0]}" category`;
+    if (names.length <= 3) return `the ${quotedList(names)} categories`;
+    return `${names.length} categories`;
   }
   if (scope === "selected") {
     const n = discountPickedIds.size;
@@ -2251,13 +2399,13 @@ function describeDiscountScope() {
 }
 
 // Frosted-glass confirmation shown after Apply / Remove succeeds.
-function showDiscountResultOverlay({ action, scopeLabel, percent, dates, count }) {
+function showDiscountResultOverlay({ action, scopeLabel, percentLabel, varies, dates, count }) {
   const isApply = action === "apply";
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay glass-overlay";
 
   const detail = isApply
-    ? `${formatPercent(percent)}% off · ${describeDiscountPeriod(dates)}`
+    ? `${percentLabel} off${varies ? " (varies)" : ""} · ${describeDiscountPeriod(dates)}`
     : "Prices are back to regular.";
 
   overlay.innerHTML = `
@@ -2290,21 +2438,20 @@ function showDiscountResultOverlay({ action, scopeLabel, percent, dates, count }
 
 async function runDiscountAction(action) {
   hideDiscountStatus();
-  const targets = getDiscountTargets();
+  const isApply = action === "apply";
+  const { entries, problem } = getDiscountPlan(isApply);
 
-  if (targets.length === 0) {
-    showDiscountStatus(getDiscountScope() === "selected" ? "Pick at least one product first." : "There are no products in this selection.", "error");
+  if (entries.length === 0) {
+    showDiscountStatus(emptySelectionMessage(), "error");
     return;
   }
 
-  let percent = null;
   let dates = null;
   let updates;
 
-  if (action === "apply") {
-    percent = readDiscountPercent();
-    if (percent === null) {
-      showDiscountStatus("Enter a discount between 0.01 and 99%.", "error");
+  if (isApply) {
+    if (problem) {
+      showDiscountStatus(problem, "error");
       return;
     }
     dates = readDiscountDates();
@@ -2315,16 +2462,21 @@ async function runDiscountAction(action) {
 
     const startTimestamp = Timestamp.fromDate(dates.start);
     const endTimestamp = dates.end ? Timestamp.fromDate(dates.end) : null;
-    updates = targets
-      .map((product) => ({ id: product.id, update: buildApplyUpdate(product, percent, startTimestamp, endTimestamp) }))
+    updates = entries
+      .map(({ product, percent }) => ({
+        id: product.id,
+        percent,
+        update: buildApplyUpdate(product, percent, startTimestamp, endTimestamp)
+      }))
       .filter((x) => x.update);
     if (updates.length === 0) {
       showDiscountStatus("None of these products have a retail price to discount.", "error");
       return;
     }
   } else {
-    updates = targets
-      .map((product) => ({ id: product.id, update: buildRemoveUpdate(product) }))
+    // Removing works on any discount — running, scheduled or already ended.
+    updates = entries
+      .map(({ product }) => ({ id: product.id, percent: null, update: buildRemoveUpdate(product) }))
       .filter((x) => x.update);
     if (updates.length === 0) {
       showDiscountStatus("None of these products currently have a discount.", "error");
@@ -2334,27 +2486,28 @@ async function runDiscountAction(action) {
 
   const noun = `${updates.length} product${updates.length === 1 ? "" : "s"}`;
   const scopeLabel = describeDiscountScope();
-  const skipped = targets.length - updates.length;
-  const skippedNote = action === "apply" && skipped > 0 ? `\n${skipped} skipped (no retail price).` : "";
+  const { label: percentLabel, varies } = describePercents(updates.map((u) => u.percent));
+  const skipped = entries.length - updates.length;
+  const skippedNote = isApply && skipped > 0 ? `\n${skipped} skipped (no retail price).` : "";
 
   const confirmed = await confirmDialog(
-    action === "apply"
-      ? `${formatPercent(percent)}% off retail price on ${noun}.\n${describeDiscountPeriod(dates)}.\nAny existing discount on these is replaced, not stacked.${skippedNote}`
+    isApply
+      ? `${percentLabel} off retail price on ${noun}${varies ? " (the percentage varies by category/product)" : ""}.\n${describeDiscountPeriod(dates)}.\nAny existing discount on these is replaced, not stacked.${skippedNote}`
       : `Remove the discount (including any scheduled or ended one) from ${noun}?`,
     {
-      title: action === "apply" ? "Apply discount?" : "Remove discount?",
-      confirmLabel: action === "apply" ? "Apply Discount" : "Remove Discount"
+      title: isApply ? "Apply discount?" : "Remove discount?",
+      confirmLabel: isApply ? "Apply Discount" : "Remove Discount"
     }
   );
   if (!confirmed) return;
 
   const applyBtn = document.getElementById("discount-apply");
   const removeBtn = document.getElementById("discount-remove");
-  const activeBtn = action === "apply" ? applyBtn : removeBtn;
+  const activeBtn = isApply ? applyBtn : removeBtn;
   const activeLabel = activeBtn.textContent;
   applyBtn.disabled = true;
   removeBtn.disabled = true;
-  activeBtn.textContent = action === "apply" ? "Applying..." : "Removing...";
+  activeBtn.textContent = isApply ? "Applying..." : "Removing...";
 
   try {
     for (let i = 0; i < updates.length; i += DISCOUNT_BATCH_LIMIT) {
@@ -2367,7 +2520,7 @@ async function runDiscountAction(action) {
 
     await reloadAfterWrite();
     closeDiscountModal();
-    showDiscountResultOverlay({ action, scopeLabel, percent, dates, count: updates.length });
+    showDiscountResultOverlay({ action, scopeLabel, percentLabel, varies, dates, count: updates.length });
   } catch (error) {
     console.error("Couldn't update discounts:", error);
     showDiscountStatus("Something went wrong. Some products may have been updated — check the list and try again.", "error");
