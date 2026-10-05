@@ -393,6 +393,51 @@ function renderInventoryTable(products, stockFilter) {
 // ====================================================================
 // CHUNK 4B — MAIN PRODUCT ROW
 // ====================================================================
+// Featured star: admins click it to feature/unfeature a product. Writes
+// `featured` (boolean) + `featuredAt` (server time) on the product doc;
+// the mobile app reads those. Non-admins just see the star if featured.
+function buildFeaturedStar(product) {
+  const star = document.createElement("button");
+  star.type = "button";
+  star.className = "featured-star";
+  const paint = () => {
+    const on = product.featured === true;
+    star.classList.toggle("featured-star--on", on);
+    star.textContent = on ? "★" : "☆";
+    star.title = on ? "Featured — click to remove" : "Click to feature this product in the app";
+    star.setAttribute("aria-label", star.title);
+    star.setAttribute("aria-pressed", String(on));
+  };
+  paint();
+
+  if (!isAdmin) {
+    star.disabled = true;
+    star.hidden = product.featured !== true;
+    return star;
+  }
+
+  star.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    const next = product.featured !== true;
+    star.disabled = true;
+    try {
+      await updateDoc(doc(db, PRODUCTS_COLLECTION, product.id), {
+        featured: next,
+        featuredAt: next ? serverTimestamp() : null
+      });
+      product.featured = next;
+      invalidateProductsCache();
+      paint();
+    } catch (error) {
+      console.error("Couldn't update featured:", error);
+      alert("Couldn't update the featured status. Please try again.");
+    } finally {
+      star.disabled = false;
+    }
+  });
+  return star;
+}
+
 function buildProductRow(product, hasVariants, variants) {
   const name = product[PRODUCT_NAME_FIELD] || "Unnamed product";
   const category = product[PRODUCT_CATEGORY_FIELD] || "—";
@@ -444,6 +489,7 @@ function buildProductRow(product, hasVariants, variants) {
   nameSpan.className = "inventory-product-name";
   nameSpan.textContent = name;
   productCell.appendChild(nameSpan);
+  productCell.appendChild(buildFeaturedStar(product));
 
   const cells = row.querySelectorAll("td");
   const offset = isAdmin ? 1 : 0;
