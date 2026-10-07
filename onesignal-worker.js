@@ -8,8 +8,9 @@
 //
 // TWO MODES (decided by the JSON body):
 //
-// 1) ORDER STATUS PUSH (unchanged) — { targetUid, title, message }
+// 1) ORDER STATUS PUSH — { targetUid, title, message }
 //    Targets one customer through OneSignal's External User ID.
+//    Requires the same staff sign-in as promotions (see below).
 //
 // 2) PROMOTION PUSH (new) — { type: "promotion", message, title? }
 //    Sent to every device tagged promotions_enabled = "true" (the
@@ -31,7 +32,12 @@
 // 401 told us so when order pushes were first set up.
 // ====================================================================
 const ONESIGNAL_APP_ID = "c3b735fb-99e4-49be-8f63-e8606b95d918";
-const ALLOWED_ORIGIN = "https://capstoneproject-403.pages.dev";
+// Addresses the admin site is served from. The Worker echoes back the
+// caller's origin only when it is on this list.
+const ALLOWED_ORIGINS = [
+  "https://capstoneproject-403.pages.dev",
+  "https://capstoneproject.eldefonsojrletigio.workers.dev"
+];
 const FIREBASE_PROJECT_ID = "almares-328-database";
 
 const DEFAULT_TITLE = "Almares 328";
@@ -40,11 +46,12 @@ const MAX_TITLE_LENGTH = 60;
 
 export default {
   async fetch(request, env) {
+    corsHeaders(request); // remember this request's origin for every response below
     if (request.method === "OPTIONS") {
-      return new Response(null, { headers: corsHeaders() });
+      return new Response(null, { headers: corsHeaders(request) });
     }
     if (request.method !== "POST") {
-      return jsonResponse({ error: "Method not allowed" }, 405);
+      return jsonResponse({ error: "Method not allowed" }, 405, request);
     }
 
     let body;
@@ -57,16 +64,25 @@ export default {
     if (body && body.type === "promotion") {
       return handlePromotion(request, env, body);
     }
-    return handleOrderPush(env, body);
+    return handleOrderPush(request, env, body);
   }
 };
 
 // ---------- Mode 1: single customer (order status) ------------------
-async function handleOrderPush(env, body) {
+async function handleOrderPush(request, env, body) {
   const { targetUid, title, message } = body || {};
   if (!targetUid || !message) {
     return jsonResponse({ error: "Missing targetUid or message" }, 400);
   }
+  if (typeof message !== "string" || message.length > MAX_MESSAGE_LENGTH) {
+    return jsonResponse({ error: "Invalid message." }, 400);
+  }
+
+  // Order updates are sent by staff from the Orders page, so require the
+  // same staff sign-in as promotions — otherwise anyone could push fake
+  // order updates to any customer.
+  const auth = await verifyStaff(request, env);
+  if (!auth.ok) return jsonResponse({ error: auth.error }, auth.status);
 
   return sendToOneSignal(env, {
     include_external_user_ids: [targetUid],
@@ -165,15 +181,20 @@ async function sendToOneSignal(env, payload) {
   return jsonResponse({ success: true, result: osData });
 }
 
-function corsHeaders() {
+let currentOrigin = "";
+
+function corsHeaders(request) {
+  if (request) currentOrigin = request.headers.get("Origin") || "";
   return {
-    "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
+    "Access-Control-Allow-Origin": ALLOWED_ORIGINS.includes(currentOrigin) ? currentOrigin : ALLOWED_ORIGINS[0],
+    "Vary": "Origin",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization"
   };
 }
 
-function jsonResponse(data, status = 200) {
+function jsonResponse(data, status = 200, request) {
+  if (request) corsHeaders(request);
   return new Response(JSON.stringify(data), {
     status,
     headers: { "Content-Type": "application/json", ...corsHeaders() }
