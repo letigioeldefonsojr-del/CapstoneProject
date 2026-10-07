@@ -99,7 +99,8 @@ function loadAccounts() {
         email: d.data().email,
         username: d.data().username,
         phone: d.data().phone,
-        suspendedUntil: d.data().suspendedUntil
+        suspendedUntil: d.data().suspendedUntil,
+        approved: d.data().approved // false = waiting for an admin to approve
       }));
       employeeLoaded = true;
       mergeAndRender();
@@ -227,6 +228,7 @@ function buildAccountRow(account) {
   const row = document.createElement("tr");
   const isSelf = account.id === currentAdminUid;
   const suspended = isCurrentlySuspended(account);
+  const pendingApproval = account.role === "employee" && account.approved === false;
 
   row.innerHTML = `
     <td>${escapeHtml(account.name || "(no name)")}</td>
@@ -238,7 +240,12 @@ function buildAccountRow(account) {
   `;
 
   const statusCell = row.children[4];
-  if (suspended) {
+  if (pendingApproval) {
+    const badge = document.createElement("span");
+    badge.className = "stock-badge stock-badge--low";
+    badge.textContent = "Pending approval";
+    statusCell.appendChild(badge);
+  } else if (suspended) {
     const untilDate = account.suspendedUntil.toDate();
     const badge = document.createElement("span");
     badge.className = "stock-badge stock-badge--critical";
@@ -258,7 +265,9 @@ function buildAccountRow(account) {
     note.textContent = "This is you";
     actionsCell.appendChild(note);
   } else {
-    if (suspended) {
+    if (pendingApproval) {
+      actionsCell.appendChild(buildActionButton("Approve", "btn-primary", (event) => handleApprove(account, event.currentTarget)));
+    } else if (suspended) {
       actionsCell.appendChild(buildActionButton("Lift Suspension", "btn-outline", () => handleLiftSuspension(account)));
     } else {
       actionsCell.appendChild(buildActionButton("Suspend", "btn-outline", () => handleSuspend(account)));
@@ -321,6 +330,22 @@ async function checkAndApplyLockStatus(account, statusCell, actionsCell) {
     actionsCell.insertBefore(unlockBtn, actionsCell.firstChild);
   } catch (error) {
     console.error("Couldn't check lockout status:", error);
+  }
+}
+
+// New employee sign-ups start as approved:false and can't log in or touch
+// any data (the Firestore rules treat them as non-staff) until an admin
+// approves them here.
+async function handleApprove(account, btn) {
+  btn.disabled = true;
+  btn.textContent = "Approving...";
+  try {
+    await updateDoc(doc(db, "employees", account.id), { approved: true });
+    // The live listener re-renders the row — nothing else to do.
+  } catch (error) {
+    console.error("Couldn't approve account:", error);
+    btn.disabled = false;
+    btn.textContent = "Approve";
   }
 }
 

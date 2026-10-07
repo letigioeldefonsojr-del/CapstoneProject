@@ -9,7 +9,8 @@
 // TWO MODES (decided by the JSON body):
 //
 // 1) ORDER STATUS PUSH — { targetUid, title, message }
-//    Targets one customer through OneSignal's External User ID.
+//    Targets one customer through OneSignal's External ID alias and
+//    attaches data.orderId (the order's Firestore doc id) when given.
 //    Requires the same staff sign-in as promotions (see below).
 //
 // 2) PROMOTION PUSH (new) — { type: "promotion", message, title? }
@@ -70,7 +71,7 @@ export default {
 
 // ---------- Mode 1: single customer (order status) ------------------
 async function handleOrderPush(request, env, body) {
-  const { targetUid, title, message } = body || {};
+  const { targetUid, orderId, title, message } = body || {};
   if (!targetUid || !message) {
     return jsonResponse({ error: "Missing targetUid or message" }, 400);
   }
@@ -84,11 +85,18 @@ async function handleOrderPush(request, env, body) {
   const auth = await verifyStaff(request, env);
   if (!auth.ok) return jsonResponse({ error: auth.error }, auth.status);
 
-  return sendToOneSignal(env, {
-    include_external_user_ids: [targetUid],
+  const payload = {
+    include_aliases: { external_id: [targetUid] },
+    target_channel: "push",
     headings: { en: title || DEFAULT_TITLE },
     contents: { en: message }
-  });
+  };
+  // The customer app reads data.orderId to open that exact order when the
+  // notification is tapped. Value = the order's Firestore document id.
+  if (typeof orderId === "string" && orderId.trim()) {
+    payload.data = { orderId: orderId.trim() };
+  }
+  return sendToOneSignal(env, payload);
 }
 
 // ---------- Mode 2: everyone with promotions turned on --------------

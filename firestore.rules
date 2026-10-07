@@ -4,9 +4,15 @@ service cloud.firestore {
     function isSignedIn() {
       return request.auth != null;
     }
+    // An employee counts as staff only once an admin has approved them.
+    // New sign-ups are written with approved:false and stay locked out of
+    // staff data until an admin flips it on the Accounts page. Accounts
+    // that predate this (no "approved" field at all) are treated as
+    // approved, so existing employees aren't affected.
     function isEmployee() {
       return isSignedIn() &&
-        exists(/databases/$(database)/documents/employees/$(request.auth.uid));
+        exists(/databases/$(database)/documents/employees/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.get('approved', true) != false;
     }
     function isAdmin() {
       return isSignedIn() &&
@@ -17,7 +23,7 @@ service cloud.firestore {
     // an email before sign-in occurs (a known tradeoff of this login design).
     match /users/{userId} {
       allow read: if true;
-      allow write: if isSignedIn() && request.auth.uid == userId;
+      allow write: if isSignedIn() && (request.auth.uid == userId || isAdmin());
       match /cart/{cartId} {
         allow read, write: if isSignedIn() && request.auth.uid == userId;
       }
@@ -34,17 +40,26 @@ service cloud.firestore {
     // Writes remain restricted to the account owner.
     match /employees/{employeeId} {
       allow read: if true;
-      allow create: if isSignedIn() && request.auth.uid == employeeId;
-      allow update: if isSignedIn() && (request.auth.uid == employeeId || isAdmin());
+      // Self-sign-up is allowed ONLY as "not yet approved". The owner can
+      // never change their own approval status — only an admin can.
+      allow create: if isSignedIn() && request.auth.uid == employeeId &&
+        request.resource.data.approved == false;
+      allow update: if isSignedIn() &&
+        ((request.auth.uid == employeeId &&
+          request.resource.data.get('approved', true) == resource.data.get('approved', true)) ||
+         isAdmin());
       allow delete: if isSignedIn() && (request.auth.uid == employeeId || isAdmin());
     }
     // Admins: self-registered account profile, same pattern as employees.
     // Readable by anyone (mirrors employees — cheap, and lets the client
     // resolve an admin's name/uid without extra auth if you ever need it).
-    // Writes restricted to the account owner.
+    // Creating is admin-only (see below); the owner can update their own.
     match /admins/{adminId} {
       allow read: if true;
-      allow create: if isSignedIn() && request.auth.uid == adminId;
+      // Only an existing admin can create an admin account (the Accounts
+      // page does this while signed in as the admin). Self-creation is NOT
+      // allowed — otherwise any signed-in user could make themselves admin.
+      allow create: if isAdmin();
       allow update: if isSignedIn() && (request.auth.uid == adminId || isAdmin());
       allow delete: if isSignedIn() && (request.auth.uid == adminId || isAdmin());
     }

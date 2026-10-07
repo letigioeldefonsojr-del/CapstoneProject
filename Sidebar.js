@@ -169,6 +169,10 @@ async function resolveRole(uid) {
       await signOutSuspended(employeeSnap.value.data(), "employee");
       return null;
     }
+    if (isPendingApproval(employeeSnap.value.data())) {
+      await signOutPending();
+      return null;
+    }
     sessionStorage.setItem("almares_role", "employee");
     return "employee";
   }
@@ -208,6 +212,11 @@ async function checkAccountStillValid(uid, role) {
       return false;
     }
 
+    if (role === "employee" && isPendingApproval(snap.data())) {
+      await signOutPending();
+      return false;
+    }
+
     return true;
   } catch (error) {
     // Fail open — a network blip checking this shouldn't lock out a
@@ -215,6 +224,20 @@ async function checkAccountStillValid(uid, role) {
     console.error("Couldn't verify account status:", error);
     return true;
   }
+}
+
+// New employee sign-ups have approved:false until an admin approves them
+// on the Accounts page. Accounts without the field (created before this
+// existed) count as approved.
+function isPendingApproval(data) {
+  return data?.approved === false;
+}
+
+async function signOutPending() {
+  console.warn("Employee account is waiting for admin approval — signing out.");
+  await signOut(auth);
+  sessionStorage.clear();
+  window.location.href = "EmployeeLogin.html?pending=1";
 }
 
 function isSuspended(data) {

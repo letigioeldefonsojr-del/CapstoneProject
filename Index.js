@@ -589,6 +589,11 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
+      if (data.approved === false) {
+        showStatus("Your account is waiting for admin approval. You'll be able to log in once an admin approves it.", "error");
+        return;
+      }
+
       const suspendedUntilMillis = data.suspendedUntil?.toMillis?.();
       if (suspendedUntilMillis && suspendedUntilMillis > Date.now()) {
         showSuspensionOverlay(new Date(suspendedUntilMillis).toLocaleDateString(), data.suspensionReason || "");
@@ -800,6 +805,7 @@ document.addEventListener("DOMContentLoaded", () => {
         // Web signup's OTP step IS the activation — no separate
         // mobile-app activation needed for accounts created here.
         [EMPLOYEE_ACTIVE_FIELD]: true,
+        approved: false, // an admin must approve new employees (Accounts page)
         role: "employee",
         createdAt: serverTimestamp()
       });
@@ -814,7 +820,7 @@ document.addEventListener("DOMContentLoaded", () => {
     pendingSignup = null;
     hideOtpStep();
 
-    showStatus(`Account created! Your username is "${username}" — please log in.`, "success");
+    showStatus(`Account created! Your username is "${username}". An admin needs to approve it before you can log in.`, "success");
     formSignup.reset();
     setEmployeeMode("login");
   }
@@ -875,6 +881,12 @@ document.addEventListener("DOMContentLoaded", () => {
         if (role === "employee" && data[EMPLOYEE_ACTIVE_FIELD] !== true) {
           await signOut(auth);
           showStatus("Your account isn't activated yet. Please verify your email first.", "error");
+          return;
+        }
+
+        if (role === "employee" && data.approved === false) {
+          await signOut(auth);
+          showStatus("Your account is waiting for admin approval. You'll be able to log in once an admin approves it.", "error");
           return;
         }
 
@@ -981,9 +993,20 @@ document.addEventListener("DOMContentLoaded", () => {
           // Google already verified this email — same trust level our
           // own OTP step provides, so this counts as activated too.
           [EMPLOYEE_ACTIVE_FIELD]: true,
+        approved: false, // an admin must approve new employees (Accounts page)
           role: "employee",
           createdAt: serverTimestamp()
         });
+      }
+
+      if (role === "employee") {
+        // New employees can't use the app until an admin approves them.
+        pendingOAuthSignup = null;
+        await signOut(auth);
+        sessionStorage.removeItem("almares_role");
+        showStatus("Account created! An admin needs to approve it before you can log in.", "success");
+        setEmployeeMode("login");
+        return;
       }
 
       sessionStorage.setItem("almares_role", role);

@@ -339,6 +339,11 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
+      if (data.approved === false) {
+        showStatus("Your account is waiting for admin approval. You'll be able to log in once an admin approves it.", "error");
+        return;
+      }
+
       const suspendedUntilMillis = data.suspendedUntil?.toMillis?.();
       if (suspendedUntilMillis && suspendedUntilMillis > Date.now()) {
         showSuspensionOverlay(new Date(suspendedUntilMillis).toLocaleDateString(), data.suspensionReason || "");
@@ -482,6 +487,7 @@ document.addEventListener("DOMContentLoaded", () => {
       [EMPLOYEE_EMAIL_FIELD]: email,
       phone,
       [EMPLOYEE_ACTIVE_FIELD]: true,
+        approved: false, // an admin must approve new employees (Accounts page)
       role: "employee",
       createdAt: serverTimestamp()
     });
@@ -492,7 +498,7 @@ document.addEventListener("DOMContentLoaded", () => {
     pendingSignup = null;
     hideOtpStep();
 
-    showStatus(`Account created! Your username is "${username}" — please log in.`, "success");
+    showStatus(`Account created! Your username is "${username}". An admin needs to approve it before you can log in.`, "success");
     formSignup.reset();
     setEmployeeMode("login");
   }
@@ -546,6 +552,12 @@ document.addEventListener("DOMContentLoaded", () => {
         if (data[EMPLOYEE_ACTIVE_FIELD] !== true) {
           await signOut(auth);
           showStatus("Your account isn't activated yet. Please verify your email first.", "error");
+          return;
+        }
+
+        if (data.approved === false) {
+          await signOut(auth);
+          showStatus("Your account is waiting for admin approval. You'll be able to log in once an admin approves it.", "error");
           return;
         }
 
@@ -636,16 +648,17 @@ document.addEventListener("DOMContentLoaded", () => {
         [EMPLOYEE_EMAIL_FIELD]: email,
         phone,
         [EMPLOYEE_ACTIVE_FIELD]: true,
+        approved: false, // an admin must approve new employees (Accounts page)
         role: "employee",
         createdAt: serverTimestamp()
       });
 
-      sessionStorage.setItem("almares_role", "employee");
-      sessionStorage.setItem("almares_employee_doc_id", uid);
-
+      // New employees can't use the app until an admin approves them.
       pendingOAuthSignup = null;
-      showStatus("Account created! Redirecting...", "success");
-      window.location.replace(EMPLOYEE_REDIRECT_URL);
+      await signOut(auth);
+      sessionStorage.removeItem("almares_role");
+      showStatus("Account created! An admin needs to approve it before you can log in.", "success");
+      setEmployeeMode("login");
     } catch (error) {
       console.error("Couldn't complete Google signup:", error);
       showStatus("Something went wrong. Please try again.", "error");
@@ -702,6 +715,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const suspendedUntil = urlParams.get("suspended");
   if (suspendedUntil) {
     showSuspensionOverlay(suspendedUntil, urlParams.get("reason") || "");
+  }
+  if (urlParams.get("pending")) {
+    showStatus("Your account is waiting for admin approval. You'll be able to log in once an admin approves it.", "error");
   }
 });
 

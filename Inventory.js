@@ -2497,8 +2497,8 @@ function showDiscountResultOverlay({ action, scopeLabel, percentLabel, varies, d
 // not already ended) and that are actually in stock trigger a push. A
 // discount scheduled for a later start date sends nothing — there is no
 // server here to fire it on that day.
-// A few products → one push each ("🔥 Milk is now 10% off!"); many →
-// one summary push, so a store-wide discount isn't 80 notifications.
+// One product → "<Name>" is now on sale!; two or more in the same action →
+// a single generic push, so a multi-product discount is never a burst.
 // ====================================================================
 function isProductInStock(product) {
   const variants = getVariants(product);
@@ -2527,14 +2527,12 @@ async function notifyDiscountLive(updates, entries, dates) {
 
   if (live.length === 0) return { note: "" };
 
+  // Exactly one product → name it. Two or more discounted in the same
+  // action → ONE generic push, never one per product.
   const result = await sendPromotionPushes(live, {
-    maxIndividual: 3,
-    one: ({ product, percent }) =>
-      `🔥 ${product[PRODUCT_NAME_FIELD] || "A product"} is now ${formatPercent(percent)}% off!`,
-    many: (items) => {
-      const best = Math.max(...items.map((item) => item.percent));
-      return `🔥 ${items.length} products are now on sale — up to ${formatPercent(best)}% off!`;
-    }
+    maxIndividual: 1,
+    one: ({ product }) => `"${product[PRODUCT_NAME_FIELD] || "A product"}" is now on sale!`,
+    many: () => "Some products are discounted! Shop now and don't miss the offer."
   });
 
   return { note: result.ok ? "Customers with promotions on were notified." : "Discount saved, but the customer push couldn't be sent." };

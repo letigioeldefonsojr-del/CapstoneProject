@@ -1,4 +1,4 @@
-import { db } from "./firebase-config.js";
+import { db, auth } from "./firebase-config.js";
 import {
   collection, doc, updateDoc, onSnapshot, query, where, Timestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
@@ -477,10 +477,15 @@ async function sendOrderNotification(order, title, message) {
   }
 
   try {
+    // The Worker only accepts order pushes from signed-in staff.
+    const idToken = await auth.currentUser?.getIdToken();
     const response = await fetch(NOTIFICATION_WORKER_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ targetUid: order.userId, title, message })
+      headers: {
+        "Content-Type": "application/json",
+        ...(idToken ? { "Authorization": `Bearer ${idToken}` } : {})
+      },
+      body: JSON.stringify({ targetUid: order.userId, orderId: order.id, title, message })
     });
 
     if (!response.ok) {
