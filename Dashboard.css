@@ -2770,3 +2770,15 @@ button {
 .featured-star:hover:not(:disabled) { color: #e0a800; transform: scale(1.15); }
 .featured-star--on { color: #e0a800; }
 .featured-star:disabled { cursor: default; opacity: 0.85; }
+
+/* Banner form: "send a push" opt-in */
+.banner-form__notify {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 4px 0 14px;
+  font-size: 0.9rem;
+  color: #3d4a41;
+  cursor: pointer;
+}
+.banner-form__notify input { margin-top: 3px; accent-color: #1f5a37; }

@@ -7,6 +7,7 @@ import { getProducts, invalidateProductsCache } from "./ProductCache.js";
 import { confirmDialog } from "./ConfirmDialog.js";
 import { promptPasswordConfirm } from "./PasswordConfirm.js";
 import { fuzzyMatch } from "./FuzzySearch.js";
+import { sendPromotionPushes } from "./PromotionPush.js";
 
 // ====================================================================
 // CHUNK 0 — CONFIG
@@ -2445,7 +2446,7 @@ function describeDiscountScope() {
 }
 
 // Frosted-glass confirmation shown after Apply / Remove succeeds.
-function showDiscountResultOverlay({ action, scopeLabel, percentLabel, varies, dates, count }) {
+function showDiscountResultOverlay({ action, scopeLabel, percentLabel, varies, dates, count, pushNote }) {
   const isApply = action === "apply";
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay glass-overlay";
@@ -2476,10 +2477,67 @@ function showDiscountResultOverlay({ action, scopeLabel, percentLabel, varies, d
   overlay.querySelector(".glass-card__detail").textContent =
     `${count} product${count === 1 ? "" : "s"} updated · ${detail}`;
 
+  if (pushNote) {
+    const noteEl = document.createElement("p");
+    noteEl.className = "glass-card__detail";
+    noteEl.textContent = pushNote;
+    overlay.querySelector(".glass-card__detail").after(noteEl);
+  }
+
   document.body.appendChild(overlay);
   const dismiss = () => overlay.remove();
   overlay.querySelector("#discount-result-dismiss").addEventListener("click", dismiss);
   overlay.addEventListener("click", (event) => { if (event.target === overlay) dismiss(); });
+}
+
+// ====================================================================
+// PROMOTION PUSH — discount went live
+// ----------------------------------------------------------------
+// Only products whose discount is ACTIVE right now (start date reached,
+// not already ended) and that are actually in stock trigger a push. A
+// discount scheduled for a later start date sends nothing — there is no
+// server here to fire it on that day.
+// A few products → one push each ("🔥 Milk is now 10% off!"); many →
+// one summary push, so a store-wide discount isn't 80 notifications.
+// ====================================================================
+function isProductInStock(product) {
+  const variants = getVariants(product);
+  if (variants.length > 0) {
+    return variants.some((variant) => {
+      if (!variant || typeof variant !== "object") return true;
+      return getStockStatus(variant[VARIANT_STOCK_FIELD], variant[PRODUCT_AVAILABLE_FIELD]) !== "out";
+    });
+  }
+  return getStockStatus(product[STOCK_FIELD], product[PRODUCT_AVAILABLE_FIELD]) !== "out";
+}
+
+async function notifyDiscountLive(updates, entries, dates) {
+  const now = Date.now();
+  const startedYet = dates.start.getTime() <= now;
+  const notEnded = !dates.end || dates.end.getTime() >= now;
+  if (!startedYet) {
+    return { note: "Starts later — no push sent now." };
+  }
+  if (!notEnded) return { note: "" };
+
+  const productById = new Map(entries.map(({ product }) => [product.id, product]));
+  const live = updates
+    .map(({ id, percent }) => ({ product: productById.get(id), percent }))
+    .filter(({ product, percent }) => product && percent > 0 && isProductInStock(product));
+
+  if (live.length === 0) return { note: "" };
+
+  const result = await sendPromotionPushes(live, {
+    maxIndividual: 3,
+    one: ({ product, percent }) =>
+      `🔥 ${product[PRODUCT_NAME_FIELD] || "A product"} is now ${formatPercent(percent)}% off!`,
+    many: (items) => {
+      const best = Math.max(...items.map((item) => item.percent));
+      return `🔥 ${items.length} products are now on sale — up to ${formatPercent(best)}% off!`;
+    }
+  });
+
+  return { note: result.ok ? "Customers with promotions on were notified." : "Discount saved, but the customer push couldn't be sent." };
 }
 
 async function runDiscountAction(action) {
@@ -2566,7 +2624,17 @@ async function runDiscountAction(action) {
 
     await reloadAfterWrite();
     closeDiscountModal();
-    showDiscountResultOverlay({ action, scopeLabel, percentLabel, varies, dates, count: updates.length });
+
+    // Tell customers (promotions-enabled devices only) about discounts that
+    // are live right now. Runs after the save succeeded; a failed push never
+    // undoes the discount.
+    let pushNote = "";
+    if (isApply) {
+      const pushResult = await notifyDiscountLive(updates, entries, dates);
+      pushNote = pushResult.note;
+    }
+
+    showDiscountResultOverlay({ action, scopeLabel, percentLabel, varies, dates, count: updates.length, pushNote });
   } catch (error) {
     console.error("Couldn't update discounts:", error);
     showDiscountStatus("Something went wrong. Some products may have been updated — check the list and try again.", "error");

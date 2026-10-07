@@ -4,6 +4,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getProducts, invalidateProductsCache } from "./ProductCache.js";
 import { kMeansCluster, normalizeFeatures } from "./KMeans.js";
+import { sendPromotionPushes } from "./PromotionPush.js";
 
 // ====================================================================
 // FORECAST — AI-assisted demand trend & restock recommendations
@@ -82,18 +83,42 @@ document.addEventListener("sidebar:ready", (event) => {
 const MIN_PRODUCTS_FOR_BEST_SELLER = 3;
 const PRODUCT_WRITE_BATCH_LIMIT = 450;
 
+// A product that flips to Best Seller triggers a promotion push, but at
+// most once per this many days — tiers can flap between runs and customers
+// shouldn't be told the same thing repeatedly.
+const BEST_SELLER_PUSH_COOLDOWN_DAYS = 30;
+
+// Firestore Timestamps arrive either as Timestamp objects or, after the
+// sessionStorage product cache, as { seconds, nanoseconds }.
+function timeValueToMillis(value) {
+  if (!value) return null;
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (typeof value.seconds === "number") return value.seconds * 1000;
+  return null;
+}
+
+function wasNotifiedRecently(product) {
+  const last = timeValueToMillis(product.bestSellerNotifiedAt);
+  return last !== null && Date.now() - last < BEST_SELLER_PUSH_COOLDOWN_DAYS * 86400000;
+}
+
 async function syncSalesTiersToProducts(productsWithData, productsWithoutData) {
   try {
     const canFlagBestSellers = productsWithData.length >= MIN_PRODUCTS_FOR_BEST_SELLER;
     const updates = [];
+    const newlyBestSelling = []; // products to announce once the writes succeed
 
-    productsWithData.forEach(({ product, velocityTier }) => {
+    productsWithData.forEach(({ product, velocityTier, currentStock }) => {
       const isBestSeller = canFlagBestSellers && velocityTier === "fast";
       if (product.salesTier !== velocityTier || (product.bestSeller === true) !== isBestSeller) {
-        updates.push({
-          id: product.id,
-          data: { salesTier: velocityTier, bestSeller: isBestSeller, salesTierUpdatedAt: serverTimestamp() }
-        });
+        const data = { salesTier: velocityTier, bestSeller: isBestSeller, salesTierUpdatedAt: serverTimestamp() };
+
+        // Just became a Best Seller, is in stock, and wasn't announced lately.
+        if (isBestSeller && product.bestSeller !== true && currentStock > 0 && !wasNotifiedRecently(product)) {
+          data.bestSellerNotifiedAt = serverTimestamp();
+          newlyBestSelling.push(product);
+        }
+        updates.push({ id: product.id, data });
       }
     });
 
@@ -117,6 +142,15 @@ async function syncSalesTiersToProducts(productsWithData, productsWithoutData) {
       await batch.commit();
     }
     invalidateProductsCache();
+
+    // Promotion push — only after the flags were saved. One push each for a
+    // few products, a single summary when many flip at once (e.g. the very
+    // first run, when every fast mover gets flagged together).
+    await sendPromotionPushes(newlyBestSelling, {
+      maxIndividual: 3,
+      one: (product) => `⭐ ${product.name || "A product"} is now a Best Seller!`,
+      many: (items) => `⭐ ${items.length} products just became Best Sellers!`
+    });
   } catch (error) {
     // Never block the Forecast page over this — it's a background sync.
     console.error("Couldn't publish sales tiers to products:", error);

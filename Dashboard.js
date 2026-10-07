@@ -6,6 +6,7 @@ import { isProductInAlertState, getWorstAlertDetail } from "./StockAlerts.js";
 import { getClearedSet, loadReadStatus } from "./ReadStatus.js";
 import { setPreferences } from "./NotificationPreferences.js";
 import { getLatestProducts, getLatestNotifications } from "./Sidebar.js";
+import { sendPromotionPush } from "./PromotionPush.js";
 
 // ====================================================================
 // CHUNK 0 — CONFIG
@@ -349,7 +350,27 @@ async function handleBannerSave(event) {
     });
 
     currentBannerImageUrl = imageUrl;
-    showBannerStatus("Banner saved — now live on the customer app.", "success");
+    let statusText = "Banner saved — now live on the customer app.";
+
+    // Promotion push: the banner's own offer + description. Only when the
+    // banner is live right now — a banner scheduled for later sends nothing
+    // (no server here to fire it on that day).
+    if (document.getElementById("banner-notify")?.checked) {
+      const now = Date.now();
+      const startsLater = startValue && new Date(startValue).getTime() > now;
+      const alreadyEnded = endValue && new Date(endValue).getTime() < now;
+      if (startsLater) {
+        statusText += " Starts later, so no push was sent.";
+      } else if (!alreadyEnded) {
+        const text = [offer, description].filter(Boolean).join(" — ");
+        const pushResult = await sendPromotionPush(text);
+        statusText += pushResult.ok
+          ? " Customers with promotions on were notified."
+          : " The push notification couldn't be sent.";
+      }
+    }
+
+    showBannerStatus(statusText, "success");
     await loadBannerPanel();
   } catch (error) {
     console.error("Couldn't save banner:", error);
