@@ -5,6 +5,7 @@ import {
 
 const ORDERS_COLLECTION = "orders";
 const STOCK_MOVEMENTS_COLLECTION = "stockMovements";
+const POS_SALES_COLLECTION = "posSales";
 const PRODUCTS_COLLECTION = "products";
 
 let viewMode = "day"; // "day" | "week" | "month" | "year"
@@ -110,10 +111,12 @@ async function loadSales() {
     const dateInput = document.getElementById("sales-date-input");
     const { start, end } = computeDateRange(dateInput.value);
 
-    const [onlineSales, inPersonSales] = await Promise.all([
+    const [onlineSales, scannerSales, posSales] = await Promise.all([
       fetchOnlineSales(start, end),
-      fetchInPersonSales(start, end)
+      fetchInPersonSales(start, end),
+      fetchPosSales(start, end)
     ]);
+    const inPersonSales = scannerSales; // scanner/manual single-item sales (estimated pricing applies to these)
 
     // In-person sales logged before the price-at-time-of-sale feature
     // existed have no unitPrice at all — those need the product's
@@ -134,7 +137,7 @@ async function loadSales() {
       sale.revenue = sale.unitPrice != null ? sale.unitPrice * sale.unitsSold : null;
     });
 
-    const combined = [...onlineSales, ...inPersonSales].sort((a, b) => b.timestampMillis - a.timestampMillis);
+    const combined = [...onlineSales, ...inPersonSales, ...posSales].sort((a, b) => b.timestampMillis - a.timestampMillis);
 
     render(container, combined, formatRangeLabel(start, end));
   } catch (error) {
@@ -184,6 +187,7 @@ async function fetchInPersonSales(start, end) {
     const unitsSold = (data.previousStock ?? 0) - (data.newStock ?? 0);
     return {
       source: "in-person",
+      fromPos: Boolean(data.posSaleId),
       id: docSnap.id,
       productId: data.productId,
       productName: data.variantName ? `${data.productName} — ${data.variantName}` : (data.productName || "Product"),
@@ -192,7 +196,31 @@ async function fetchInPersonSales(start, end) {
       performedByEmail: data.performedByEmail || "unknown",
       timestampMillis: data.createdAt?.toMillis?.() ?? 0
     };
-  }).filter((s) => s.unitsSold > 0); // a "sale" movement with 0 or negative change isn't a real sale (shouldn't happen, but guards against bad data)
+  }).filter((s) => !s.fromPos) // Cashier sales are counted once, from posSales
+    .filter((s) => s.unitsSold > 0); // a "sale" movement with 0 or negative change isn't a real sale (shouldn't happen, but guards against bad data)
+}
+
+async function fetchPosSales(start, end) {
+  const q = query(
+    collection(db, POS_SALES_COLLECTION),
+    where("createdAt", ">=", Timestamp.fromDate(start)),
+    where("createdAt", "<", Timestamp.fromDate(end))
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((docSnap) => {
+    const data = docSnap.data();
+    return {
+      source: "pos",
+      id: docSnap.id,
+      receiptNo: data.receiptNo || "POS",
+      itemCount: data.units ?? (Array.isArray(data.items) ? data.items.length : 0),
+      paymentMethod: data.paymentMethod === "gcash" ? "GCash" : "Cash",
+      performedByEmail: data.cashierEmail || "unknown",
+      revenue: typeof data.total === "number" ? data.total : null,
+      priceIsEstimated: false,
+      timestampMillis: data.createdAt?.toMillis?.() ?? 0
+    };
+  });
 }
 
 async function fetchCurrentPrices(productIds) {
@@ -204,7 +232,8 @@ async function fetchCurrentPrices(productIds) {
       const snap = await getDoc(doc(db, PRODUCTS_COLLECTION, productId));
       if (snap.exists()) {
         const data = snap.data();
-        if (typeof data.price === "number") prices.set(productId, data.price);
+        const parsed = typeof data.price === "number" ? data.price : parseFloat(String(data.price ?? "").replace(/[^\d.]/g, ""));
+        if (!isNaN(parsed)) prices.set(productId, parsed);
       }
     } catch (error) {
       console.error(`Couldn't fetch current price for product ${productId}:`, error);
@@ -217,7 +246,7 @@ async function fetchCurrentPrices(productIds) {
 function render(container, combined, rangeLabel) {
   const totalRevenue = combined.reduce((sum, s) => sum + (s.revenue ?? 0), 0);
   const onlineCount = combined.filter((s) => s.source === "online").length;
-  const inPersonCount = combined.filter((s) => s.source === "in-person").length;
+  const inPersonCount = combined.filter((s) => s.source === "in-person" || s.source === "pos").length;
   const hasEstimated = combined.some((s) => s.priceIsEstimated);
 
   container.innerHTML = `
@@ -270,6 +299,18 @@ function buildSalesTable(combined) {
           <td>${escapeHtmlSales(sale.customerName)} — ${sale.itemCount} item${sale.itemCount === 1 ? "" : "s"}</td>
           <td style="text-align:right;">${sale.revenue != null ? `₱${sale.revenue.toFixed(2)}` : "—"}</td>
           <td style="text-align:right;"><button type="button" class="btn-outline" data-receipt-order-id="${sale.id}">Download Receipt</button></td>
+        </tr>
+      `;
+    }
+
+    if (sale.source === "pos") {
+      return `
+        <tr>
+          <td>${time}</td>
+          <td><span class="role-pill role-pill--employee">In-Person</span></td>
+          <td>Cashier ${escapeHtmlSales(sale.receiptNo)} — ${sale.itemCount} item${sale.itemCount === 1 ? "" : "s"} · ${sale.paymentMethod} — by ${escapeHtmlSales(sale.performedByEmail)}</td>
+          <td style="text-align:right;">${sale.revenue != null ? `₱${sale.revenue.toFixed(2)}` : "—"}</td>
+          <td></td>
         </tr>
       `;
     }

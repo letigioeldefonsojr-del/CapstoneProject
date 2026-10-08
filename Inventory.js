@@ -889,6 +889,14 @@ function parsePriceNumber(value) {
   return isNaN(parsed) ? "" : parsed;
 }
 
+// Prices are stored as text like "₱45.00" — the stock log needs a real
+// number (null when there's no usable price).
+function priceToNumberOrNull(value) {
+  if (typeof value === "number") return isNaN(value) ? null : value;
+  const parsed = parseFloat(String(value ?? "").replace(/[^\d.]/g, ""));
+  return isNaN(parsed) ? null : parsed;
+}
+
 function formatPrice(numberValue) {
   return `₱${Number(numberValue).toFixed(2)}`;
 }
@@ -1580,7 +1588,7 @@ async function performScanAction(productId, barcode, mode, value) {
         productId,
         productName: data[PRODUCT_NAME_FIELD] || "Product",
         variantName: null,
-        unitPrice: typeof data[PRODUCT_PRICE_FIELD] === "number" ? data[PRODUCT_PRICE_FIELD] : null
+        unitPrice: priceToNumberOrNull(data[PRODUCT_PRICE_FIELD])
       };
     }
 
@@ -1604,7 +1612,7 @@ async function performScanAction(productId, barcode, mode, value) {
       productId,
       productName: data[PRODUCT_NAME_FIELD] || "Product",
       variantName: variant.name || "Variant",
-      unitPrice: typeof variant[PRODUCT_PRICE_FIELD] === "number" ? variant[PRODUCT_PRICE_FIELD] : null
+      unitPrice: priceToNumberOrNull(variant[PRODUCT_PRICE_FIELD]) ?? priceToNumberOrNull(data[PRODUCT_PRICE_FIELD])
     };
   });
 }

@@ -21,6 +21,28 @@ const LOGIN_PAGE_URL = "/";
 let latestProducts = null;
 let latestNotifications = null;
 
+
+// The Cashier (counter POS) link is added from here rather than pasted
+// into every page's HTML, so all pages get it from this one place. It
+// goes right before the Orders link and is visible to every role.
+function injectCashierNav() {
+  const nav = document.querySelector(".sidebar__nav");
+  if (!nav || nav.querySelector('a[href="Cashier.html"]')) return;
+  const ordersLink = nav.querySelector('a[href="Orders.html"]');
+  const link = document.createElement("a");
+  link.href = "Cashier.html";
+  link.className = "nav-item";
+  link.innerHTML = `
+    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <rect x="5" y="3.5" width="14" height="5" rx="1.2" stroke="currentColor" stroke-width="1.7"/>
+      <path d="M4 12.5H20L19 20.5H5L4 12.5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+      <path d="M9 15.5V17.5M12 15.5V17.5M15 15.5V17.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+    </svg>
+    <span class="nav-item__label">Cashier</span>`;
+  if (ordersLink) nav.insertBefore(link, ordersLink); else nav.appendChild(link);
+}
+injectCashierNav();
+
 const EMPLOYEE_COLLECTION = "employees";
 const EMPLOYEE_NAME_FIELD = "firstName";
 const ADMIN_COLLECTION = "admins";
