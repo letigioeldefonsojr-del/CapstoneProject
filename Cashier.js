@@ -567,7 +567,7 @@ function openRefund(sale) {
   refundQtys = sale.items.map(() => 0);
   $("pos-refund-title").textContent = `Refund / Void — ${sale.receiptNo || ""}`;
   $("pos-refund-reason").value = "";
-  $("pos-refund-restock").checked = true;
+  $("pos-refund-restock").checked = false;
   $("pos-refund-status").hidden = true;
   renderRefund();
   $("pos-refund-overlay").hidden = false;
