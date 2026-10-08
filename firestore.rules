@@ -12,7 +12,18 @@ service cloud.firestore {
     function isEmployee() {
       return isSignedIn() &&
         exists(/databases/$(database)/documents/employees/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.get('approved', true) != false;
+        get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.get('approved', true) != false &&
+        get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.get('isDriver', false) != true;
+    }
+    // A Driver is an employee account an admin has marked isDriver:true.
+    // Drivers are deliberately NOT counted by isEmployee(), so they lose
+    // access to everything staff-only (sales, stock log, cashier data,
+    // store settings, ...) and get only the order access granted below.
+    function isDriver() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/employees/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.get('approved', true) != false &&
+        get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.get('isDriver', false) == true;
     }
     function isAdmin() {
       return isSignedIn() &&
@@ -42,11 +53,14 @@ service cloud.firestore {
       allow read: if true;
       // Self-sign-up is allowed ONLY as "not yet approved". The owner can
       // never change their own approval status — only an admin can.
+      // Nor can anyone sign themselves up as a driver — only an admin sets it.
       allow create: if isSignedIn() && request.auth.uid == employeeId &&
-        request.resource.data.approved == false;
+        request.resource.data.approved == false &&
+        request.resource.data.get('isDriver', false) == false;
       allow update: if isSignedIn() &&
         ((request.auth.uid == employeeId &&
-          request.resource.data.get('approved', true) == resource.data.get('approved', true)) ||
+          request.resource.data.get('approved', true) == resource.data.get('approved', true) &&
+          request.resource.data.get('isDriver', false) == resource.data.get('isDriver', false)) ||
          isAdmin());
       allow delete: if isSignedIn() && (request.auth.uid == employeeId || isAdmin());
     }
@@ -82,10 +96,19 @@ service cloud.firestore {
     // "Clear History").
     match /orders/{orderId} {
       allow read: if isSignedIn() &&
-        (isEmployee() || isAdmin() || resource.data.userId == request.auth.uid);
+        (isEmployee() || isAdmin() || isDriver() || resource.data.userId == request.auth.uid);
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
       allow update: if isSignedIn() &&
-        (isEmployee() || isAdmin() || resource.data.userId == request.auth.uid);
+        (isEmployee() || isAdmin() || resource.data.userId == request.auth.uid ||
+         // Drivers: delivery steps only (on the way, delivered, undeliverable).
+         (isDriver() &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'awaitingCustomerConfirmation', 'isPaid', 'confirmDeadline', 'deliveryIssueReason']) &&
+          ((request.resource.data.diff(resource.data).affectedKeys().hasAny(['status']) &&
+            request.resource.data.status in ['on_the_way', 'undelivered'] &&
+            resource.data.status in ['approved', 'on_the_way']) ||
+           (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['status']) &&
+            resource.data.status == 'on_the_way'))));
       allow delete: if isEmployee() || isAdmin() ||
         (isSignedIn() && resource.data.userId == request.auth.uid &&
          resource.data.status == 'cancelled');

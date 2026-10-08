@@ -110,12 +110,21 @@ async function initSidebar(user) {
   const role = await resolveRole(user.uid);
   if (!role) return; // resolveRole already signed out and is redirecting — nothing more to do here
 
+  // Drivers are employees an admin marked isDriver:true. They only get the
+  // Orders page — anywhere else sends them straight back to it.
+  const isDriver = role === "employee" ? await resolveDriverFlag(user.uid) : false;
+  if (isDriver && !onOrdersPage()) {
+    window.location.replace("Orders.html");
+    return;
+  }
+
   const preferences = await getPreferences(user.uid, role);
 
   renderIdentity(role, user);
   startClock();
+  if (isDriver) applyDriverNav();
   highlightActiveNav();
-  loadNotifBadge(user.uid, preferences);
+  if (!isDriver) loadNotifBadge(user.uid, preferences);
   wireCollapse();
   wireLogout();
   wireScrollToTop();
@@ -125,7 +134,57 @@ async function initSidebar(user) {
   // Let the page's own script (Dashboard.js, Inventory.js, etc.) know
   // the sidebar is ready and what role is logged in, in case it needs
   // to adjust its own content (e.g. hiding an admin-only button).
-  document.dispatchEvent(new CustomEvent("sidebar:ready", { detail: { role, user, preferences } }));
+  document.dispatchEvent(new CustomEvent("sidebar:ready", { detail: { role, user, preferences, isDriver } }));
+}
+
+// ====================================================================
+// DRIVER ROLE
+// ----------------------------------------------------------------
+// A driver is an employees/{uid} document with isDriver:true (only an
+// admin can set it — the Firestore rules block self-editing). The flag
+// is cached per-user in sessionStorage so pages open instantly, and
+// re-checked in the background on every page load; if an admin has
+// changed it since, the page reloads once and picks up the new access.
+// ====================================================================
+const DRIVER_CACHE_KEY = "almares_driver";
+
+function onOrdersPage() {
+  const page = (window.location.pathname.split("/").pop() || "").replace(/\.html$/i, "").toLowerCase();
+  return page === "orders";
+}
+
+async function fetchDriverFlag(uid) {
+  const snap = await getDoc(doc(db, EMPLOYEE_COLLECTION, uid));
+  return snap.exists() && snap.data().isDriver === true;
+}
+
+async function resolveDriverFlag(uid) {
+  const cached = sessionStorage.getItem(DRIVER_CACHE_KEY);
+  if (cached && cached.startsWith(`${uid}:`)) {
+    const cachedValue = cached === `${uid}:1`;
+    fetchDriverFlag(uid).then((fresh) => {
+      if (fresh !== cachedValue) {
+        sessionStorage.setItem(DRIVER_CACHE_KEY, `${uid}:${fresh ? 1 : 0}`);
+        window.location.reload();
+      }
+    }).catch(() => {});
+    return cachedValue;
+  }
+  try {
+    const flag = await fetchDriverFlag(uid);
+    sessionStorage.setItem(DRIVER_CACHE_KEY, `${uid}:${flag ? 1 : 0}`);
+    return flag;
+  } catch (error) {
+    console.error("Couldn't check driver status:", error);
+    return false;
+  }
+}
+
+// Only Orders (and Log out) stay in the sidebar for a driver.
+function applyDriverNav() {
+  document.querySelectorAll(".sidebar__nav a.nav-item").forEach((link) => {
+    if (link.getAttribute("href") !== "Orders.html") link.hidden = true;
+  });
 }
 
 // Feedback and Accounts are admin-only — hidden by default directly
@@ -566,6 +625,7 @@ function wireLogout() {
       await signOut(auth);
     } finally {
       sessionStorage.removeItem("almares_role");
+      sessionStorage.removeItem(DRIVER_CACHE_KEY);
       sessionStorage.removeItem("almares_employee_doc_id");
       window.location.href = LOGIN_PAGE_URL;
     }

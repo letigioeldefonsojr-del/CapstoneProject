@@ -82,7 +82,8 @@ async function handleOrderPush(request, env, body) {
   // Order updates are sent by staff from the Orders page, so require the
   // same staff sign-in as promotions — otherwise anyone could push fake
   // order updates to any customer.
-  const auth = await verifyStaff(request, env);
+  // Drivers may send order-status pushes (that's their job).
+  const auth = await verifyStaff(request, env, { allowDriver: true });
   if (!auth.ok) return jsonResponse({ error: auth.error }, auth.status);
 
   const payload = {
@@ -112,7 +113,8 @@ async function handlePromotion(request, env, body) {
     return jsonResponse({ error: `Title is too long (max ${MAX_TITLE_LENGTH} characters).` }, 400);
   }
 
-  const auth = await verifyStaff(request, env);
+  // Promotions go to every customer, so drivers can't send them.
+  const auth = await verifyStaff(request, env, { allowDriver: false });
   if (!auth.ok) return jsonResponse({ error: auth.error }, auth.status);
 
   return sendToOneSignal(env, {
@@ -128,7 +130,7 @@ async function handlePromotion(request, env, body) {
 // Firestore REST is called WITHOUT the user's token on purpose: admins/
 // and employees/ are publicly readable by your rules, so no service
 // account is needed.
-async function verifyStaff(request, env) {
+async function verifyStaff(request, env, { allowDriver = false } = {}) {
   const header = request.headers.get("Authorization") || "";
   const idToken = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
   if (!idToken) return { ok: false, status: 401, error: "Sign in required." };
@@ -159,7 +161,20 @@ async function verifyStaff(request, env) {
       const res = await fetch(
         `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/${collectionName}/${encodeURIComponent(uid)}`
       );
-      if (res.ok) return { ok: true, uid };
+      if (!res.ok) continue;
+      if (collectionName === "employees") {
+        const doc = await res.json().catch(() => ({}));
+        const fields = (doc && doc.fields) || {};
+        // Not approved yet -> not staff. (Missing field = approved.)
+        if (fields.approved && fields.approved.booleanValue === false) {
+          return { ok: false, status: 403, error: "Your account is waiting for admin approval." };
+        }
+        const isDriver = Boolean(fields.isDriver && fields.isDriver.booleanValue === true);
+        if (isDriver && !allowDriver) {
+          return { ok: false, status: 403, error: "Driver accounts can't send promotions." };
+        }
+      }
+      return { ok: true, uid };
     } catch (error) {
       return { ok: false, status: 502, error: "Couldn't verify your account right now." };
     }

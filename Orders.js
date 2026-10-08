@@ -64,6 +64,7 @@ let cancelledSubStatus = "cancelled"; // when activeTab === "cancelled": "cancel
 let expandedOrderDetail = null;   // accordion: only one order's detail row open at a time
 let expandedOrderMainRow = null;
 let currentRole = "employee";
+let currentIsDriver = false; // drivers only get the delivery buttons
 let pendingUndeliverableOrderId = null;
 
 // ====================================================================
@@ -74,6 +75,7 @@ let hasHandledTargetOrder = false;
 
 document.addEventListener("sidebar:ready", (event) => {
   currentRole = event.detail.role;
+  currentIsDriver = Boolean(event.detail.isDriver);
 
   wireTabs();
   wireSearch();
@@ -624,6 +626,8 @@ function buildActionsForOrder(order) {
   wrap.className = "orders-table__action-group";
 
   if (order.status === "pending") {
+    // Approving / rejecting is for staff. A driver just sees the order.
+    if (currentIsDriver) return wrap;
     wrap.appendChild(buildActionButton("Approve", "btn-primary", () => handleApprove(order)));
     wrap.appendChild(buildActionButton("Reject", "btn-danger-outline", () => handleReject(order)));
   } else if (order.status === "approved") {
