@@ -352,3 +352,123 @@ export function buildSaleItems(cart) {
     lineTotal: lineTotal(line)
   }));
 }
+
+// ------------------------- REFUNDS & VOIDS ---------------------------
+// A sale document keeps `refundedQtys` (one number per item, same order
+// as `items`) and `refundedTotal`. A "void" is simply a refund of every
+// remaining unit; the status becomes "full" when nothing is left.
+
+export function itemRefundedQty(sale, index) {
+  const q = Array.isArray(sale.refundedQtys) ? sale.refundedQtys[index] : 0;
+  return typeof q === "number" && q > 0 ? q : 0;
+}
+
+export function remainingQty(sale, index) {
+  const item = sale.items?.[index];
+  if (!item) return 0;
+  return Math.max(0, item.qty - itemRefundedQty(sale, index));
+}
+
+export function saleRefundStatus(sale) {
+  const items = Array.isArray(sale.items) ? sale.items : [];
+  if (items.length === 0) return "none";
+  const remaining = items.reduce((s, _, i) => s + remainingQty(sale, i), 0);
+  const refunded = items.reduce((s, _, i) => s + itemRefundedQty(sale, i), 0);
+  if (refunded === 0) return "none";
+  return remaining === 0 ? "full" : "partial";
+}
+
+// requested: array of quantities to refund, one per item (same order).
+// -> { lines, total, refundedQtys, refundedTotal, status } or { error }
+export function planRefund(sale, requested) {
+  const items = Array.isArray(sale.items) ? sale.items : [];
+  if (!Array.isArray(requested) || requested.length !== items.length) return { error: "Invalid refund request." };
+
+  const lines = [];
+  const refundedQtys = items.map((_, i) => itemRefundedQty(sale, i));
+  let total = 0;
+
+  for (let i = 0; i < items.length; i++) {
+    const qty = Math.floor(Number(requested[i]) || 0);
+    if (qty < 0) return { error: "Quantities can't be negative." };
+    if (qty === 0) continue;
+    const left = remainingQty(sale, i);
+    if (qty > left) {
+      const name = items[i].variantName ? `${items[i].productName} — ${items[i].variantName}` : items[i].productName;
+      return { error: left === 0 ? `"${name}" was already fully refunded.` : `Only ${left} of "${name}" can still be refunded.` };
+    }
+    const unit = typeof items[i].unitPrice === "number" ? items[i].unitPrice : 0;
+    const amount = round2(unit * qty);
+    lines.push({
+      index: i,
+      productId: items[i].productId,
+      productName: items[i].productName,
+      variantName: items[i].variantName ?? null,
+      barcode: items[i].barcode ?? null,
+      priceMode: items[i].priceMode,
+      qty,
+      unitPrice: unit,
+      amount
+    });
+    refundedQtys[i] += qty;
+    total = round2(total + amount);
+  }
+
+  if (lines.length === 0) return { error: "Choose at least one item to refund." };
+
+  const priorTotal = typeof sale.refundedTotal === "number" ? sale.refundedTotal : 0;
+  const refundedTotal = round2(priorTotal + total);
+  if (refundedTotal > round2(sale.total) + 0.001) return { error: "That refund is more than the sale total." };
+
+  const merged = { ...sale, refundedQtys };
+  return { lines, total, refundedQtys, refundedTotal, status: saleRefundStatus(merged) };
+}
+
+// Puts refunded units back on the shelf. Lines whose product/variant no
+// longer exists are skipped and reported (the refund itself still goes
+// through — the customer is still owed the money).
+export function planRestock(freshProductsById, lines) {
+  const working = new Map();
+  const updates = new Map();
+  const movements = [];
+  const skipped = [];
+
+  for (const line of lines) {
+    const label = line.variantName ? `${line.productName} — ${line.variantName}` : line.productName;
+    const data = freshProductsById.get(line.productId);
+    if (!data) { skipped.push(label); continue; }
+
+    const state = working.get(line.productId) || {
+      stockCount: data[F.stock],
+      flavors: Array.isArray(data[F.variants]) ? data[F.variants].map((v) => (isVariantObject(v) ? { ...v } : v)) : null
+    };
+    working.set(line.productId, state);
+
+    if (line.variantName === null || line.variantName === undefined) {
+      const current = typeof state.stockCount === "number" ? state.stockCount : 0;
+      const next = current + line.qty;
+      state.stockCount = next;
+      updates.set(line.productId, { ...(updates.get(line.productId) || {}), [F.stock]: next, [F.available]: next > 0 });
+      movements.push({ productId: line.productId, productName: line.productName, variantName: null, previousStock: current, newStock: next, unitPrice: line.unitPrice });
+      continue;
+    }
+
+    if (!state.flavors) { skipped.push(label); continue; }
+    const idx = state.flavors.findIndex((v) => {
+      if (!isVariantObject(v)) return false;
+      const name = v.name || v.flavor || v.label;
+      if (name !== line.variantName) return false;
+      return !line.barcode || !v[F.barcode] || v[F.barcode] === line.barcode;
+    });
+    if (idx === -1) { skipped.push(label); continue; }
+
+    const variant = state.flavors[idx];
+    const current = typeof variant[F.variantStock] === "number" ? variant[F.variantStock] : 0;
+    const next = current + line.qty;
+    state.flavors[idx] = { ...variant, [F.variantStock]: next, [F.available]: next > 0 };
+    updates.set(line.productId, { ...(updates.get(line.productId) || {}), [F.variants]: state.flavors });
+    movements.push({ productId: line.productId, productName: line.productName, variantName: line.variantName, previousStock: current, newStock: next, unitPrice: line.unitPrice });
+  }
+
+  return { updates, movements, skipped };
+}

@@ -207,6 +207,26 @@
 
         </div>
 
+        <section class="panel pos-history">
+            <div class="pos-history__head">
+                <h3 class="panel__title">Recent sales</h3>
+                <div class="pos-history__tools">
+                    <input type="date" id="pos-history-date" class="feedback-sort-select">
+                    <input type="text" id="pos-history-search" class="feedback-sort-select" placeholder="Receipt no...">
+                </div>
+            </div>
+            <div class="accounts-table-scroll">
+                <table class="inventory-table">
+                    <thead>
+                        <tr><th>Time</th><th>Receipt</th><th>Items</th><th>Paid by</th><th style="text-align:right;">Total</th><th>Status</th><th></th></tr>
+                    </thead>
+                    <tbody id="pos-history-body">
+                        <tr><td colspan="7" class="inventory-empty">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
     </main>
 </div>
 
@@ -228,8 +248,39 @@
     </div>
 </div>
 
+<!-- ================================================================
+     REFUND / VOID MODAL
+     ================================================================ -->
+<div class="modal-overlay" id="pos-refund-overlay" hidden>
+    <div class="modal">
+        <div class="modal__header">
+            <h3 id="pos-refund-title">Refund / Void</h3>
+            <button type="button" class="modal__close" id="pos-refund-close" aria-label="Close">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path d="M6 6L18 18M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                </svg>
+            </button>
+        </div>
+        <div class="modal__body">
+            <div id="pos-refund-items"></div>
+            <button type="button" class="btn-outline" id="pos-refund-all">Void the whole sale</button>
+            <div class="form-field">
+                <label for="pos-refund-reason">Reason (required)</label>
+                <input type="text" id="pos-refund-reason" maxlength="120" placeholder="e.g. Wrong item rung up, customer returned item">
+            </div>
+            <label class="pos-refund-restock"><input type="checkbox" id="pos-refund-restock" checked> Return items to stock (untick if damaged or not coming back)</label>
+            <div class="pos-totals__row pos-totals__row--total"><span>Refund</span><span id="pos-refund-total">₱0.00</span></div>
+            <p class="form-status" id="pos-refund-status" hidden></p>
+        </div>
+        <div class="modal__footer">
+            <button type="button" class="btn-outline" id="pos-refund-cancel">Cancel</button>
+            <button type="button" class="btn-danger-outline" id="pos-refund-confirm" disabled>Confirm refund</button>
+        </div>
+    </div>
+</div>
+
 <script type="module" src="firebase-config.js"></script>
 <script type="module" src="Sidebar.js"></script>
-<script type="module" src="Cashier.js?v=20261008a"></script>
+<script type="module" src="Cashier.js?v=20261008b"></script>
 </body>
 </html>

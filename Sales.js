@@ -216,7 +216,11 @@ async function fetchPosSales(start, end) {
       itemCount: data.units ?? (Array.isArray(data.items) ? data.items.length : 0),
       paymentMethod: data.paymentMethod === "gcash" ? "GCash" : "Cash",
       performedByEmail: data.cashierEmail || "unknown",
-      revenue: typeof data.total === "number" ? data.total : null,
+      grossTotal: typeof data.total === "number" ? data.total : null,
+      refundedTotal: typeof data.refundedTotal === "number" ? data.refundedTotal : 0,
+      refundStatus: data.refundStatus || "none",
+      // Revenue is what was kept: the sale total minus anything refunded.
+      revenue: typeof data.total === "number" ? Math.max(0, data.total - (typeof data.refundedTotal === "number" ? data.refundedTotal : 0)) : null,
       priceIsEstimated: false,
       timestampMillis: data.createdAt?.toMillis?.() ?? 0
     };
@@ -309,7 +313,7 @@ function buildSalesTable(combined) {
           <td>${time}</td>
           <td><span class="role-pill role-pill--employee">In-Person</span></td>
           <td>Cashier ${escapeHtmlSales(sale.receiptNo)} — ${sale.itemCount} item${sale.itemCount === 1 ? "" : "s"} · ${sale.paymentMethod} — by ${escapeHtmlSales(sale.performedByEmail)}</td>
-          <td style="text-align:right;">${sale.revenue != null ? `₱${sale.revenue.toFixed(2)}` : "—"}</td>
+          <td style="text-align:right;">${sale.revenue != null ? `₱${sale.revenue.toFixed(2)}` : "—"}${sale.refundedTotal > 0 ? `<br><small>${sale.refundStatus === "full" ? "voided / refunded" : "after"} −₱${sale.refundedTotal.toFixed(2)} refund${sale.refundStatus === "full" ? "" : ` (was ₱${sale.grossTotal.toFixed(2)})`}</small>` : ""}</td>
           <td></td>
         </tr>
       `;

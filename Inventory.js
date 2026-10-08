@@ -1786,6 +1786,7 @@ function closeStockLogModal() {
 
 const MOVEMENT_TYPE_LABELS = {
   sale: "Sale",
+  return: "Refund Return",
   count: "Stock Count",
   manual_edit: "Manual Edit"
 };

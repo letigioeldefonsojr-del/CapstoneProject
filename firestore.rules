@@ -132,6 +132,27 @@ service cloud.firestore {
         request.resource.data.items.size() > 0 &&
         request.resource.data.items.size() <= 100 &&
         request.resource.data.paymentMethod in ['cash', 'gcash'];
+      // Refunds/voids may ONLY touch the refund-tracking fields, and the
+      // refunded amount can only go up and never past the sale total.
+      allow update: if (isEmployee() || isAdmin()) &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['refundedQtys', 'refundedTotal', 'refundStatus']) &&
+        request.resource.data.refundedTotal is number &&
+        request.resource.data.refundedTotal <= resource.data.total &&
+        request.resource.data.refundedTotal >= resource.data.get('refundedTotal', 0) &&
+        request.resource.data.refundStatus in ['partial', 'full'];
+    }
+    // Refund / void log: who refunded what, why, and when. Append-only.
+    match /posRefunds/{refundId} {
+      allow read: if isEmployee() || isAdmin();
+      allow create: if (isEmployee() || isAdmin()) &&
+        request.resource.data.cashierUid == request.auth.uid &&
+        request.resource.data.createdAt == request.time &&
+        request.resource.data.total is number &&
+        request.resource.data.total > 0 &&
+        request.resource.data.reason is string &&
+        request.resource.data.reason.size() > 0 &&
+        request.resource.data.reason.size() <= 200;
     }
     // Login attempt tracking (rate limiting / escalating lockout).
     // Must be open — this is checked and updated BEFORE the person is

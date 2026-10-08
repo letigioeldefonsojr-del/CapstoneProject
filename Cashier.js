@@ -1,14 +1,15 @@
 import { db } from "./firebase-config.js";
 import {
-  collection, doc, runTransaction, serverTimestamp
+  collection, doc, runTransaction, serverTimestamp, getDocs, query, where, orderBy, Timestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getProducts, invalidateProductsCache } from "./ProductCache.js";
 import {
   candidatesForProduct, findCandidateByBarcode, searchProducts,
   addToCart, setLineQty, setLineMode, removeLine,
   lineUnitPrice, lineTotal, cartTotal, cartUnits,
-  computePayment, planStockUpdates, makeReceiptNo, buildSaleItems, formatMoney
-} from "./CashierLogic.js";
+  computePayment, planStockUpdates, makeReceiptNo, buildSaleItems, formatMoney,
+  itemRefundedQty, remainingQty, saleRefundStatus, planRefund, planRestock, round2
+} from "./CashierLogic.js?v=20261008b";
 
 // ====================================================================
 // CASHIER (face-to-face counter POS)
@@ -40,8 +41,10 @@ document.addEventListener("sidebar:ready", async (event) => {
   currentUser = event.detail.user;
   currentRole = event.detail.role || "employee";
   wireUi();
+  wireHistory();
   await loadProducts();
   renderAll();
+  loadHistory();
   $("pos-input").focus();
 });
 
@@ -405,6 +408,7 @@ async function completeSale() {
 
   busy = false;
   btn.textContent = "Complete sale";
+  loadHistory();
   showReceipt({
     receiptNo, lines, total, units,
     paymentMethod: method, tendered: pay.tendered, change: pay.change,
@@ -450,4 +454,266 @@ async function newSale() {
   await loadProducts();      // stock just changed — show fresh numbers
   renderAll();
   $("pos-input").focus();
+}
+
+
+// ====================================================================
+// RECENT SALES + REFUND / VOID
+// ----------------------------------------------------------------
+// A refund never edits the original sale's items or total. It records
+// how much of each line has been refunded on the sale (refundedQtys /
+// refundedTotal), writes a posRefunds entry (who, why, how much), and —
+// unless "return to stock" is unticked — puts the units back and logs
+// them in the stock log as "return". Everything happens in one
+// transaction, so the same item can't be refunded twice by two devices.
+// ====================================================================
+let historySales = [];
+let refundSale = null;
+let refundQtys = [];
+class RefundError extends Error {}
+
+function pad2(n) { return String(n).padStart(2, "0"); }
+function dateInputValue(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
+
+function wireHistory() {
+  const dateInput = $("pos-history-date");
+  dateInput.value = dateInputValue(new Date());
+  dateInput.addEventListener("change", loadHistory);
+  $("pos-history-search").addEventListener("input", renderHistory);
+
+  $("pos-history-body").addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-refund-sale]");
+    if (!btn) return;
+    const sale = historySales.find((x) => x.id === btn.dataset.refundSale);
+    if (sale) openRefund(sale);
+  });
+
+  $("pos-refund-close").addEventListener("click", closeRefund);
+  $("pos-refund-cancel").addEventListener("click", closeRefund);
+  $("pos-refund-all").addEventListener("click", () => {
+    refundQtys = refundSale.items.map((_, i) => remainingQty(refundSale, i));
+    renderRefund();
+  });
+  $("pos-refund-items").addEventListener("input", (event) => {
+    const el = event.target.closest("[data-refund-index]");
+    if (!el) return;
+    const i = Number(el.dataset.refundIndex);
+    const max = remainingQty(refundSale, i);
+    let v = Math.floor(Number(el.value));
+    if (!Number.isFinite(v) || v < 0) v = 0;
+    refundQtys[i] = Math.min(v, max);
+    updateRefundSummary();
+  });
+  $("pos-refund-items").addEventListener("change", (event) => {
+    const el = event.target.closest("[data-refund-index]");
+    if (el) el.value = refundQtys[Number(el.dataset.refundIndex)];
+  });
+  $("pos-refund-reason").addEventListener("input", updateRefundSummary);
+  $("pos-refund-confirm").addEventListener("click", confirmRefund);
+}
+
+async function loadHistory() {
+  const body = $("pos-history-body");
+  body.innerHTML = `<tr><td colspan="7" class="inventory-empty">Loading...</td></tr>`;
+  try {
+    const [y, m, d] = $("pos-history-date").value.split("-").map(Number);
+    const start = new Date(y, m - 1, d, 0, 0, 0, 0);
+    const end = new Date(y, m - 1, d + 1, 0, 0, 0, 0);
+    const snap = await getDocs(query(
+      collection(db, "posSales"),
+      where("createdAt", ">=", Timestamp.fromDate(start)),
+      where("createdAt", "<", Timestamp.fromDate(end)),
+      orderBy("createdAt", "desc")
+    ));
+    historySales = snap.docs.map((x) => ({ id: x.id, ...x.data() }));
+    renderHistory();
+  } catch (error) {
+    console.error("Couldn't load recent sales:", error);
+    body.innerHTML = `<tr><td colspan="7" class="inventory-empty">Couldn't load recent sales.</td></tr>`;
+  }
+}
+
+function renderHistory() {
+  const body = $("pos-history-body");
+  const term = $("pos-history-search").value.trim().toLowerCase();
+  const rows = historySales.filter((x) => !term || String(x.receiptNo || "").toLowerCase().includes(term));
+  if (rows.length === 0) {
+    body.innerHTML = `<tr><td colspan="7" class="inventory-empty">${historySales.length ? "No receipt matches." : "No sales on this day."}</td></tr>`;
+    return;
+  }
+  body.innerHTML = rows.map((x) => {
+    const status = saleRefundStatus(x);
+    const time = x.createdAt?.toDate ? x.createdAt.toDate().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
+    const badge = status === "full"
+      ? `<span class="order-badge order-badge--cancelled">Voided / refunded</span>`
+      : status === "partial"
+        ? `<span class="order-badge order-badge--pending">Partial refund −${formatMoney(x.refundedTotal || 0)}</span>`
+        : `<span class="order-badge order-badge--delivered">Paid</span>`;
+    return `
+      <tr>
+        <td>${esc(time)}</td>
+        <td>${esc(x.receiptNo || x.id)}</td>
+        <td>${x.units ?? (x.items || []).length}</td>
+        <td>${x.paymentMethod === "gcash" ? "GCash" : "Cash"}</td>
+        <td style="text-align:right;">${formatMoney(x.total)}</td>
+        <td>${badge}</td>
+        <td style="text-align:right;">${status === "full" ? "" : `<button type="button" class="btn-outline" data-refund-sale="${esc(x.id)}">Refund / Void</button>`}</td>
+      </tr>`;
+  }).join("");
+}
+
+function openRefund(sale) {
+  refundSale = sale;
+  refundQtys = sale.items.map(() => 0);
+  $("pos-refund-title").textContent = `Refund / Void — ${sale.receiptNo || ""}`;
+  $("pos-refund-reason").value = "";
+  $("pos-refund-restock").checked = true;
+  $("pos-refund-status").hidden = true;
+  renderRefund();
+  $("pos-refund-overlay").hidden = false;
+}
+
+function closeRefund() {
+  $("pos-refund-overlay").hidden = true;
+  refundSale = null;
+}
+
+function renderRefund() {
+  $("pos-refund-items").innerHTML = refundSale.items.map((item, i) => {
+    const left = remainingQty(refundSale, i);
+    const done = itemRefundedQty(refundSale, i);
+    const name = item.variantName ? `${item.productName} — ${item.variantName}` : item.productName;
+    return `
+      <div class="pos-refund-row">
+        <div class="pos-refund-row__info">
+          <strong>${esc(name)}</strong>
+          <small>${item.qty} × ${formatMoney(item.unitPrice)}${item.priceMode === "wholesale" ? " (wholesale)" : ""}${done ? ` · ${done} already refunded` : ""}</small>
+        </div>
+        <input type="number" min="0" max="${left}" value="${refundQtys[i]}" data-refund-index="${i}" ${left === 0 ? "disabled" : ""} aria-label="Quantity to refund">
+        <span class="pos-refund-row__of">of ${left}</span>
+      </div>`;
+  }).join("");
+  updateRefundSummary();
+}
+
+function updateRefundSummary() {
+  const total = refundSale.items.reduce((sum, item, i) => sum + round2((item.unitPrice || 0) * (refundQtys[i] || 0)), 0);
+  $("pos-refund-total").textContent = formatMoney(round2(total));
+  const reasonOk = $("pos-refund-reason").value.trim().length > 0;
+  $("pos-refund-confirm").disabled = busy || total <= 0 || !reasonOk || !navigator.onLine;
+}
+
+function setRefundStatus(text, kind) {
+  const el = $("pos-refund-status");
+  el.textContent = text;
+  el.dataset.kind = kind;
+  el.hidden = false;
+}
+
+async function confirmRefund() {
+  if (busy || !refundSale) return;
+  const reason = $("pos-refund-reason").value.trim();
+  if (!reason) return;
+  const restock = $("pos-refund-restock").checked;
+  const requested = [...refundQtys];
+  const saleId = refundSale.id;
+  const saleRef = doc(db, "posSales", saleId);
+  const refundRef = doc(collection(db, "posRefunds"));
+  const cashierEmail = currentUser?.email || "unknown";
+
+  busy = true;
+  const btn = $("pos-refund-confirm");
+  btn.disabled = true;
+  btn.textContent = "Saving...";
+  let outcome = null;
+
+  try {
+    outcome = await runTransaction(db, async (tx) => {
+      const saleSnap = await tx.get(saleRef);
+      if (!saleSnap.exists()) throw new RefundError("That sale no longer exists.");
+      const sale = { id: saleId, ...saleSnap.data() };
+
+      const plan = planRefund(sale, requested);
+      if (plan.error) throw new RefundError(plan.error);
+
+      const fresh = new Map();
+      if (restock) {
+        for (const productId of [...new Set(plan.lines.map((l) => l.productId))]) {
+          const snap = await tx.get(doc(db, "products", productId));
+          if (snap.exists()) fresh.set(productId, snap.data());
+        }
+      }
+
+      const stock = restock ? planRestock(fresh, plan.lines) : { updates: new Map(), movements: [], skipped: [] };
+      const wasUntouched = saleRefundStatus(sale) === "none";
+
+      tx.update(saleRef, {
+        refundedQtys: plan.refundedQtys,
+        refundedTotal: plan.refundedTotal,
+        refundStatus: plan.status
+      });
+
+      tx.set(refundRef, {
+        saleId,
+        receiptNo: sale.receiptNo || null,
+        kind: wasUntouched && plan.status === "full" ? "void" : "refund",
+        items: plan.lines,
+        total: plan.total,
+        reason,
+        restocked: restock,
+        notRestocked: stock.skipped,
+        paymentMethod: sale.paymentMethod || null,
+        cashierUid: currentUser.uid,
+        cashierEmail,
+        cashierRole: currentRole,
+        createdAt: serverTimestamp()
+      });
+
+      for (const [productId, update] of stock.updates) {
+        tx.update(doc(db, "products", productId), update);
+      }
+      stock.movements.forEach((m) => {
+        tx.set(doc(collection(db, "stockMovements")), {
+          productId: m.productId,
+          productName: m.productName,
+          variantName: m.variantName,
+          type: "return",
+          previousStock: m.previousStock,
+          newStock: m.newStock,
+          unitPrice: m.unitPrice,
+          posSaleId: saleId,
+          posRefundId: refundRef.id,
+          performedByEmail: cashierEmail,
+          performedByRole: currentRole,
+          createdAt: serverTimestamp()
+        });
+      });
+
+      return { total: plan.total, skipped: stock.skipped, receiptNo: sale.receiptNo };
+    });
+  } catch (error) {
+    console.error("Refund failed:", error);
+    busy = false;
+    btn.textContent = "Confirm refund";
+    if (error instanceof RefundError) {
+      setRefundStatus(error.message, "error");
+      loadHistory();
+    } else {
+      setRefundStatus("Couldn't save the refund. Nothing was changed — check the connection and try again.", "error");
+    }
+    updateRefundSummary();
+    return;
+  }
+
+  busy = false;
+  btn.textContent = "Confirm refund";
+  closeRefund();
+  const method = historySales.find((x) => x.id === saleId)?.paymentMethod === "gcash" ? "GCash" : "cash";
+  let msg = `Refunded ${formatMoney(outcome.total)} (${method}) for ${outcome.receiptNo || "the sale"}.`;
+  if (outcome.skipped.length) msg += ` Not returned to stock (item no longer exists): ${outcome.skipped.join(", ")}.`;
+  showMessage(msg, false);
+  await loadProducts();
+  refreshCartFromProducts();
+  renderAll();
+  loadHistory();
 }
