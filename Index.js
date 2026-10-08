@@ -613,6 +613,7 @@ document.addEventListener("DOMContentLoaded", () => {
       await resetAttempts(rawInput);
 
       sessionStorage.setItem("almares_role", "employee");
+      sessionStorage.setItem("almares_driver", `${employeeDoc.id}:${data.isDriver === true ? 1 : 0}`);
       sessionStorage.setItem("almares_employee_doc_id", employeeDoc.id);
 
       showStatus("Signed in. Redirecting...", "success");
@@ -891,7 +892,10 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         sessionStorage.setItem("almares_role", role);
-        if (role === "employee") sessionStorage.setItem("almares_employee_doc_id", user.uid);
+        if (role === "employee") {
+          sessionStorage.setItem("almares_driver", `${user.uid}:${data.isDriver === true ? 1 : 0}`);
+          sessionStorage.setItem("almares_employee_doc_id", user.uid);
+        }
 
         showStatus("Signed in. Redirecting...", "success");
         window.location.replace(role === "admin" ? ADMIN_REDIRECT_URL : EMPLOYEE_REDIRECT_URL);

@@ -113,6 +113,8 @@ async function initSidebar(user) {
   // Drivers are employees an admin marked isDriver:true. They only get the
   // Orders page — anywhere else sends them straight back to it.
   const isDriver = role === "employee" ? await resolveDriverFlag(user.uid) : false;
+  document.documentElement.classList.remove("driver-check");
+  document.documentElement.classList.toggle("is-driver", isDriver);
   if (isDriver && !onOrdersPage()) {
     window.location.replace("Orders.html");
     return;

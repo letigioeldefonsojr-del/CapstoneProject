@@ -4,6 +4,26 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Almares 328 | Notifications</title>
+    <script>
+        // Runs before first paint. Drivers only get Orders: hide the other
+        // sidebar links immediately (CSS in Dashboard.css) and send them away
+        // from any other page. "driver-check" = employee whose driver status
+        // isn't known yet; Sidebar.js settles it once it has checked.
+        (function () {
+            try {
+                var role = sessionStorage.getItem("almares_role");
+                var d = sessionStorage.getItem("almares_driver");
+                if (role !== "employee") return;
+                var cl = document.documentElement.classList;
+                if (d && /:1$/.test(d)) {
+                    cl.add("is-driver");
+                    if (!/\/orders(\.html)?$/i.test(location.pathname)) location.replace("Orders.html");
+                } else if (!d) {
+                    cl.add("driver-check");
+                }
+            } catch (e) {}
+        })();
+    </script>
     <link rel="icon" type="image/png" href="Logo.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -48,6 +68,15 @@
                     <path d="M3.5 7.5L12 12M12 12L20.5 7.5M12 12V21" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
                 </svg>
                 <span class="nav-item__label">Inventory</span>
+            </a>
+
+            <a href="Cashier.html" class="nav-item">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <rect x="5" y="3.5" width="14" height="5" rx="1.2" stroke="currentColor" stroke-width="1.7"/>
+                    <path d="M4 12.5H20L19 20.5H5L4 12.5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+                    <path d="M9 15.5V17.5M12 15.5V17.5M15 15.5V17.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+                <span class="nav-item__label">Cashier</span>
             </a>
 
             <a href="Orders.html" class="nav-item">

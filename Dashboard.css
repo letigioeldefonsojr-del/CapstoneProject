@@ -2883,3 +2883,11 @@ button {
     body.pos-printing .modal__header,
     body.pos-printing .modal__footer { display: none !important; }
 }
+
+/* Driver accounts only get Orders. These classes are set by a tiny script
+   in each page's <head> before the page paints, so the other links never
+   flash on screen while the page is loading. */
+html.is-driver .sidebar__nav a.nav-item:not([href="Orders.html"]),
+html.driver-check .sidebar__nav a.nav-item:not([href="Orders.html"]) {
+    display: none !important;
+}
