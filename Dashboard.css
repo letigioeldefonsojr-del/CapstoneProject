@@ -3013,3 +3013,18 @@ body.page-cashier button { touch-action: manipulation; }
     .pos-history .btn-outline { min-height: 44px; }
     .pos-refund-row input { width: 76px; height: 44px; font-size: 16px; }
 }
+
+/* Cashier — larger payment readouts */
+body.page-cashier .pos-totals__row { font-size: 15px; }
+body.page-cashier .pos-totals__row--total { font-size: 28px; }
+body.page-cashier .pos-pay__left label { font-size: 14px; font-weight: 700; }
+body.page-cashier .pos-cash-display { font-size: 32px; padding: 10px 14px; }
+body.page-cashier .pos-change { font-size: 22px; }
+body.page-cashier #pos-method .tab-row__btn { min-height: 46px; font-size: 15px; padding: 0 24px; }
+body.page-cashier .pos-quick__btn { font-size: 15px; min-height: 44px; }
+.pos-results__label { margin: 0 0 2px; }
+@media (min-width: 961px) and (max-height: 860px) {
+    body.page-cashier .pos-cash-display { font-size: 28px; padding: 8px 12px; }
+    body.page-cashier .pos-quick__btn { min-height: 42px; }
+    body.page-cashier .pos-totals__row--total { font-size: 26px; }
+}

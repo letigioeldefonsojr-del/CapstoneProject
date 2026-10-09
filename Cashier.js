@@ -156,7 +156,6 @@ function wireUi() {
   });
   wireQtyPad();
   $("pos-clear").addEventListener("click", () => {
-    if (cart.length === 0) return;
     cart = [];
     $("pos-tendered").value = "";
     $("pos-gcash-ref").value = "";
@@ -240,14 +239,18 @@ function renderAll() {
 function renderResults() {
   const box = $("pos-results");
   const term = $("pos-input").value.trim();
-  if (!term) { box.innerHTML = ""; return; }
-
-  const rows = searchProducts(products, term).flatMap((p) => candidatesForProduct(p));
+  // Nothing typed: show the whole catalogue (A–Z) so the cashier can tap items
+  // instead of leaving this panel empty.
+  const browsing = !term;
+  const rows = (browsing ? products : searchProducts(products, term))
+    .flatMap((p) => candidatesForProduct(p));
+  if (browsing) rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
   if (rows.length === 0) {
+    if (browsing) { box.innerHTML = `<p class="notif-list__empty">No products yet.</p>`; return; }
     box.innerHTML = `<p class="notif-list__empty">No products match "${esc(term)}".</p>`;
     return;
   }
-  box.innerHTML = rows.slice(0, 40).map((c) => `
+  box.innerHTML = (browsing ? `<p class="pos-hint pos-results__label">All products (A–Z) — tap Add, or scan / search above</p>` : "") + rows.slice(0, browsing ? 200 : 40).map((c) => `
     <div class="pos-result ${c.inStock ? "" : "is-out"}">
       <div class="pos-result__info">
         <span class="pos-result__name">${esc(c.name)}</span>
