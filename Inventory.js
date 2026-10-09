@@ -681,6 +681,7 @@ function wireAdminControls() {
   document.getElementById("product-modal-close").addEventListener("click", closeProductModal);
   document.getElementById("product-modal-cancel").addEventListener("click", closeProductModal);
   document.getElementById("product-form").addEventListener("submit", handleProductFormSubmit);
+  document.getElementById("pf-category").addEventListener("change", onCategorySelectChange);
   document.getElementById("pf-image-upload-btn").addEventListener("click", () => {
     document.getElementById("pf-image-file").click();
   });
@@ -724,12 +725,81 @@ function wireAdminControls() {
 // or edit — goes through a native confirm() summarizing exactly
 // what's about to change, per your "prevent accidental change" ask.
 // ====================================================================
+// ---------------------------- CATEGORY PICKER ------------------------
+// The category is a drop-down of the categories that already exist on
+// products, plus "+ Add new category..." which reveals a text box. A new
+// name that matches an existing one (ignoring capital letters / extra
+// spaces) reuses the existing spelling, so "snacks" can't become a
+// second category next to "Snacks".
+const NEW_CATEGORY_VALUE = "__new__";
+
+function normalizeCategoryName(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function existingCategories() {
+  const seen = new Map();
+  allProducts.forEach((p) => {
+    const name = normalizeCategoryName(p[PRODUCT_CATEGORY_FIELD]);
+    if (name && !seen.has(name.toLowerCase())) seen.set(name.toLowerCase(), name);
+  });
+  return [...seen.values()].sort((a, b) => a.localeCompare(b));
+}
+
+function populateCategorySelect(selected = "") {
+  const select = document.getElementById("pf-category");
+  const newInput = document.getElementById("pf-category-new");
+  const categories = existingCategories();
+  const wanted = normalizeCategoryName(selected);
+  // An edited product whose category somehow isn't in the list still shows it.
+  if (wanted && !categories.some((c) => c.toLowerCase() === wanted.toLowerCase())) categories.push(wanted);
+
+  select.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select a category...";
+  select.appendChild(placeholder);
+  categories.forEach((category) => {
+    const option = document.createElement("option");
+    option.value = category;
+    option.textContent = category;
+    select.appendChild(option);
+  });
+  const addNew = document.createElement("option");
+  addNew.value = NEW_CATEGORY_VALUE;
+  addNew.textContent = "+ Add new category...";
+  select.appendChild(addNew);
+
+  const match = categories.find((c) => c.toLowerCase() === wanted.toLowerCase());
+  select.value = match || "";
+  newInput.value = "";
+  newInput.hidden = true;
+}
+
+function onCategorySelectChange() {
+  const select = document.getElementById("pf-category");
+  const newInput = document.getElementById("pf-category-new");
+  const adding = select.value === NEW_CATEGORY_VALUE;
+  newInput.hidden = !adding;
+  if (adding) newInput.focus();
+}
+
+// The category the form will save ("" if none chosen / typed yet).
+function getCategoryValue() {
+  const select = document.getElementById("pf-category");
+  if (select.value !== NEW_CATEGORY_VALUE) return normalizeCategoryName(select.value);
+  const typed = normalizeCategoryName(document.getElementById("pf-category-new").value);
+  const existing = existingCategories().find((c) => c.toLowerCase() === typed.toLowerCase());
+  return existing || typed;
+}
+
 function openAddModal() {
   editingProductId = null;
   editOriginalProduct = null;
   document.getElementById("product-modal-title").textContent = "Add Product";
   document.getElementById("product-form-submit").textContent = "Save Product";
   document.getElementById("product-form").reset();
+  populateCategorySelect("");
   document.getElementById("variant-editor-list").innerHTML = "";
   applyVariantModeUI(false);
   setImagePreview("");
@@ -744,7 +814,7 @@ function openEditModal(product) {
   document.getElementById("product-form-submit").textContent = "Save Changes";
 
   document.getElementById("pf-name").value = product[PRODUCT_NAME_FIELD] || "";
-  document.getElementById("pf-category").value = product[PRODUCT_CATEGORY_FIELD] || "";
+  populateCategorySelect(product[PRODUCT_CATEGORY_FIELD] || "");
   document.getElementById("pf-sku").value = product.sku || "";
   document.getElementById("pf-barcode").value = product[BARCODE_FIELD] || "";
   document.getElementById("pf-unit").value = product.unit || "";
@@ -906,7 +976,7 @@ async function handleProductFormSubmit(event) {
   hideFormStatus();
 
   const name = document.getElementById("pf-name").value.trim();
-  const category = document.getElementById("pf-category").value.trim();
+  const category = getCategoryValue();
   const sku = document.getElementById("pf-sku").value.trim();
   const barcode = document.getElementById("pf-barcode").value.trim();
   const unit = document.getElementById("pf-unit").value.trim();
@@ -917,7 +987,12 @@ async function handleProductFormSubmit(event) {
   const isVariantMode = document.getElementById("pf-has-variants").checked;
 
   if (!name || !category) {
-    showFormStatus("Fill in all required fields (marked *).", "error");
+    showFormStatus(
+      document.getElementById("pf-category").value === NEW_CATEGORY_VALUE && !category
+        ? "Type the name of the new category."
+        : "Fill in all required fields (marked *).",
+      "error"
+    );
     return;
   }
 

@@ -2894,3 +2894,8 @@ html.is-driver .sidebar__nav a.nav-item:not([href="Orders.html"]),
 html.driver-check .sidebar__nav a.nav-item:not([href="Orders.html"]) {
     display: none !important;
 }
+
+/* Product form: text box that appears under the Category drop-down when
+   "+ Add new category..." is chosen. */
+.pf-category-new { margin-top: 8px; width: 100%; }
+.pf-category-new[hidden] { display: none; }
