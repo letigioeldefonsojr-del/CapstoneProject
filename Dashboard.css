@@ -2899,3 +2899,117 @@ html.driver-check .sidebar__nav a.nav-item:not([href="Orders.html"]) {
    "+ Add new category..." is chosen. */
 .pf-category-new { margin-top: 8px; width: 100%; }
 .pf-category-new[hidden] { display: none; }
+
+/* ===========================
+   CASHIER — TABLET / TOUCH LAYOUT
+   =========================== */
+body.page-cashier button { touch-action: manipulation; }
+
+/* On-screen number pad */
+.pos-pad { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.pos-pad[hidden] { display: none; }
+.pos-pad__key {
+    min-height: 54px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--card-bg);
+    font-size: 21px;
+    font-weight: 700;
+    color: var(--ink);
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: background var(--transition), border-color var(--transition);
+}
+.pos-pad__key:active { background: var(--brand-green-soft); border-color: var(--brand-green); }
+.pos-pad__key--fn { background: var(--bg); color: var(--muted); }
+.pos-pad__key[data-ghost] { visibility: hidden; }
+
+.pos-cash-display { font-size: 26px; font-weight: 800; text-align: right; padding: 10px 14px; width: 100%; }
+
+.pos-quick { display: flex; flex-wrap: wrap; gap: 8px; }
+.pos-quick:empty { display: none; }
+.pos-quick__btn {
+    flex: 1 1 auto;
+    min-height: 46px;
+    padding: 0 14px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--card-bg);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--ink);
+    cursor: pointer;
+}
+.pos-quick__btn:active { background: var(--brand-green-soft); border-color: var(--brand-green); }
+.pos-quick__btn--exact { background: var(--brand-green); border-color: var(--brand-green); color: #fff; }
+
+/* Payment area: stacked on narrow carts, side by side (details | keypad)
+   once the cart panel is wide enough — measured on the panel itself, so
+   it adapts to a tablet with or without the sidebar open. */
+.pos-cart { container-type: inline-size; }
+.pos-pay { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.pos-pay__left { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+@container (min-width: 400px) {
+    .pos-pay { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); align-items: start; }
+}
+
+/* Quantity pad window */
+.pos-qty-modal { max-width: 380px; }
+.pos-qty-name { font-weight: 700; margin-bottom: 8px; }
+.pos-qty-display {
+    font-size: 44px; font-weight: 800; text-align: center; padding: 10px;
+    border: 1px solid var(--border); border-radius: 12px; margin-bottom: 6px;
+}
+.pos-qty-display.is-placeholder { color: var(--muted); }
+.pos-pad-host { margin-top: 8px; }
+
+/* Landscape tablets and up: the sale screen fills the window; the results
+   list and the cart's item list scroll inside it, so Total, the keypad and
+   Complete sale always stay on screen. */
+@media (min-width: 961px) {
+    body.page-cashier .pos-layout {
+        height: calc(100vh - 150px);
+        height: calc(100dvh - 150px);
+        min-height: 580px;
+        align-items: stretch;
+        grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+    }
+    body.page-cashier .pos-cart { overflow-y: auto; }
+    body.page-cashier .pos-find,
+    body.page-cashier .pos-cart { display: flex; flex-direction: column; min-height: 0; }
+    body.page-cashier .pos-results { flex: 1; max-height: none; min-height: 0; }
+    body.page-cashier .pos-lines { flex: 1; max-height: none; min-height: 90px; }
+}
+@media (min-width: 961px) and (max-width: 1280px) {
+    body.page-cashier .pos-layout {
+        height: calc(100vh - 112px);
+        height: calc(100dvh - 112px);
+    }
+}
+@media (max-width: 1280px) {
+    body.page-cashier .main { padding: 16px 18px 32px; }
+    body.page-cashier .topbar { margin-bottom: 12px; }
+}
+
+/* Short screens (10-inch landscape): slightly tighter keys so everything fits */
+@media (min-width: 961px) and (max-height: 860px) {
+    .pos-pad { gap: 6px; }
+    .pos-pad__key { min-height: 46px; font-size: 20px; }
+    .pos-cash-display { font-size: 22px; padding: 8px 12px; }
+    .pos-quick__btn { min-height: 40px; }
+}
+
+/* Finger-sized controls on touch screens */
+@media (pointer: coarse) {
+    .pos-result { padding: 12px 14px; }
+    .pos-result .btn-outline { min-height: 46px; padding: 0 22px; }
+    .pos-qty button { width: 44px; height: 44px; font-size: 22px; }
+    .pos-qty input { width: 64px; height: 44px; font-size: 17px; }
+    .pos-mode__btn { padding: 11px 16px; font-size: 13px; }
+    .pos-line__remove { padding: 10px 12px; font-size: 17px; }
+    .pos-actions button { min-height: 50px; padding-left: 24px; padding-right: 24px; }
+    #pos-method .tab-row__btn { min-height: 46px; }
+    .pos-history .btn-outline { min-height: 44px; }
+    .pos-refund-row input { width: 76px; height: 44px; font-size: 16px; }
+}

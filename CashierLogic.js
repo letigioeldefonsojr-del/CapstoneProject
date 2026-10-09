@@ -472,3 +472,47 @@ export function planRestock(freshProductsById, lines) {
 
   return { updates, movements, skipped };
 }
+
+// ------------------------ ON-SCREEN NUMBER PAD ------------------------
+// Pure rules for the touch number pad, so they can be tested alone.
+// keys: "0"-"9", "00", ".", "back", "clear"
+export function applyNumpadKey(current, key, { decimal = true, maxInt = 7 } = {}) {
+  let value = String(current ?? "");
+  if (key === "clear") return "";
+  if (key === "back") return value.slice(0, -1);
+
+  if (key === ".") {
+    if (!decimal || value.includes(".")) return value;
+    return value === "" ? "0." : value + ".";
+  }
+
+  if (key === "00" && (!decimal || value === "" || value === "0")) {
+    // "00" on an empty box would just be a zero; keep it a single 0.
+    return decimal || value === "" ? (value === "" ? "0" : value) : value;
+  }
+
+  if (!/^\d+$/.test(key)) return value;
+  const [intPart, decPart] = value.split(".");
+  if (value.includes(".")) {
+    const room = 2 - (decPart || "").length;
+    if (room <= 0) return value;
+    return value + key.slice(0, room);
+  }
+  let next = (intPart === "0" ? "" : intPart) + key;
+  next = next.replace(/^0+(?=\d)/, "");
+  if (next.length > maxInt) return value;
+  return next;
+}
+
+// Cash buttons shown next to "Exact": the next round amounts a customer
+// is likely to hand over (always more than the total, at most 4).
+export function quickCashAmounts(total) {
+  const t = round2(total);
+  if (!(t > 0)) return [];
+  const out = [];
+  [50, 100, 500, 1000].forEach((step) => {
+    const amount = Math.ceil(t / step) * step;
+    if (amount > t + 0.001 && !out.includes(amount)) out.push(amount);
+  });
+  return out.sort((a, b) => a - b).slice(0, 4);
+}

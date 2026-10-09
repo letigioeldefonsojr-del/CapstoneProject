@@ -8,8 +8,9 @@ import {
   addToCart, setLineQty, setLineMode, removeLine,
   lineUnitPrice, lineTotal, cartTotal, cartUnits,
   computePayment, planStockUpdates, makeReceiptNo, buildSaleItems, formatMoney,
-  itemRefundedQty, remainingQty, saleRefundStatus, planRefund, planRestock, round2
-} from "./CashierLogic.js?v=20261008b";
+  itemRefundedQty, remainingQty, saleRefundStatus, planRefund, planRestock, round2,
+  applyNumpadKey, quickCashAmounts
+} from "./CashierLogic.js?v=20261009a";
 
 // ====================================================================
 // CASHIER (face-to-face counter POS)
@@ -121,6 +122,11 @@ function wireUi() {
     applyCartResult(result);
   });
 
+  $("pos-lines").addEventListener("click", (event) => {
+    const el = event.target.closest("[data-qty-input]");
+    if (el && IS_TOUCH) { el.blur(); openQtyPad(el.dataset.qtyInput); }
+  });
+
   $("pos-lines").addEventListener("change", (event) => {
     const el = event.target.closest("[data-qty-input]");
     if (!el) return;
@@ -135,7 +141,20 @@ function wireUi() {
     renderPayment();
   });
 
-  $("pos-tendered").addEventListener("input", renderPayment);
+  // Cash received: typed on a keyboard, or tapped on the on-screen number
+  // pad. inputmode="none" keeps the tablet's own keyboard from popping up.
+  $("pos-tendered").addEventListener("input", () => {
+    setTendered(sanitizeAmount($("pos-tendered").value));
+  });
+  buildNumpad($("pos-pay-pad"), {
+    decimal: true,
+    onKey: (key) => setTendered(applyNumpadKey($("pos-tendered").value, key))
+  });
+  $("pos-quick").addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-quick]");
+    if (btn) setTendered(btn.dataset.quick);
+  });
+  wireQtyPad();
   $("pos-clear").addEventListener("click", () => {
     if (cart.length === 0) return;
     cart = [];
@@ -264,7 +283,7 @@ function renderCart() {
             </div>
             <div class="pos-qty">
               <button type="button" data-action="dec" data-key="${esc(line.key)}" aria-label="Less">−</button>
-              <input type="number" min="1" max="${line.stock}" value="${line.qty}" data-qty-input="${esc(line.key)}">
+              <input type="number" min="1" max="${line.stock}" value="${line.qty}" inputmode="${IS_TOUCH ? "none" : "numeric"}" data-qty-input="${esc(line.key)}">
               <button type="button" data-action="inc" data-key="${esc(line.key)}" aria-label="More">+</button>
             </div>
             <div class="pos-line__money">
@@ -279,6 +298,96 @@ function renderCart() {
   $("pos-total").textContent = formatMoney(cartTotal(cart));
 }
 
+// ----------------------------- NUMBER PAD ------------------------------
+const IS_TOUCH = typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;
+
+// Keeps the cash box to digits with at most 2 decimals (typed or pasted).
+function sanitizeAmount(raw) {
+  let v = String(raw).replace(/[^\d.]/g, "");
+  const dot = v.indexOf(".");
+  if (dot !== -1) v = v.slice(0, dot + 1) + v.slice(dot + 1).replace(/\./g, "").slice(0, 2);
+  v = v.replace(/^0+(?=\d)/, "");
+  return v.slice(0, 10);
+}
+
+function setTendered(value) {
+  $("pos-tendered").value = value;
+  renderPayment();
+}
+
+// Big touch keys: 7 8 9 ⌫ / 4 5 6 C / 1 2 3 . / 0 00  (qty pad: no . or 00).
+function buildNumpad(host, { decimal, onKey }) {
+  const keys = decimal
+    ? [["7"], ["8"], ["9"], ["back", "⌫"], ["4"], ["5"], ["6"], ["clear", "C"], ["1"], ["2"], ["3"], ["."], ["0", "0", 2], ["00", "00", 2]]
+    : [["7"], ["8"], ["9"], ["back", "⌫"], ["4"], ["5"], ["6"], ["clear", "C"], ["1"], ["2"], ["3"], ["", "", 1, true], ["0", "0", 4]];
+  host.classList.add("pos-pad");
+  host.innerHTML = keys.map(([key, label, span, ghost]) => `
+    <button type="button" class="pos-pad__key ${key === "back" || key === "clear" ? "pos-pad__key--fn" : ""}"
+      ${span ? `style="grid-column: span ${span};"` : ""} ${ghost ? "disabled aria-hidden=\"true\" tabindex=\"-1\" data-ghost=\"1\"" : `data-key="${key}"`}>${label ?? key}</button>`).join("");
+  host.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-key]");
+    if (btn) onKey(btn.dataset.key);
+  });
+}
+
+function renderQuickCash(cash) {
+  const box = $("pos-quick");
+  const total = cartTotal(cart);
+  if (!cash || cart.length === 0 || !(total > 0)) { box.innerHTML = ""; return; }
+  const exact = Number.isInteger(total) ? String(total) : total.toFixed(2);
+  box.innerHTML = [`<button type="button" class="pos-quick__btn pos-quick__btn--exact" data-quick="${exact}">Exact</button>`]
+    .concat(quickCashAmounts(total).map((a) => `<button type="button" class="pos-quick__btn" data-quick="${a}">₱${a.toLocaleString("en-PH")}</button>`))
+    .join("");
+}
+
+// Quantity pad (touch screens): tap a line's quantity to open it.
+let qtyPadKey = null;
+let qtyEntry = "";
+
+function wireQtyPad() {
+  buildNumpad($("pos-qty-pad"), {
+    decimal: false,
+    onKey: (key) => {
+      qtyEntry = applyNumpadKey(qtyEntry, key, { decimal: false, maxInt: 4 });
+      renderQtyDisplay();
+    }
+  });
+  $("pos-qty-close").addEventListener("click", closeQtyPad);
+  $("pos-qty-cancel").addEventListener("click", closeQtyPad);
+  $("pos-qty-ok").addEventListener("click", () => {
+    const line = cart.find((l) => l.key === qtyPadKey);
+    if (!line) { closeQtyPad(); return; }
+    const value = qtyEntry === "" ? line.qty : Number(qtyEntry);
+    if (!(value >= 1)) { $("pos-qty-hint").textContent = "Quantity must be at least 1."; return; }
+    closeQtyPad();
+    applyCartResult(setLineQty(cart, line.key, value));
+  });
+}
+
+function openQtyPad(key) {
+  const line = cart.find((l) => l.key === key);
+  if (!line) return;
+  qtyPadKey = key;
+  qtyEntry = "";
+  $("pos-qty-name").textContent = line.name;
+  $("pos-qty-hint").textContent = `In stock: ${line.stock}`;
+  renderQtyDisplay();
+  $("pos-qty-overlay").hidden = false;
+}
+
+function renderQtyDisplay() {
+  const line = cart.find((l) => l.key === qtyPadKey);
+  const el = $("pos-qty-display");
+  el.textContent = qtyEntry === "" ? String(line ? line.qty : "") : qtyEntry;
+  el.classList.toggle("is-placeholder", qtyEntry === "");
+  if (line) $("pos-qty-hint").textContent = `In stock: ${line.stock}`;
+}
+
+function closeQtyPad() {
+  $("pos-qty-overlay").hidden = true;
+  qtyPadKey = null;
+}
+
 function paymentState() {
   const total = cartTotal(cart);
   return computePayment(total, method, $("pos-tendered").value);
@@ -289,6 +398,8 @@ function renderPayment() {
   $("pos-cash-field").hidden = !cash;
   $("pos-gcash-field").hidden = cash;
   $("pos-change-row").hidden = !cash;
+  $("pos-pay-pad").hidden = !cash;
+  renderQuickCash(cash);
 
   const pay = paymentState();
   $("pos-change").textContent = formatMoney(pay.ok ? pay.change : 0);
@@ -589,7 +700,7 @@ function renderRefund() {
           <strong>${esc(name)}</strong>
           <small>${item.qty} × ${formatMoney(item.unitPrice)}${item.priceMode === "wholesale" ? " (wholesale)" : ""}${done ? ` · ${done} already refunded` : ""}</small>
         </div>
-        <input type="number" min="0" max="${left}" value="${refundQtys[i]}" data-refund-index="${i}" ${left === 0 ? "disabled" : ""} aria-label="Quantity to refund">
+        <input type="number" min="0" max="${left}" value="${refundQtys[i]}" inputmode="numeric" data-refund-index="${i}" ${left === 0 ? "disabled" : ""} aria-label="Quantity to refund">
         <span class="pos-refund-row__of">of ${left}</span>
       </div>`;
   }).join("");
