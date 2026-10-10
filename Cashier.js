@@ -46,7 +46,7 @@ document.addEventListener("sidebar:ready", async (event) => {
   await loadProducts();
   renderAll();
   loadHistory();
-  $("pos-input").focus();
+  $("pos-input").focus({ preventScroll: true });
 });
 
 async function loadProducts() {
@@ -105,7 +105,7 @@ function wireUi() {
     if (!btn) return;
     const candidate = allCandidates().find((c) => c.key === btn.dataset.addKey);
     if (candidate) add(candidate);
-    input.focus();
+    input.focus({ preventScroll: true });
   });
 
   $("pos-lines").addEventListener("click", (event) => {
@@ -160,7 +160,7 @@ function wireUi() {
     $("pos-tendered").value = "";
     $("pos-gcash-ref").value = "";
     renderAll();
-    $("pos-input").focus();
+    $("pos-input").focus({ preventScroll: true });
   });
   $("pos-complete").addEventListener("click", completeSale);
 
@@ -567,7 +567,7 @@ async function newSale() {
   $("pos-input").value = "";
   await loadProducts();      // stock just changed — show fresh numbers
   renderAll();
-  $("pos-input").focus();
+  $("pos-input").focus({ preventScroll: true });
 }
 
 

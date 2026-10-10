@@ -127,6 +127,7 @@ async function initSidebar(user) {
   if (isDriver) applyDriverNav();
   highlightActiveNav();
   if (!isDriver) loadNotifBadge(user.uid, preferences);
+  loadOrdersBadge(isDriver);
   wireCollapse();
   wireLogout();
   wireScrollToTop();
@@ -424,6 +425,42 @@ function highlightActiveNav() {
     const linkPage = link.getAttribute("href").replace(/\.html$/i, "");
     link.classList.toggle("is-active", linkPage.toLowerCase() === currentPage.toLowerCase());
   });
+}
+
+// ====================================================================
+// ORDERS BADGE
+// ----------------------------------------------------------------
+// Live count on the "Orders" nav item, same style as Notifications.
+// Staff see how many orders are waiting for approval (status
+// "pending"); drivers see how many approved orders are ready for
+// delivery. The badge element is created here so every page gets it
+// without editing each page's HTML.
+// ====================================================================
+function loadOrdersBadge(isDriver) {
+  const link = document.querySelector('.sidebar__nav a[href="Orders.html"]');
+  if (!link) return;
+
+  let badge = document.getElementById("orders-badge");
+  if (!badge) {
+    badge = document.createElement("span");
+    badge.className = "nav-item__badge";
+    badge.id = "orders-badge";
+    badge.hidden = true;
+    link.appendChild(badge);
+  }
+
+  const status = isDriver ? "approved" : "pending";
+  badge.title = isDriver ? "Orders ready for delivery" : "Orders waiting for approval";
+
+  onSnapshot(
+    query(collection(db, "orders"), where("status", "==", status)),
+    (snap) => {
+      const count = snap.size;
+      badge.textContent = count > 99 ? "99+" : String(count);
+      badge.hidden = count === 0;
+    },
+    (error) => console.error("Couldn't load orders for badge:", error)
+  );
 }
 
 // ====================================================================
