@@ -127,7 +127,7 @@ async function initSidebar(user) {
   if (isDriver) applyDriverNav();
   highlightActiveNav();
   if (!isDriver) loadNotifBadge(user.uid, preferences);
-  loadOrdersBadge(isDriver);
+  loadOrdersBadge();
   wireCollapse();
   wireLogout();
   wireScrollToTop();
@@ -431,12 +431,11 @@ function highlightActiveNav() {
 // ORDERS BADGE
 // ----------------------------------------------------------------
 // Live count on the "Orders" nav item, same style as Notifications.
-// Staff see how many orders are waiting for approval (status
-// "pending"); drivers see how many approved orders are ready for
-// delivery. The badge element is created here so every page gets it
+// It counts Pending orders only (status "pending"), for every role.
+// The badge element is created here so every page gets it
 // without editing each page's HTML.
 // ====================================================================
-function loadOrdersBadge(isDriver) {
+function loadOrdersBadge() {
   const link = document.querySelector('.sidebar__nav a[href="Orders.html"]');
   if (!link) return;
 
@@ -449,11 +448,11 @@ function loadOrdersBadge(isDriver) {
     link.appendChild(badge);
   }
 
-  const status = isDriver ? "approved" : "pending";
-  badge.title = isDriver ? "Orders ready for delivery" : "Orders waiting for approval";
+  // Everyone (staff and drivers) sees the same count: Pending orders only.
+  badge.title = "Pending orders";
 
   onSnapshot(
-    query(collection(db, "orders"), where("status", "==", status)),
+    query(collection(db, "orders"), where("status", "==", "pending")),
     (snap) => {
       const count = snap.size;
       badge.textContent = count > 99 ? "99+" : String(count);
