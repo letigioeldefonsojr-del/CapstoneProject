@@ -454,7 +454,14 @@ function loadOrdersBadge() {
   onSnapshot(
     query(collection(db, "orders"), where("status", "==", "pending")),
     (snap) => {
-      const count = snap.size;
+      // Same 60-day window the Orders page loads by default, so the badge
+      // always matches the Pending count shown there (very old orders that
+      // were never approved or rejected are not counted).
+      const cutoff = Date.now() - 60 * 24 * 60 * 60 * 1000;
+      const count = snap.docs.filter((d) => {
+        const created = d.data().createdAt?.toMillis?.();
+        return created == null || created >= cutoff;
+      }).length;
       badge.textContent = count > 99 ? "99+" : String(count);
       badge.hidden = count === 0;
     },
