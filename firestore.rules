@@ -103,11 +103,11 @@ service cloud.firestore {
          // Drivers: delivery steps only (on the way, delivered, undeliverable).
          (isDriver() &&
           request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['status', 'awaitingCustomerConfirmation', 'isPaid', 'confirmDeadline', 'deliveryIssueReason']) &&
-          ((request.resource.data.diff(resource.data).affectedKeys().hasAny(['status']) &&
-            request.resource.data.status in ['on_the_way', 'undelivered'] &&
+            .hasOnly(['status', 'isPaid', 'deliveryIssueReason']) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasAny(['status']) &&
+          ((request.resource.data.status in ['on_the_way', 'undelivered'] &&
             resource.data.status in ['approved', 'on_the_way']) ||
-           (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['status']) &&
+           (request.resource.data.status == 'delivered' &&
             resource.data.status == 'on_the_way'))));
       allow delete: if isEmployee() || isAdmin() ||
         (isSignedIn() && resource.data.userId == request.auth.uid &&

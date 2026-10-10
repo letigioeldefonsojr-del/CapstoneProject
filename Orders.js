@@ -11,8 +11,8 @@ import { confirmDialog } from "./ConfirmDialog.js";
 // guessed: orders/{orderId} has userId, customerName, customerAddress,
 // total, itemCount, items[] ({productId, productName, imageUrl,
 // flavor, amount, unitPrice, subtotal}), status, createdAt,
-// estimatedDelivery, and (once marked delivered) awaitingCustomer-
-// Confirmation / isPaid / confirmDeadline.
+// estimatedDelivery, and (once marked delivered) isPaid. There is no
+// customer "Confirm Received" step any more: Delivered is final.
 //
 // This page works for both Employee and Admin — your Firestore rules
 // grant orders read/write to isEmployee() || isAdmin().
@@ -536,7 +536,7 @@ function buildOrderRow(order) {
 
   const badge = document.createElement("span");
   badge.className = `order-badge ${meta.badgeClass}`;
-  badge.textContent = order.awaitingCustomerConfirmation ? "Awaiting Confirmation" : meta.label;
+  badge.textContent = meta.label;
   cells[5].appendChild(badge);
 
   cells[6].appendChild(buildActionsForOrder(order));
@@ -632,7 +632,7 @@ function buildActionsForOrder(order) {
     wrap.appendChild(buildActionButton("Reject", "btn-danger-outline", () => handleReject(order)));
   } else if (order.status === "approved") {
     wrap.appendChild(buildActionButton("Mark On the Way", "btn-outline btn-on-the-way", () => handleMarkOnTheWay(order)));
-  } else if (order.status === "on_the_way" && !order.awaitingCustomerConfirmation) {
+  } else if (order.status === "on_the_way") {
     wrap.appendChild(buildActionButton("Mark Delivered", "btn-primary", () => handleMarkDelivered(order)));
     wrap.appendChild(buildActionButton("Undeliverable", "btn-danger-outline", () => openUndeliverableModal(order)));
   } else if (order.status === "cancelled" && order.cancelReason) {
@@ -645,7 +645,7 @@ function buildActionsForOrder(order) {
     reasonNote.textContent = order.cancelReason;
     wrap.appendChild(reasonNote);
   }
-  // delivered / rejected / undelivered / awaiting-confirmation: no actions, view-only.
+  // delivered / rejected / undelivered: no actions, view-only.
 
   return wrap;
 }
@@ -694,17 +694,14 @@ async function handleMarkOnTheWay(order) {
   if (!confirmed) return;
 
   await updateDoc(doc(db, ORDERS_COLLECTION, order.id), {
-    status: "on_the_way",
-    awaitingCustomerConfirmation: false
+    status: "on_the_way"
   });
   sendOrderNotification(order, "Order On The Way", `Your order #${shortOrderId(order.id)} is on its way!`);
   await reloadAfterAction();
 }
 
-// Matches the mobile app's exact two-step flow: this does NOT set
-// status to "delivered" directly. It flags the order as awaiting the
-// customer's confirmation (or auto-confirms after a 10-minute window
-// via the mobile app's own logic) — same as _markDelivered in main.dart.
+// Delivered is final: the order is marked delivered (and paid) right away.
+// No customer confirmation step and no countdown timer.
 async function handleMarkDelivered(order) {
   const isPaid = await confirmDialog(
     "Confirm whether the customer has paid for this order.",
@@ -712,13 +709,11 @@ async function handleMarkDelivered(order) {
   );
   if (!isPaid) return;
 
-  const confirmDeadline = new Date(Date.now() + 10 * 60 * 1000);
   await updateDoc(doc(db, ORDERS_COLLECTION, order.id), {
-    awaitingCustomerConfirmation: true,
-    isPaid: true,
-    confirmDeadline
+    status: "delivered",
+    isPaid: true
   });
-  sendOrderNotification(order, "Order Delivered", `Your order #${shortOrderId(order.id)} has been delivered — please confirm receipt in the app.`);
+  sendOrderNotification(order, "Order Delivered", `Your order #${shortOrderId(order.id)} has been delivered. Thank you!`);
   await reloadAfterAction();
 }
 
@@ -762,8 +757,7 @@ async function handleConfirmUndeliverable() {
   try {
     await updateDoc(doc(db, ORDERS_COLLECTION, pendingUndeliverableOrderId), {
       status: "undelivered",
-      deliveryIssueReason: reason,
-      awaitingCustomerConfirmation: false
+      deliveryIssueReason: reason
     });
     const affectedOrder = allOrders.find((o) => o.id === pendingUndeliverableOrderId);
     if (affectedOrder) {
