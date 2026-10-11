@@ -667,9 +667,27 @@ function buildActionsForOrder(order) {
   const wrap = document.createElement("div");
   wrap.className = "orders-table__action-group";
 
+  // Who can do what:
+  //   Admin             approve / reject only
+  //   Driver            delivery steps only (on the way, delivered, undeliverable)
+  //   Regular employee  view only — no order actions at all
+  const isAdminUser = currentRole === "admin";
+  const actionable = ["pending", "approved", "on_the_way"].includes(order.status);
+  const allowed = order.status === "pending" ? isAdminUser : currentIsDriver;
+
+  if (actionable && !allowed) {
+    // Nothing to click for this person. Drivers see a blank cell on pending
+    // orders (the admin approves first); everyone else gets a small note.
+    if (!currentIsDriver) {
+      const note = document.createElement("span");
+      note.className = "orders-table__view-only";
+      note.textContent = isAdminUser ? "Driver handles delivery" : "View only";
+      wrap.appendChild(note);
+    }
+    return wrap;
+  }
+
   if (order.status === "pending") {
-    // Approving / rejecting is for staff. A driver just sees the order.
-    if (currentIsDriver) return wrap;
     wrap.appendChild(buildActionButton("Approve", "btn-primary", () => handleApprove(order)));
     wrap.appendChild(buildActionButton("Reject", "btn-danger-outline", () => handleReject(order)));
   } else if (order.status === "approved") {
