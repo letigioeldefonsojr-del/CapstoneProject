@@ -584,7 +584,14 @@ function buildOrderDetailRow(order) {
   const addressLine = document.createElement("p");
   addressLine.className = "order-detail__address";
   const addressText = document.createElement("span");
-  addressText.textContent = order.customerAddress ? `Deliver to: ${order.customerAddress}` : "No address on file.";
+  addressText.className = "order-detail__address-text";
+  if (order.customerAddress) {
+    const label = document.createElement("strong");
+    label.textContent = "Deliver to: ";
+    addressText.append(label, order.customerAddress);
+  } else {
+    addressText.textContent = "No address on file.";
+  }
   addressLine.appendChild(addressText);
 
   // Exact pin from the customer app (only on orders where the delivery fee

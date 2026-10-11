@@ -3060,3 +3060,10 @@ body.page-cashier .pos-quick__btn { font-size: 15px; min-height: 44px; }
 
 /* Orders: regular employees are view-only */
 .orders-table__view-only { font-size: 12px; font-style: italic; color: var(--muted); }
+
+/* Order details: larger, easier-to-read delivery address */
+.order-detail__address { font-size: 17px; line-height: 1.45; color: var(--ink); margin-bottom: 12px; }
+.order-detail__address-text { flex: 1 1 280px; min-width: 0; overflow-wrap: anywhere; }
+.order-detail__address-text strong { font-weight: 800; }
+.order-detail__pin-link { min-height: 36px; padding: 0 16px; font-size: 14px; }
+@media (pointer: coarse) { .order-detail__address { font-size: 18px; } .order-detail__pin-link { min-height: 44px; } }
