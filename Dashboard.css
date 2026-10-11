@@ -3048,3 +3048,12 @@ body.page-cashier .pos-quick__btn { font-size: 15px; min-height: 44px; }
 .banner-form-wrap { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--border); }
 .banner-form-wrap[hidden] { display: none; }
 .banner-form__title { margin: 0 0 12px; font-size: 14px; }
+
+/* Order details: exact-pin link next to the address */
+.order-detail__address { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.order-detail__pin-link {
+    display: inline-flex; align-items: center; min-height: 30px; padding: 0 12px;
+    border: 1px solid var(--brand-green); border-radius: 999px;
+    color: var(--brand-green); font-size: 12.5px; font-weight: 700; text-decoration: none;
+}
+.order-detail__pin-link:hover { background: var(--brand-green-soft); }

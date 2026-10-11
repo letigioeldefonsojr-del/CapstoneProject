@@ -424,6 +424,17 @@ function shortOrderId(id) {
   return id.slice(0, 8).toUpperCase();
 }
 
+// Only http(s) links are ever used for the "View on map" button.
+function safeMapUrl(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
 // ====================================================================
 // DELIVERY ADDRESS MAP
 // ----------------------------------------------------------------
@@ -441,11 +452,15 @@ function shortOrderId(id) {
 // Google Maps" link below is a reliable fallback either way, and
 // works the exact same way regardless.
 // ====================================================================
-function buildAddressMap(address) {
+function buildAddressMap(address, lat, lng) {
   const wrap = document.createElement("div");
   wrap.className = "order-detail__map-wrap";
 
-  const encoded = encodeURIComponent(address);
+  // When the customer app saved exact coordinates, search for those so the
+  // map drops a pin on the real delivery point; otherwise fall back to the
+  // typed address.
+  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+  const encoded = encodeURIComponent(hasCoords ? `${lat},${lng}` : address);
 
   const iframe = document.createElement("iframe");
   iframe.className = "order-detail__map";
@@ -556,11 +571,26 @@ function buildOrderDetailRow(order) {
 
   const addressLine = document.createElement("p");
   addressLine.className = "order-detail__address";
-  addressLine.textContent = order.customerAddress ? `Deliver to: ${order.customerAddress}` : "No address on file.";
+  const addressText = document.createElement("span");
+  addressText.textContent = order.customerAddress ? `Deliver to: ${order.customerAddress}` : "No address on file.";
+  addressLine.appendChild(addressText);
+
+  // Exact pin from the customer app (only on orders where the delivery fee
+  // was calculated). Hidden entirely when missing or not a real web link.
+  const mapUrl = safeMapUrl(order.deliveryMapUrl);
+  if (mapUrl) {
+    const mapLink = document.createElement("a");
+    mapLink.className = "order-detail__pin-link";
+    mapLink.href = mapUrl;
+    mapLink.target = "_blank";
+    mapLink.rel = "noopener noreferrer";
+    mapLink.textContent = "View on map ↗";
+    addressLine.appendChild(mapLink);
+  }
   wrap.appendChild(addressLine);
 
   if (order.customerAddress) {
-    wrap.appendChild(buildAddressMap(order.customerAddress));
+    wrap.appendChild(buildAddressMap(order.customerAddress, order.deliveryLat, order.deliveryLng));
   }
 
   const items = Array.isArray(order.items) ? order.items : [];
