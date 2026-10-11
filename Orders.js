@@ -452,15 +452,24 @@ function safeMapUrl(value) {
 // Google Maps" link below is a reliable fallback either way, and
 // works the exact same way regardless.
 // ====================================================================
-function buildAddressMap(address, lat, lng) {
+// Reads a saved coordinate (number, or numeric string) and checks its range.
+function toCoord(value, limit) {
+  const n = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+  return typeof n === "number" && Number.isFinite(n) && Math.abs(n) <= limit ? n : null;
+}
+
+function buildAddressMap(order) {
   const wrap = document.createElement("div");
   wrap.className = "order-detail__map-wrap";
 
-  // When the customer app saved exact coordinates, search for those so the
-  // map drops a pin on the real delivery point; otherwise fall back to the
-  // typed address.
-  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
-  const encoded = encodeURIComponent(hasCoords ? `${lat},${lng}` : address);
+  // Exact pin first: the customer app saves deliveryLat/deliveryLng, so the
+  // embedded map is centred on (and marks) those coordinates directly. The
+  // typed address is only searched when no coordinates were saved (older
+  // orders, or addresses that were never re-pinned).
+  const lat = toCoord(order.deliveryLat, 90);
+  const lng = toCoord(order.deliveryLng, 180);
+  const hasCoords = lat !== null && lng !== null;
+  const encoded = encodeURIComponent(hasCoords ? `${lat},${lng}` : order.customerAddress);
 
   const iframe = document.createElement("iframe");
   iframe.className = "order-detail__map";
@@ -470,12 +479,15 @@ function buildAddressMap(address, lat, lng) {
   iframe.title = "Delivery location map";
   wrap.appendChild(iframe);
 
+  // Link below the map: the customer's own pin link when present, otherwise
+  // a Google Maps link built from the coordinates, otherwise from the text.
+  const pinUrl = safeMapUrl(order.deliveryMapUrl);
   const link = document.createElement("a");
-  link.href = `https://www.google.com/maps/search/?api=1&query=${encoded}`;
+  link.href = pinUrl || `https://www.google.com/maps/search/?api=1&query=${encoded}`;
   link.target = "_blank";
   link.rel = "noopener noreferrer";
   link.className = "order-detail__map-link";
-  link.textContent = "Open in Google Maps ↗";
+  link.textContent = pinUrl ? "Open pinned location ↗" : "Open in Google Maps ↗";
   wrap.appendChild(link);
 
   return wrap;
@@ -589,8 +601,8 @@ function buildOrderDetailRow(order) {
   }
   wrap.appendChild(addressLine);
 
-  if (order.customerAddress) {
-    wrap.appendChild(buildAddressMap(order.customerAddress, order.deliveryLat, order.deliveryLng));
+  if (order.customerAddress || (toCoord(order.deliveryLat, 90) !== null && toCoord(order.deliveryLng, 180) !== null)) {
+    wrap.appendChild(buildAddressMap(order));
   }
 
   const items = Array.isArray(order.items) ? order.items : [];
