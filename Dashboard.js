@@ -241,6 +241,7 @@ const BANNER_CLOUDINARY_UPLOAD_PRESET = "productsweb";
 const BANNER_CLOUDINARY_FOLDER = "banners";
 const BANNERS_COLLECTION = "storeBanners";
 const MAX_BANNERS = 10;
+const BANNER_EXPIRY_GRACE_HOURS = 12; // ended promotions are deleted this long after they end
 
 let banners = [];            // [{id, ...data}] sorted by sortOrder
 let editingBannerId = null;  // null = adding a new promotion
@@ -267,6 +268,32 @@ async function loadBannerPanel() {
           updatedAt: serverTimestamp()
         });
         banners = [{ id: "legacy", ...data, sortOrder: 1 }];
+      }
+    }
+
+    // Housekeeping: a promotion that ended more than 12 hours ago is deleted.
+    // (There is no server here to do it on a timer, so it runs whenever
+    // someone opens the Dashboard.) During the 12 hours it stays visible as
+    // "Ended" so it can still be edited or extended.
+    const cutoff = Date.now() - BANNER_EXPIRY_GRACE_HOURS * 60 * 60 * 1000;
+    const expired = banners.filter((b) => {
+      const end = b.scheduleEnd?.toDate?.()?.getTime();
+      return end && end < cutoff;
+    });
+    if (expired.length > 0) {
+      const removed = [];
+      for (const b of expired) {
+        try {
+          await deleteDoc(doc(db, BANNERS_COLLECTION, b.id));
+          removed.push(b.id);
+        } catch (error) {
+          console.error("Couldn't remove an expired promotion:", error);
+        }
+      }
+      banners = banners.filter((b) => !removed.includes(b.id));
+      if (removed.length > 0) {
+        banners.sort((x, y) => (x.sortOrder || 0) - (y.sortOrder || 0));
+        await syncLegacyBanner();
       }
     }
 
