@@ -46,8 +46,43 @@ document.addEventListener("sidebar:ready", async (event) => {
   await loadProducts();
   renderAll();
   loadHistory();
-  $("pos-input").focus({ preventScroll: true });
+  focusScanInput();
 });
+
+// ----------------------------- SCANNER READY --------------------------
+// The barcode scanner types like a keyboard, so the scan box must be the
+// place keystrokes land without the cashier clicking it first. Three
+// things make that work: focus it when the page opens (and when the window
+// regains focus), and — as a safety net — send any typed character to it
+// when focus is on the blank page or a button instead of a text field.
+// On touch screens the box is not focused automatically (that would pop up
+// the on-screen keyboard); a hardware scanner still works via the safety net.
+function focusScanInput() {
+  const input = $("pos-input");
+  if (!input || IS_TOUCH) return;
+  input.focus({ preventScroll: true });
+}
+
+function isTypingTarget(el) {
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+}
+
+function anyModalOpen() {
+  return Boolean(document.querySelector(".modal-overlay:not([hidden])"));
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if (isTypingTarget(event.target) || anyModalOpen()) return;
+  if (event.key.length !== 1) return; // only characters (scanners type characters)
+  const input = $("pos-input");
+  if (input) input.focus({ preventScroll: true }); // the character then lands in the box
+});
+
+window.addEventListener("focus", () => { if (!anyModalOpen()) focusScanInput(); });
+window.addEventListener("pageshow", () => focusScanInput());
 
 async function loadProducts() {
   invalidateProductsCache();
@@ -406,6 +441,8 @@ function renderPayment() {
 
   const pay = paymentState();
   $("pos-change").textContent = formatMoney(pay.ok ? pay.change : 0);
+  // Highlight the change box once there is change to give back.
+  $("pos-change-row").classList.toggle("has-change", Boolean(pay.ok && pay.change > 0));
 
   const status = $("pos-pay-status");
   const offline = !navigator.onLine;

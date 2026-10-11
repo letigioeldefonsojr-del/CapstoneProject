@@ -3067,3 +3067,24 @@ body.page-cashier .pos-quick__btn { font-size: 15px; min-height: 44px; }
 .order-detail__address-text strong { font-weight: 800; }
 .order-detail__pin-link { min-height: 36px; padding: 0 16px; font-size: 14px; }
 @media (pointer: coarse) { .order-detail__address { font-size: 18px; } .order-detail__pin-link { min-height: 44px; } }
+
+/* Cashier: make the Change amount impossible to miss */
+body.page-cashier .pos-change {
+    align-items: center;
+    padding: 10px 16px;
+    border: 2px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg);
+    color: var(--muted);
+    font-size: 18px;
+}
+body.page-cashier .pos-change > span:last-child { font-size: 30px; font-weight: 800; line-height: 1.1; }
+body.page-cashier .pos-change.has-change {
+    background: var(--brand-green);
+    border-color: var(--brand-green);
+    color: #ffffff;
+}
+@media (min-width: 961px) and (max-height: 860px) {
+    body.page-cashier .pos-change { padding: 6px 14px; }
+    body.page-cashier .pos-change > span:last-child { font-size: 26px; }
+}
