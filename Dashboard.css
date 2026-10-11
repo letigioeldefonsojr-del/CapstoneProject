@@ -3028,3 +3028,23 @@ body.page-cashier .pos-quick__btn { font-size: 15px; min-height: 44px; }
     body.page-cashier .pos-quick__btn { min-height: 42px; }
     body.page-cashier .pos-totals__row--total { font-size: 26px; }
 }
+
+/* Store banner: multiple promotions */
+.banner-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.banner-list__empty { font-size: 13px; color: var(--muted); margin: 0; }
+.banner-item { display: flex; align-items: center; gap: 12px; background: var(--bg); border-radius: 10px; padding: 10px 12px; flex-wrap: wrap; }
+.banner-item__image { width: 56px; height: 56px; border-radius: 8px; object-fit: cover; flex-shrink: 0; }
+.banner-item__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 180px; }
+.banner-item__text strong { font-size: 13.5px; color: var(--ink); }
+.banner-item__text span { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.banner-item__schedule { font-style: italic; }
+.banner-item__badge { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; }
+.banner-item__badge--live { background: #dff3e6; color: #1f5a37; }
+.banner-item__badge--scheduled { background: #fff1d6; color: #8a5a00; }
+.banner-item__badge--ended { background: #eceeed; color: #6b746d; }
+.banner-item__actions { display: flex; gap: 8px; }
+.banner-item__actions button { min-height: 34px; padding: 0 14px; }
+.banner-add-btn { margin-bottom: 4px; }
+.banner-form-wrap { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--border); }
+.banner-form-wrap[hidden] { display: none; }
+.banner-form__title { margin: 0 0 12px; font-size: 14px; }

@@ -223,91 +223,203 @@ function loadRecentNotifications(uid) {
 }
 
 // ====================================================================
-// CHUNK — STORE BANNER
+// CHUNK — STORE BANNERS (multiple promotions)
 // ----------------------------------------------------------------
-// Writes to settings/storeBanner — schema confirmed directly from the
-// mobile app's lib/core/banner_helpers.dart: {offer, description,
-// imageUrl, scheduleStart, scheduleEnd, updatedAt}. The customer app
-// reads this same document live via a Firestore stream, so a save
-// here shows up on their home screen immediately, no separate sync
-// step needed. Available to both Admin and Employee (matches the
-// existing settings write rule).
+// Each promotion is its own document in storeBanners/{id}:
+// {offer, description, imageUrl, scheduleStart, scheduleEnd, sortOrder,
+// createdAt, updatedAt}. The customer app shows every promotion that is
+// live right now as a banner that scrolls automatically and repeats.
+//
+// Backward compatibility: the first promotion (by sortOrder) is also
+// mirrored to settings/storeBanner, the single document older versions
+// of the customer app read, so those keep working until updated. If the
+// collection is empty, a leftover settings/storeBanner is imported once.
+// Available to both Admin and Employee (settings/storeBanners write rule).
 // ====================================================================
 const BANNER_CLOUDINARY_CLOUD_NAME = "h5291fss";
 const BANNER_CLOUDINARY_UPLOAD_PRESET = "productsweb";
 const BANNER_CLOUDINARY_FOLDER = "banners";
+const BANNERS_COLLECTION = "storeBanners";
+const MAX_BANNERS = 10;
 
+let banners = [];            // [{id, ...data}] sorted by sortOrder
+let editingBannerId = null;  // null = adding a new promotion
 let currentBannerImageUrl = null;
 
 async function loadBannerPanel() {
   try {
-    const snap = await getDoc(doc(db, "settings", "storeBanner"));
-    if (!snap.exists()) {
-      document.getElementById("banner-preview").hidden = true;
+    const snap = await getDocs(collection(db, BANNERS_COLLECTION));
+    banners = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+    if (banners.length === 0) {
+      // One-time import of the old single banner, if there is one.
+      const legacy = await getDoc(doc(db, "settings", "storeBanner"));
+      if (legacy.exists()) {
+        const data = legacy.data();
+        await setDoc(doc(db, BANNERS_COLLECTION, "legacy"), {
+          offer: data.offer || "",
+          description: data.description || "",
+          imageUrl: data.imageUrl || null,
+          scheduleStart: data.scheduleStart || null,
+          scheduleEnd: data.scheduleEnd || null,
+          sortOrder: 1,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+        banners = [{ id: "legacy", ...data, sortOrder: 1 }];
+      }
+    }
+
+    banners.sort((x, y) => (x.sortOrder || 0) - (y.sortOrder || 0));
+    renderBannerList();
+  } catch (error) {
+    console.error("Couldn't load store banners:", error);
+    document.getElementById("banner-list").innerHTML =
+      `<p class="banner-list__empty">Couldn't load the promotions right now.</p>`;
+  }
+}
+
+function bannerState(b) {
+  const now = Date.now();
+  const start = b.scheduleStart?.toDate?.()?.getTime();
+  const end = b.scheduleEnd?.toDate?.()?.getTime();
+  if (start && start > now) return { key: "scheduled", label: "Scheduled" };
+  if (end && end < now) return { key: "ended", label: "Ended" };
+  return { key: "live", label: "Live" };
+}
+
+function bannerScheduleText(b) {
+  const start = b.scheduleStart?.toDate?.();
+  const end = b.scheduleEnd?.toDate?.();
+  if (!start && !end) return "Always on (no schedule)";
+  return `${start ? start.toLocaleDateString() : "now"} → ${end ? end.toLocaleDateString() : "no end date"}`;
+}
+
+function renderBannerList() {
+  const list = document.getElementById("banner-list");
+  list.replaceChildren();
+
+  if (banners.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "banner-list__empty";
+    empty.textContent = "No promotions yet. Add one below.";
+    list.appendChild(empty);
+  }
+
+  banners.forEach((b) => {
+    const state = bannerState(b);
+    const card = document.createElement("div");
+    card.className = "banner-item";
+
+    if (b.imageUrl) {
+      const img = document.createElement("img");
+      img.className = "banner-item__image";
+      img.src = b.imageUrl;
+      img.alt = "";
+      card.appendChild(img);
+    }
+
+    const text = document.createElement("div");
+    text.className = "banner-item__text";
+    const title = document.createElement("strong");
+    title.textContent = b.offer || "(no headline)";
+    const desc = document.createElement("span");
+    desc.textContent = b.description || "";
+    const sched = document.createElement("span");
+    sched.className = "banner-item__schedule";
+    sched.textContent = bannerScheduleText(b);
+    text.append(title, desc, sched);
+    card.appendChild(text);
+
+    const badge = document.createElement("span");
+    badge.className = `banner-item__badge banner-item__badge--${state.key}`;
+    badge.textContent = state.label;
+    card.appendChild(badge);
+
+    const actions = document.createElement("div");
+    actions.className = "banner-item__actions";
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "btn-outline";
+    editBtn.textContent = "Edit";
+    editBtn.addEventListener("click", () => openBannerForm(b));
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "btn-danger-outline";
+    delBtn.textContent = "Delete";
+    delBtn.addEventListener("click", () => handleBannerRemove(b));
+    actions.append(editBtn, delBtn);
+    card.appendChild(actions);
+
+    list.appendChild(card);
+  });
+
+  const addBtn = document.getElementById("banner-add-btn");
+  addBtn.disabled = banners.length >= MAX_BANNERS;
+  addBtn.textContent = banners.length >= MAX_BANNERS
+    ? `Limit reached (${MAX_BANNERS} promotions)`
+    : (banners.length === 0 ? "+ Add a promotion" : "+ Add another promotion");
+}
+
+function openBannerForm(banner) {
+  const form = document.getElementById("banner-form");
+  form.reset();
+  editingBannerId = banner ? banner.id : null;
+  currentBannerImageUrl = banner?.imageUrl || null;
+
+  document.getElementById("banner-form-title").textContent = banner ? "Edit promotion" : "New promotion";
+  document.getElementById("banner-offer").value = banner?.offer || "";
+  document.getElementById("banner-description").value = banner?.description || "";
+  if (banner?.scheduleStart?.toDate) {
+    document.getElementById("banner-schedule-start").value = toDatetimeLocalValue(banner.scheduleStart.toDate());
+  }
+  if (banner?.scheduleEnd?.toDate) {
+    document.getElementById("banner-schedule-end").value = toDatetimeLocalValue(banner.scheduleEnd.toDate());
+  }
+  document.getElementById("banner-image-note").hidden = !currentBannerImageUrl;
+  document.getElementById("banner-status").hidden = true;
+  // Editing an existing promotion: don't re-send a push by default.
+  document.getElementById("banner-notify").checked = !banner;
+
+  const wrap = document.getElementById("banner-form-wrap");
+  wrap.hidden = false;
+  document.getElementById("banner-offer").focus({ preventScroll: true });
+  wrap.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function closeBannerForm() {
+  document.getElementById("banner-form-wrap").hidden = true;
+  document.getElementById("banner-form").reset();
+  editingBannerId = null;
+  currentBannerImageUrl = null;
+}
+
+// Keep settings/storeBanner (read by older customer-app versions) pointing
+// at the first promotion, or removed when there are none.
+async function syncLegacyBanner() {
+  const first = banners[0];
+  try {
+    if (!first) {
+      await deleteDoc(doc(db, "settings", "storeBanner"));
       return;
     }
-
-    const data = snap.data();
-    document.getElementById("banner-offer").value = data.offer || "";
-    document.getElementById("banner-description").value = data.description || "";
-    currentBannerImageUrl = data.imageUrl || null;
-
-    if (data.scheduleStart?.toDate) {
-      document.getElementById("banner-schedule-start").value = toDatetimeLocalValue(data.scheduleStart.toDate());
-    }
-    if (data.scheduleEnd?.toDate) {
-      document.getElementById("banner-schedule-end").value = toDatetimeLocalValue(data.scheduleEnd.toDate());
-    }
-
-    renderBannerPreview(data);
+    await setDoc(doc(db, "settings", "storeBanner"), {
+      offer: first.offer || "",
+      description: first.description || "",
+      imageUrl: first.imageUrl || null,
+      scheduleStart: first.scheduleStart || null,
+      scheduleEnd: first.scheduleEnd || null,
+      updatedAt: serverTimestamp()
+    });
   } catch (error) {
-    console.error("Couldn't load store banner:", error);
+    console.error("Couldn't update the legacy banner document:", error);
   }
-}
-
-function renderBannerPreview(data) {
-  const preview = document.getElementById("banner-preview");
-  const imageEl = document.getElementById("banner-preview-image");
-
-  if (!data.offer && !data.description) {
-    preview.hidden = true;
-    return;
-  }
-
-  preview.hidden = false;
-  document.getElementById("banner-preview-offer").textContent = data.offer || "";
-  document.getElementById("banner-preview-description").textContent = data.description || "";
-
-  if (data.imageUrl) {
-    imageEl.src = data.imageUrl;
-    imageEl.hidden = false;
-  } else {
-    imageEl.hidden = true;
-  }
-
-  const scheduleEl = document.getElementById("banner-preview-schedule");
-  const startDate = data.scheduleStart?.toDate?.();
-  const endDate = data.scheduleEnd?.toDate?.();
-  if (startDate || endDate) {
-    const startText = startDate ? startDate.toLocaleDateString() : "now";
-    const endText = endDate ? endDate.toLocaleDateString() : "no end date";
-    scheduleEl.textContent = `Active ${startText} → ${endText}`;
-  } else {
-    scheduleEl.textContent = "Active always (no schedule set)";
-  }
-}
-
-function toDatetimeLocalValue(dateObj) {
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${dateObj.getFullYear()}-${pad(dateObj.getMonth() + 1)}-${pad(dateObj.getDate())}T${pad(dateObj.getHours())}:${pad(dateObj.getMinutes())}`;
 }
 
 function wireBannerForm() {
-  const form = document.getElementById("banner-form");
-  const removeBtn = document.getElementById("banner-remove-btn");
-
-  form.addEventListener("submit", handleBannerSave);
-  removeBtn.addEventListener("click", handleBannerRemove);
+  document.getElementById("banner-form").addEventListener("submit", handleBannerSave);
+  document.getElementById("banner-add-btn").addEventListener("click", () => openBannerForm(null));
+  document.getElementById("banner-cancel-btn").addEventListener("click", closeBannerForm);
 }
 
 function showBannerStatus(message, kind) {
@@ -340,21 +452,35 @@ async function handleBannerSave(event) {
       imageUrl = await uploadBannerImage(imageFile);
     }
 
-    await setDoc(doc(db, "settings", "storeBanner"), {
+    const existing = banners.find((b) => b.id === editingBannerId);
+    const payload = {
       offer,
       description,
       imageUrl: imageUrl || null,
       scheduleStart: startValue ? Timestamp.fromDate(new Date(startValue)) : null,
       scheduleEnd: endValue ? Timestamp.fromDate(new Date(endValue)) : null,
       updatedAt: serverTimestamp()
-    });
+    };
 
-    currentBannerImageUrl = imageUrl;
-    let statusText = "Banner saved — now live on the customer app.";
+    if (existing) {
+      await setDoc(doc(db, BANNERS_COLLECTION, existing.id), {
+        ...payload,
+        sortOrder: existing.sortOrder || Date.now(),
+        createdAt: existing.createdAt || serverTimestamp()
+      });
+    } else {
+      await setDoc(doc(collection(db, BANNERS_COLLECTION)), {
+        ...payload,
+        sortOrder: Date.now(),
+        createdAt: serverTimestamp()
+      });
+    }
 
-    // Promotion push: the banner's own offer + description. Only when the
-    // banner is live right now — a banner scheduled for later sends nothing
-    // (no server here to fire it on that day).
+    let statusText = "Promotion saved — now in the customer app's banner.";
+
+    // Promotion push: this promotion's offer + description. Only when it is
+    // live right now — one scheduled for later sends nothing (no server here
+    // to fire it on that day).
     if (document.getElementById("banner-notify")?.checked) {
       const now = Date.now();
       const startsLater = startValue && new Date(startValue).getTime() > now;
@@ -370,31 +496,37 @@ async function handleBannerSave(event) {
       }
     }
 
-    showBannerStatus(statusText, "success");
     await loadBannerPanel();
+    await syncLegacyBanner();
+    showBannerStatus(statusText, "success");
+    setTimeout(closeBannerForm, 1800);
   } catch (error) {
     console.error("Couldn't save banner:", error);
-    showBannerStatus("Couldn't save the banner. Please try again.", "error");
+    showBannerStatus("Couldn't save the promotion. Please try again.", "error");
   } finally {
     saveBtn.disabled = false;
-    saveBtn.textContent = "Save Banner";
+    saveBtn.textContent = "Save Promotion";
   }
 }
 
-async function handleBannerRemove() {
-  const confirmed = window.confirm("Remove the current banner? Customers will stop seeing it immediately.");
+async function handleBannerRemove(banner) {
+  const confirmed = window.confirm(`Delete the promotion "${banner.offer || banner.description || "untitled"}"? Customers will stop seeing it immediately.`);
   if (!confirmed) return;
 
   try {
-    await deleteDoc(doc(db, "settings", "storeBanner"));
-    document.getElementById("banner-form").reset();
-    currentBannerImageUrl = null;
-    document.getElementById("banner-preview").hidden = true;
-    showBannerStatus("Banner removed.", "success");
+    await deleteDoc(doc(db, BANNERS_COLLECTION, banner.id));
+    if (editingBannerId === banner.id) closeBannerForm();
+    await loadBannerPanel();
+    await syncLegacyBanner();
   } catch (error) {
     console.error("Couldn't remove banner:", error);
-    showBannerStatus("Couldn't remove the banner. Please try again.", "error");
+    window.alert("Couldn't delete the promotion. Please try again.");
   }
+}
+
+function toDatetimeLocalValue(dateObj) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${dateObj.getFullYear()}-${pad(dateObj.getMonth() + 1)}-${pad(dateObj.getDate())}T${pad(dateObj.getHours())}:${pad(dateObj.getMinutes())}`;
 }
 
 async function uploadBannerImage(file) {

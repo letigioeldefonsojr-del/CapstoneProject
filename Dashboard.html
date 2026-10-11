@@ -294,21 +294,14 @@
             </div>
 
             <div class="panel" id="banner-panel">
-                <h3 class="panel__title">Store Banner</h3>
-                <p class="panel__subtitle">Shown to customers on the app's home screen. Leave a field blank to skip it.</p>
+                <h3 class="panel__title">Store Banner &amp; Promotions</h3>
+                <p class="panel__subtitle">Every live promotion appears on the customer app's home screen as a banner that scrolls automatically and repeats. Add as many as you need (up to 10).</p>
 
-                <div class="banner-preview" id="banner-preview" hidden>
-                    <span class="banner-preview__label">Current banner</span>
-                    <div class="banner-preview__card">
-                        <img class="banner-preview__image" id="banner-preview-image" alt="" hidden>
-                        <div class="banner-preview__text">
-                            <strong id="banner-preview-offer"></strong>
-                            <span id="banner-preview-description"></span>
-                            <span class="banner-preview__schedule" id="banner-preview-schedule"></span>
-                        </div>
-                    </div>
-                </div>
+                <div class="banner-list" id="banner-list"></div>
+                <button type="button" class="btn-outline banner-add-btn" id="banner-add-btn">+ Add another promotion</button>
 
+                <div class="banner-form-wrap" id="banner-form-wrap" hidden>
+                <h4 class="banner-form__title" id="banner-form-title">New promotion</h4>
                 <form id="banner-form">
                     <div class="form-field">
                         <label for="banner-offer">Offer (short headline)</label>
@@ -323,6 +316,7 @@
                     <div class="form-field">
                         <label for="banner-image">Banner image (optional)</label>
                         <input type="file" id="banner-image" accept="image/*">
+                        <p class="pos-hint" id="banner-image-note" hidden>Current image is kept unless you choose a new one.</p>
                     </div>
 
                     <div class="banner-form__schedule-row">
@@ -344,10 +338,11 @@
                     <p class="form-status" id="banner-status" hidden></p>
 
                     <div class="banner-form__actions">
-                        <button type="button" class="btn-outline" id="banner-remove-btn">Remove Banner</button>
-                        <button type="submit" class="btn-primary" id="banner-save-btn">Save Banner</button>
+                        <button type="button" class="btn-outline" id="banner-cancel-btn">Cancel</button>
+                        <button type="submit" class="btn-primary" id="banner-save-btn">Save Promotion</button>
                     </div>
                 </form>
+                </div>
             </div>
         </div>
 
@@ -360,6 +355,6 @@
 </button>
 
 <script type="module" src="Sidebar.js"></script>
-<script type="module" src="Dashboard.js"></script>
+<script type="module" src="Dashboard.js?v=20261011a"></script>
 </body>
 </html>

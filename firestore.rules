@@ -132,6 +132,12 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow write: if isEmployee() || isAdmin();
     }
+    // Promotions shown in the customer app's scrolling banner. Same pattern
+    // as settings: any signed-in user reads, staff write.
+    match /storeBanners/{bannerId} {
+      allow read: if isSignedIn();
+      allow write: if isEmployee() || isAdmin();
+    }
     // Stock movement log: append-only audit trail of inventory stock
     // changes (barcode scanner sales/counts, manual edits). Both roles
     // can read and create; nothing is ever updated or deleted here —
