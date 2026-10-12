@@ -2355,21 +2355,49 @@ function updateDiscountSummary() {
   }
 
   const { label, varies } = describePercents(entries.map((e) => e.percent));
-  let text = label
-    ? `${label} off ${count}${varies ? " (varies by row)" : ""}.`
-    : `Applies to ${count}.`;
+  if (!label) {
+    summary.textContent = `Applies to ${count}. Enter a discount % to continue.`;
+    return;
+  }
 
-  if (label) {
-    const dates = readDiscountDates();
-    if (!dates.error) text += ` ${describeDiscountPeriod(dates)}.`;
+  // Three short lines instead of one run-on sentence:
+  //   1) what: "15% off · 8 products"
+  //   2) when: "Starts today · No end date (stays on until you remove it)"
+  //   3) example of the new price
+  const lines = [{ cls: "discount-summary__main", text: `${label} off · ${count}${varies ? " (varies by row)" : ""}` }];
 
-    const sample = entries.find((e) => e.percent !== null && firstRegularPrice(e.product) !== null);
-    if (sample) {
-      const regular = firstRegularPrice(sample.product);
-      text += ` e.g. ${sample.product[PRODUCT_NAME_FIELD] || "Product"}: ${regular} → ${discountedPrice(regular, sample.percent)}`;
+  const dates = readDiscountDates();
+  if (!dates.error) {
+    const today = new Date();
+    const startsToday = dates.start.toDateString() === today.toDateString();
+    const startText = startsToday ? "Starts today" : `Starts ${formatLongDate(dates.start)}`;
+    const endText = dates.end
+      ? `Ends ${formatLongDate(dates.end)}`
+      : "No end date (stays on until you remove it)";
+    lines.push({ cls: "discount-summary__when", text: `${startText} · ${endText}` });
+  }
+
+  const sample = entries.find((e) => e.percent !== null && firstRegularPrice(e.product) !== null);
+  if (sample) {
+    const regular = firstRegularPrice(sample.product);
+    const now = discountedPrice(regular, sample.percent);
+    if (now) {
+      const saved = parsePriceNumber(regular) - parsePriceNumber(now);
+      const savedText = saved > 0 ? ` (customer saves ${formatPrice(saved)})` : "";
+      lines.push({
+        cls: "discount-summary__example",
+        text: `Example: ${sample.product[PRODUCT_NAME_FIELD] || "Product"} ${regular} → ${now}${savedText}`
+      });
     }
   }
-  summary.textContent = text;
+
+  summary.textContent = "";
+  lines.forEach(({ cls, text }) => {
+    const line = document.createElement("span");
+    line.className = cls;
+    line.textContent = text;
+    summary.appendChild(line);
+  });
 }
 
 function defaultPercentPlaceholder() {

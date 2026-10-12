@@ -735,6 +735,28 @@ button {
     color: var(--brand-green);
 }
 
+.discount-summary span {
+    display: block;
+}
+
+.discount-summary__main {
+    font-size: 16px;
+    font-weight: 800;
+}
+
+.discount-summary__when {
+    margin-top: 2px;
+    font-weight: 600;
+}
+
+.discount-summary__example {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px dashed rgba(0, 0, 0, 0.12);
+    font-weight: 600;
+    color: var(--muted);
+}
+
 .btn-danger-outline {
     border: 1px solid #f3b7b0;
     background: #fdecea;
