@@ -334,6 +334,8 @@ function numericPrice(product) {
 // on simple products — not on variant breakdown rows (see CHUNK 0
 // note on admin editing scope).
 // ====================================================================
+const INVENTORY_PAGE_SIZE = 100; // rows drawn per batch
+
 function renderInventoryTable(products, stockFilter) {
   const tbody = document.getElementById("inventory-tbody");
   const countLabel = document.getElementById("inventory-count");
@@ -356,39 +358,74 @@ function renderInventoryTable(products, stockFilter) {
     return;
   }
 
+  // Only the first INVENTORY_PAGE_SIZE products are drawn at once; "Show more"
+  // draws the next batch. Drawing thousands of table rows in one go freezes
+  // the page, and nobody scrolls through them all — search and filters still
+  // look through every product.
   tbody.innerHTML = "";
-  products.forEach((product) => {
-    const allVariants = getVariants(product);
-    const visibleVariants = stockFilter === "all"
-      ? allVariants
-      : allVariants.filter((v) => variantMatchesStockFilter(v, stockFilter));
-    const hasVariants = visibleVariants.length > 0;
+  let shown = 0;
+  const colCount = isAdmin ? 9 : 7;
 
-    const mainRow = buildProductRow(product, hasVariants, visibleVariants);
-    tbody.appendChild(mainRow);
+  const appendRows = (batch) => {
+    batch.forEach((product) => {
+      const allVariants = getVariants(product);
+      const visibleVariants = stockFilter === "all"
+        ? allVariants
+        : allVariants.filter((v) => variantMatchesStockFilter(v, stockFilter));
+      const hasVariants = visibleVariants.length > 0;
 
-    if (hasVariants) {
-      const variantRow = buildVariantRow(visibleVariants, product);
-      tbody.appendChild(variantRow);
+      const mainRow = buildProductRow(product, hasVariants, visibleVariants);
+      tbody.appendChild(mainRow);
 
-      mainRow.addEventListener("click", (event) => {
-        if (event.target.closest(".inventory-edit-btn, .inventory-row-checkbox")) return;
-        const expanding = variantRow.hidden;
+      if (hasVariants) {
+        const variantRow = buildVariantRow(visibleVariants, product);
+        tbody.appendChild(variantRow);
 
-        // Accordion: collapse whichever product's variant row was
-        // previously open, if any.
-        if (expandedVariantRow && expandedVariantRow !== variantRow) {
-          expandedVariantRow.hidden = true;
-          expandedVariantMainRow.classList.remove("is-expanded");
-        }
+        mainRow.addEventListener("click", (event) => {
+          if (event.target.closest(".inventory-edit-btn, .inventory-row-checkbox")) return;
+          const expanding = variantRow.hidden;
 
-        variantRow.hidden = !expanding;
-        mainRow.classList.toggle("is-expanded", expanding);
-        expandedVariantRow = expanding ? variantRow : null;
-        expandedVariantMainRow = expanding ? mainRow : null;
-      });
+          // Accordion: collapse whichever product's variant row was
+          // previously open, if any.
+          if (expandedVariantRow && expandedVariantRow !== variantRow) {
+            expandedVariantRow.hidden = true;
+            expandedVariantMainRow.classList.remove("is-expanded");
+          }
+
+          variantRow.hidden = !expanding;
+          mainRow.classList.toggle("is-expanded", expanding);
+          expandedVariantRow = expanding ? variantRow : null;
+          expandedVariantMainRow = expanding ? mainRow : null;
+        });
+      }
+    });
+  };
+
+  const renderNextBatch = () => {
+    const old = tbody.querySelector(".inventory-more-row");
+    if (old) old.remove();
+
+    appendRows(products.slice(shown, shown + INVENTORY_PAGE_SIZE));
+    shown = Math.min(shown + INVENTORY_PAGE_SIZE, products.length);
+
+    if (shown < products.length) {
+      const remaining = products.length - shown;
+      const moreRow = document.createElement("tr");
+      moreRow.className = "inventory-more-row";
+      const cell = document.createElement("td");
+      cell.colSpan = colCount;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn-outline";
+      btn.textContent = `Show ${Math.min(INVENTORY_PAGE_SIZE, remaining)} more (${remaining} not shown — use search or filters to narrow down)`;
+      btn.addEventListener("click", renderNextBatch);
+      cell.appendChild(btn);
+      moreRow.appendChild(cell);
+      tbody.appendChild(moreRow);
     }
-  });
+  };
+
+  renderNextBatch();
 }
 
 // ====================================================================

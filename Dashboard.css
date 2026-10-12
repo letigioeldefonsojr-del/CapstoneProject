@@ -3088,3 +3088,7 @@ body.page-cashier .pos-change.has-change {
     body.page-cashier .pos-change { padding: 6px 14px; }
     body.page-cashier .pos-change > span:last-child { font-size: 26px; }
 }
+
+/* Inventory: "Show more" row */
+.inventory-more-row td { text-align: center; padding: 14px; }
+.inventory-more-row button { min-height: 40px; padding: 0 22px; }
