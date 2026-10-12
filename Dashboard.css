@@ -1167,6 +1167,12 @@ button {
         flex-direction: row;
         align-items: center;
         position: relative;
+        /* The desktop rule sets overflow-y: auto, which clips the
+           account-menu dropdown below (it hangs outside this box), so the
+           arrow button looked dead. Visible + a z-index puts the menu
+           above the page content. */
+        overflow: visible;
+        z-index: 60;
         /* No overflow set here on purpose — the account-menu dropdown
            is an absolutely-positioned child that renders outside this
            box, and setting overflow-x here (even with overflow-y:
