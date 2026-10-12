@@ -41,12 +41,43 @@ onAuthStateChanged(auth, async (user) => {
 document.addEventListener("DOMContentLoaded", () => {
 
   const SIGNUP_PASSWORD_FIELD_IDS = ["signup-password", "signup-confirm-password"];
-  // Start empty, but do NOT clear when the browser autofills — people
-  // use "Use strong password" from Google Password Manager here.
+  // The browser may auto-fill a SAVED password into these boxes by
+  // itself (on reload, or while the form is hidden). That must never
+  // show up. A password the person chose on purpose — "Use strong
+  // password" from Google Password Manager — only appears AFTER they
+  // click into the box, so: anything that appears while they haven't
+  // touched the box yet is cleared; anything after they touch it stays.
+  const touchedPasswordFields = new Set();
+  function clearIfUntouched(input) {
+    if (!touchedPasswordFields.has(input) && input.value) input.value = "";
+  }
   SIGNUP_PASSWORD_FIELD_IDS.forEach((id) => {
     const input = document.getElementById(id);
-    if (input) input.value = "";
+    if (!input) return;
+    input.value = "";
+    // Touching either box counts for both: picking "Use strong
+    // password" in the first box fills the confirm box too.
+    ["pointerdown", "focus", "keydown"].forEach((evt) =>
+      input.addEventListener(evt, () => {
+        SIGNUP_PASSWORD_FIELD_IDS.forEach((otherId) => {
+          const other = document.getElementById(otherId);
+          if (other) touchedPasswordFields.add(other);
+        });
+      }));
+    input.addEventListener("animationstart", (event) => {
+      if (event.animationName === "onAutofillDetected") clearIfUntouched(input);
+    });
   });
+  // Autofill can land a moment after load, and not every browser fires
+  // the event above, so sweep a few times as well.
+  window.clearUntouchedSignupPasswords = () => {
+    SIGNUP_PASSWORD_FIELD_IDS.forEach((id) => {
+      const input = document.getElementById(id);
+      if (input) clearIfUntouched(input);
+    });
+  };
+  [0, 150, 500, 1200, 2500].forEach((ms) => setTimeout(window.clearUntouchedSignupPasswords, ms));
+  window.addEventListener("pageshow", window.clearUntouchedSignupPasswords);
 
   const cardTitle    = document.getElementById("card-title");
   const formEmployee = document.getElementById("form-employee");
@@ -74,7 +105,10 @@ document.addEventListener("DOMContentLoaded", () => {
     hideStatus();
   }
 
-  toSignupLink.addEventListener("click", () => setEmployeeMode("signup"));
+  toSignupLink.addEventListener("click", () => {
+    setEmployeeMode("signup");
+    [0, 150, 500].forEach((ms) => setTimeout(window.clearUntouchedSignupPasswords, ms));
+  });
   toLoginLink.addEventListener("click", () => setEmployeeMode("login"));
 
   function showOtpStep(email) {
