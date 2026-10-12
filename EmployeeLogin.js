@@ -41,15 +41,11 @@ onAuthStateChanged(auth, async (user) => {
 document.addEventListener("DOMContentLoaded", () => {
 
   const SIGNUP_PASSWORD_FIELD_IDS = ["signup-password", "signup-confirm-password"];
+  // Start empty, but do NOT clear when the browser autofills — people
+  // use "Use strong password" from Google Password Manager here.
   SIGNUP_PASSWORD_FIELD_IDS.forEach((id) => {
     const input = document.getElementById(id);
-    if (!input) return;
-    input.value = "";
-    input.addEventListener("animationstart", (event) => {
-      if (event.animationName === "onAutofillDetected") {
-        input.value = "";
-      }
-    });
+    if (input) input.value = "";
   });
 
   const cardTitle    = document.getElementById("card-title");
