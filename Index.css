@@ -1038,7 +1038,11 @@ input:focus-visible {
 #admin-signup-password:-webkit-autofill,
 #admin-signup-confirm-password:-webkit-autofill,
 #signup-password:-webkit-autofill,
-#signup-confirm-password:-webkit-autofill {
+#signup-confirm-password:-webkit-autofill,
+#employee-username:-webkit-autofill,
+#employee-password:-webkit-autofill,
+#admin-email:-webkit-autofill,
+#admin-password:-webkit-autofill {
     animation-name: onAutofillDetected;
     animation-duration: 0.01s;
 }

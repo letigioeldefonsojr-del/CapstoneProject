@@ -1,4 +1,5 @@
 import { auth, db } from "./firebase-config.js";
+import { guardAutofill } from "./AutofillGuard.js";
 import { promptForgotPassword } from "./ForgotPassword.js";
 import { checkLoginAllowed, recordFailedAttempt, resetAttempts } from "./LoginAttempts.js";
 import { sendOtpCode, verifyOtpCode } from "./OtpVerification.js";
@@ -18,6 +19,7 @@ const EYE_OPEN_INNER = '<path d="M2 12C4 7.5 7.8 5 12 5C16.2 5 20 7.5 22 12C20 1
 const EYE_SLASH_INNER = EYE_OPEN_INNER + '<line x1="3.5" y1="20.5" x2="20.5" y2="3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>';
 
 document.addEventListener("DOMContentLoaded", () => {
+  guardAutofill(["admin-email", "admin-password"]);
   const formAdmin = document.getElementById("form-admin");
   const formOtpVerify = document.getElementById("form-otp-verify");
   const cardTitle = document.querySelector(".card-header h2");

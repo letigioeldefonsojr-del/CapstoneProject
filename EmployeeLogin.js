@@ -1,4 +1,5 @@
 import { auth, db } from "./firebase-config.js";
+import { guardAutofill } from "./AutofillGuard.js";
 import { promptForgotPassword } from "./ForgotPassword.js";
 import { validatePasswordStrength } from "./PasswordStrength.js";
 import { checkLoginAllowed, recordFailedAttempt, resetAttempts } from "./LoginAttempts.js";
@@ -39,6 +40,8 @@ onAuthStateChanged(auth, async (user) => {
 });
 
 document.addEventListener("DOMContentLoaded", () => {
+
+  guardAutofill(["employee-username", "employee-password"]);
 
   const SIGNUP_PASSWORD_FIELD_IDS = ["signup-password", "signup-confirm-password"];
   // The browser may auto-fill a SAVED password into these boxes by
