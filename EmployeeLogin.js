@@ -303,6 +303,11 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
+    // Start the account lookup at the same time as the lockout check
+    // (they don't depend on each other) so sign-in waits for one
+    // round trip here instead of two.
+    const employeeLookup = findEmployeeRecordByIdentifier(rawInput);
+    employeeLookup.catch(() => {}); // handled below; avoids an unhandled-rejection warning if we return early
     const lockStatus = await checkLoginAllowed(rawInput);
     if (!lockStatus.allowed) {
       if (lockStatus.secondsLeft) {
@@ -318,7 +323,7 @@ document.addEventListener("DOMContentLoaded", () => {
     setButtonLoading(submitBtn, true, "Login", "Signing in...");
 
     try {
-      const employeeDoc = await findEmployeeRecordByIdentifier(rawInput);
+      const employeeDoc = await employeeLookup;
 
       if (!employeeDoc) {
         const result = await recordFailedAttempt(rawInput);

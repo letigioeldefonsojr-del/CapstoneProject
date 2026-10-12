@@ -1,6 +1,6 @@
 import { auth, db } from "./firebase-config.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
-import { doc, getDoc, collection, query, where, onSnapshot, enableNetwork, disableNetwork } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { doc, getDoc, collection, query, where, orderBy, limit, onSnapshot, enableNetwork, disableNetwork } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getWorstAlertDetail } from "./StockAlerts.js";
 import { getPreferences } from "./NotificationPreferences.js";
 import { getReadSet, getClearedSet, loadReadStatus } from "./ReadStatus.js";
@@ -582,7 +582,7 @@ async function loadNotifBadge(uid, preferences) {
   // "notifications:live" instead of each maintaining its own
   // duplicate listener on this same collection.
   onSnapshot(
-    collection(db, "employeeNotifications"),
+    query(collection(db, "employeeNotifications"), orderBy("createdAt", "desc"), limit(100)),
     (snap) => {
       latestNotifications = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       recomputeUnreadCounts();

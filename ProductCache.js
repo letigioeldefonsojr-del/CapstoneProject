@@ -4,54 +4,99 @@ import { collection, getDocs } from "https://www.gstatic.com/firebasejs/10.13.0/
 // ====================================================================
 // SHARED PRODUCT CACHE
 // ----------------------------------------------------------------
-// Why this exists: without it, a single Dashboard page load fetches
-// the entire "products" collection TWICE (once for the sidebar's
-// low-stock badge, once for the stat cards) — and clicking over to
-// Inventory fetches it a third time. That's the main thing making
-// things feel slow, not the UI rendering.
-//
-// getProducts() caches the result in sessionStorage for CACHE_TTL_MS.
-// Any caller within that window gets the cached array back instantly
-// with zero network round-trip. Stock changes will take up to
-// CACHE_TTL_MS to show up elsewhere as a result — that's the
-// deliberate tradeoff for speed. Call invalidateProductsCache() after
-// any action that changes stock (once Inventory management exists)
-// to force the next read to be fresh.
+// getProducts() returns the whole products list, reading Firestore
+// only when it has to. Three layers, fastest first:
+//   1. memory      — instant, lasts while the page stays open
+//   2. IndexedDB   — survives page changes; has room for thousands of
+//                    products (sessionStorage's ~5 MB limit silently
+//                    failed once the catalog got big)
+//   3. Firestore   — the real read (costs one read per product)
+// Two callers asking at the same moment share ONE Firestore read.
+// Stock changes can take up to CACHE_TTL_MS to show on another page;
+// call invalidateProductsCache() after any write to force a fresh read.
 // ====================================================================
 const PRODUCTS_COLLECTION = "products";
-const CACHE_KEY = "almares_products_cache";
-const CACHE_TTL_MS = 45000; // 45 seconds
+const CACHE_TTL_MS = 90000; // 90 seconds
+const DB_NAME = "almares_cache";
+const STORE = "kv";
+const KEY = "products";
+
+let memory = null;       // { timestamp, products }
+let inflight = null;     // shared in-progress Firestore read
+let pendingClear = null; // IndexedDB delete that must finish before a read
+let generation = 0;      // bumps on invalidate so stale reads aren't cached
 
 export async function getProducts() {
-  const cached = readCache();
-  if (cached) return cached;
+  if (memory && Date.now() - memory.timestamp <= CACHE_TTL_MS) return memory.products;
+  if (inflight) return inflight;
 
-  const snap = await getDocs(collection(db, PRODUCTS_COLLECTION));
-  const products = snap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
-  writeCache(products);
-  return products;
+  inflight = (async () => {
+    try {
+      if (pendingClear) await pendingClear;
+      const fromDisk = await idbRead();
+      if (fromDisk && Date.now() - fromDisk.timestamp <= CACHE_TTL_MS) {
+        memory = fromDisk;
+        return fromDisk.products;
+      }
+      const startedAt = generation;
+      const snap = await getDocs(collection(db, PRODUCTS_COLLECTION));
+      const products = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      if (startedAt === generation) {
+        memory = { timestamp: Date.now(), products };
+        idbWrite(memory);
+      }
+      return products;
+    } finally {
+      inflight = null;
+    }
+  })();
+  return inflight;
 }
 
 export function invalidateProductsCache() {
-  sessionStorage.removeItem(CACHE_KEY);
+  memory = null;
+  generation++;
+  pendingClear = idbDelete().finally(() => { pendingClear = null; });
+  try { sessionStorage.removeItem("almares_products_cache"); } catch (e) { /* ignore */ }
 }
 
-function readCache() {
-  try {
-    const raw = sessionStorage.getItem(CACHE_KEY);
-    if (!raw) return null;
-    const { timestamp, products } = JSON.parse(raw);
-    if (Date.now() - timestamp > CACHE_TTL_MS) return null;
-    return products;
-  } catch (error) {
-    return null;
-  }
+// ---- IndexedDB helpers: every failure just means "no disk cache" ----
+function openDb() {
+  return new Promise((resolve, reject) => {
+    try {
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = () => req.result.createObjectStore(STORE);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    } catch (e) { reject(e); }
+  });
 }
 
-function writeCache(products) {
+async function idbRead() {
   try {
-    sessionStorage.setItem(CACHE_KEY, JSON.stringify({ timestamp: Date.now(), products }));
-  } catch (error) {
-    console.error("Couldn't cache products:", error);
-  }
+    const d = await openDb();
+    return await new Promise((resolve) => {
+      const r = d.transaction(STORE, "readonly").objectStore(STORE).get(KEY);
+      r.onsuccess = () => resolve(r.result || null);
+      r.onerror = () => resolve(null);
+    });
+  } catch (e) { return null; }
+}
+
+async function idbWrite(value) {
+  try {
+    const d = await openDb();
+    d.transaction(STORE, "readwrite").objectStore(STORE).put(value, KEY);
+  } catch (e) { console.error("Couldn't cache products:", e); }
+}
+
+async function idbDelete() {
+  try {
+    const d = await openDb();
+    await new Promise((resolve) => {
+      const tx = d.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).delete(KEY);
+      tx.oncomplete = tx.onerror = tx.onabort = () => resolve();
+    });
+  } catch (e) { /* ignore */ }
 }
