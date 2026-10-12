@@ -156,7 +156,6 @@ document.addEventListener("sidebar:ready", (event) => {
   currentUser = event.detail.user;
   loadInventory();
   wireControls();
-  wireScanner();
   wireStockLog();
   if (isAdmin) wireAdminControls();
 });
@@ -1864,12 +1863,28 @@ function wireStockLog() {
   document.getElementById("stock-log-btn").addEventListener("click", openStockLogModal);
   document.getElementById("stock-log-modal-close").addEventListener("click", closeStockLogModal);
   document.getElementById("stock-log-modal-done").addEventListener("click", closeStockLogModal);
+
+  document.querySelectorAll("#stock-log-filters .tab-row__btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      stockLogFilter = btn.dataset.filter;
+      document.querySelectorAll("#stock-log-filters .tab-row__btn").forEach((b) =>
+        b.classList.toggle("is-active", b === btn));
+      renderStockLog();
+    });
+  });
 }
+
+let stockLogEntries = [];
+let stockLogFilter = "all";
 
 async function openStockLogModal() {
   document.getElementById("stock-log-modal-overlay").hidden = false;
   const list = document.getElementById("stock-log-list");
-  list.innerHTML = `<p class="scanner-log__empty">Loading...</p>`;
+  list.innerHTML = `<p class="stock-log__empty">Loading...</p>`;
+
+  stockLogFilter = "all";
+  document.querySelectorAll("#stock-log-filters .tab-row__btn").forEach((b) =>
+    b.classList.toggle("is-active", b.dataset.filter === "all"));
 
   try {
     const logQuery = query(
@@ -1878,17 +1893,11 @@ async function openStockLogModal() {
       limit(100)
     );
     const snap = await getDocs(logQuery);
-
-    if (snap.empty) {
-      list.innerHTML = `<p class="scanner-log__empty">No stock changes recorded yet.</p>`;
-      return;
-    }
-
-    list.innerHTML = "";
-    snap.forEach((docSnap) => list.appendChild(buildStockLogItem(docSnap.data())));
+    stockLogEntries = snap.docs.map((d) => d.data());
+    renderStockLog();
   } catch (error) {
     console.error("Couldn't load stock log:", error);
-    list.innerHTML = `<p class="scanner-log__empty">Couldn't load the stock log right now.</p>`;
+    list.innerHTML = `<p class="stock-log__empty">Couldn't load the stock log right now.</p>`;
   }
 }
 
@@ -1903,35 +1912,86 @@ const MOVEMENT_TYPE_LABELS = {
   manual_edit: "Manual Edit"
 };
 
-function buildStockLogItem(entry) {
+// "Today", "Yesterday", or "Oct 10, 2026" — used as the day headings.
+function stockLogDayLabel(date) {
+  if (!date) return "Earlier";
+  const startOf = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diffDays = Math.round((startOf(new Date()) - startOf(date)) / 86400000);
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function renderStockLog() {
+  const list = document.getElementById("stock-log-list");
+  const entries = stockLogFilter === "all"
+    ? stockLogEntries
+    : stockLogEntries.filter((e) => e.type === stockLogFilter);
+
+  if (entries.length === 0) {
+    list.innerHTML = `<p class="stock-log__empty">${
+      stockLogEntries.length === 0 ? "No stock changes recorded yet." : "Nothing in this category yet."
+    }</p>`;
+    return;
+  }
+
+  list.innerHTML = "";
+  let currentDay = null;
+  entries.forEach((entry) => {
+    const date = entry.createdAt?.toDate ? entry.createdAt.toDate() : null;
+    const day = stockLogDayLabel(date);
+    if (day !== currentDay) {
+      currentDay = day;
+      const heading = document.createElement("div");
+      heading.className = "stock-log__day";
+      heading.textContent = day;
+      list.appendChild(heading);
+    }
+    list.appendChild(buildStockLogItem(entry, date));
+  });
+}
+
+function buildStockLogItem(entry, date) {
   const el = document.createElement("div");
   el.className = "stock-log__item";
 
-  const badge = document.createElement("span");
-  badge.className = `stock-log__type-badge stock-log__type-badge--${entry.type}`;
-  badge.textContent = MOVEMENT_TYPE_LABELS[entry.type] || entry.type;
-  el.appendChild(badge);
+  // Top line: product name on the left, stock change on the right.
+  const top = document.createElement("div");
+  top.className = "stock-log__item-top";
 
   const name = document.createElement("span");
   name.className = "stock-log__item-name";
   name.textContent = entry.variantName
     ? `${entry.productName} — ${entry.variantName}`
     : entry.productName;
-  el.appendChild(name);
+  top.appendChild(name);
 
+  const delta = Number(entry.newStock) - Number(entry.previousStock);
+  const dir = delta < 0 ? "down" : delta > 0 ? "up" : "same";
   const change = document.createElement("span");
-  const delta = entry.newStock - entry.previousStock;
-  change.className = `stock-log__item-change stock-log__item-change--${delta < 0 ? "down" : delta > 0 ? "up" : "same"}`;
-  change.textContent = `${entry.previousStock} → ${entry.newStock}`;
-  el.appendChild(change);
+  change.className = `stock-log__item-change stock-log__item-change--${dir}`;
+  const deltaText = delta === 0 ? "no change" : `${delta > 0 ? "+" : "−"}${Math.abs(delta)}`;
+  change.innerHTML = `<span class="stock-log__delta"></span><span class="stock-log__range"></span>`;
+  change.querySelector(".stock-log__delta").textContent = deltaText;
+  change.querySelector(".stock-log__range").textContent = `${entry.previousStock} → ${entry.newStock}`;
+  top.appendChild(change);
+  el.appendChild(top);
+
+  // Bottom line: what kind of change, who did it, and when.
+  const bottom = document.createElement("div");
+  bottom.className = "stock-log__item-bottom";
+
+  const badge = document.createElement("span");
+  badge.className = `stock-log__type-badge stock-log__type-badge--${entry.type}`;
+  badge.textContent = MOVEMENT_TYPE_LABELS[entry.type] || entry.type;
+  bottom.appendChild(badge);
 
   const meta = document.createElement("span");
   meta.className = "stock-log__item-meta";
-  const timeLabel = entry.createdAt?.toDate
-    ? entry.createdAt.toDate().toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
-    : "";
-  meta.textContent = `${entry.performedByEmail || "unknown"} · ${timeLabel}`;
-  el.appendChild(meta);
+  const timeLabel = date ? date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : "";
+  meta.textContent = `${entry.performedByEmail || "unknown"}${timeLabel ? " · " + timeLabel : ""}`;
+  bottom.appendChild(meta);
+  el.appendChild(bottom);
 
   return el;
 }

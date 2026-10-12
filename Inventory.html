@@ -186,12 +186,6 @@
              import via CSV — all gated behind role checks in Inventory.js.
              ================================================================ -->
         <div class="shared-toolbar">
-            <button type="button" class="btn-primary" id="scan-barcode-btn">
-                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                    <path d="M4 5V19M8 5V19M12 5V12M12 15V19M16 5V19M20 5V19" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-                </svg>
-                Scan Barcode
-            </button>
             <button type="button" class="btn-outline" id="stock-log-btn">
                 <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                     <path d="M4 6H20M4 12H20M4 18H14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
@@ -541,54 +535,6 @@
     </div>
 </div>
 
-<!-- ================================================================
-     BARCODE SCANNER MODAL (both roles — Record Sale / Stock Count)
-     ================================================================ -->
-<div class="modal-overlay" id="scanner-modal-overlay" hidden>
-    <div class="modal modal--wide">
-        <div class="modal__header">
-            <h3>Scan Barcode</h3>
-            <button type="button" class="modal__close" id="scanner-modal-close" aria-label="Close">
-                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                    <path d="M6 6L18 18M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-                </svg>
-            </button>
-        </div>
-        <div class="modal__body">
-            <div class="tab-row" id="scanner-mode-toggle">
-                <button type="button" class="tab-row__btn is-active" data-mode="sale">Record Sale (Deduct)</button>
-                <button type="button" class="tab-row__btn" data-mode="count">Stock Count (Set Exact)</button>
-            </div>
-
-            <div class="form-field">
-                <label for="scanner-barcode-input">Scan or type a barcode, then press Enter</label>
-                <input type="text" id="scanner-barcode-input" autocomplete="off" placeholder="Ready to scan...">
-            </div>
-
-            <p class="form-status" id="scanner-status" hidden></p>
-            <button type="button" class="btn-primary" id="scanner-add-new-btn" hidden>+ Add as New Product</button>
-
-            <div class="scanner-found" id="scanner-found" hidden>
-                <img class="scanner-found__thumb" id="scanner-found-thumb" src="" alt="">
-                <div class="scanner-found__info">
-                    <strong id="scanner-found-name"></strong>
-                    <span id="scanner-found-current-stock"></span>
-                </div>
-                <div class="scanner-found__action">
-                    <input type="number" id="scanner-qty-input" min="1" step="1" value="1">
-                    <button type="button" class="btn-primary" id="scanner-action-btn">Record Sale</button>
-                </div>
-            </div>
-
-            <div class="scanner-log" id="scanner-log">
-                <p class="scanner-log__empty">Scanned items will appear here.</p>
-            </div>
-        </div>
-        <div class="modal__footer">
-            <button type="button" class="btn-outline" id="scanner-modal-done">Done</button>
-        </div>
-    </div>
-</div>
 
 <!-- ================================================================
      STOCK MOVEMENT LOG (both roles) — read-only audit trail
@@ -604,7 +550,14 @@
             </button>
         </div>
         <div class="modal__body">
-            <p class="stock-log__subtitle">Most recent 100 stock changes — sales, stock counts, and manual edits.</p>
+            <p class="stock-log__subtitle">Most recent 100 stock changes — sales, returns, stock counts, and manual edits.</p>
+            <div class="tab-row stock-log__filters" id="stock-log-filters">
+                <button type="button" class="tab-row__btn is-active" data-filter="all">All</button>
+                <button type="button" class="tab-row__btn" data-filter="sale">Sales</button>
+                <button type="button" class="tab-row__btn" data-filter="return">Returns</button>
+                <button type="button" class="tab-row__btn" data-filter="count">Counts</button>
+                <button type="button" class="tab-row__btn" data-filter="manual_edit">Edits</button>
+            </div>
             <div class="stock-log-list" id="stock-log-list">
                 <p class="scanner-log__empty">Loading...</p>
             </div>
