@@ -224,6 +224,17 @@
             </button>
             <input type="file" id="csv-file-input" accept=".csv" hidden>
         </div>
+        <script>
+            // Show the admin buttons immediately on reload. The role is
+            // remembered for this tab, so there's no need to wait for the
+            // page scripts to confirm it (they still re-check afterwards,
+            // and hide nothing for admins).
+            try {
+                if (sessionStorage.getItem("almares_role") === "admin") {
+                    document.getElementById("admin-toolbar").hidden = false;
+                }
+            } catch (e) { /* storage blocked: the normal path still shows it */ }
+        </script>
 
         <div class="inventory-toolbar">
             <div class="search-field">
