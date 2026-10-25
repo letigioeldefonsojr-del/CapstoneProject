@@ -241,10 +241,16 @@ service cloud.firestore {
     // after the order. Only the rider handling that order may write it, and
     // only while it is on the way; staff read it; it is deleted when done.
     match /driverLocations/{orderId} {
-      allow read: if isAdmin() || isEmployee() || isDriver();
+      // A rider can hide their location from specific accounts (hiddenFrom).
+      // resource == null lets "no location yet" read as empty, not denied.
+      allow read: if isDriver() ||
+        ((isAdmin() || isEmployee()) &&
+         (resource == null || !(request.auth.uid in resource.data.get('hiddenFrom', []))));
       allow create, update: if isDriver() &&
         request.resource.data.driverUid == request.auth.uid &&
-        request.resource.data.keys().hasOnly(['orderId', 'driverUid', 'lat', 'lng', 'accuracy', 'updatedAt']) &&
+        request.resource.data.keys().hasOnly(['orderId', 'driverUid', 'lat', 'lng', 'accuracy', 'hiddenFrom', 'updatedAt']) &&
+        request.resource.data.get('hiddenFrom', []) is list &&
+        request.resource.data.get('hiddenFrom', []).size() <= 40 &&
         get(/databases/$(database)/documents/orders/$(orderId)).data.status == 'on_the_way' &&
         get(/databases/$(database)/documents/orders/$(orderId)).data.get('driverUid', '') == request.auth.uid;
       allow delete: if isAdmin() || (isDriver() && resource.data.driverUid == request.auth.uid);

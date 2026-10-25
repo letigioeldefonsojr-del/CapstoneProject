@@ -3332,3 +3332,13 @@ body.has-share-bar { padding-bottom: 76px; }
     .orders-search-bar .search-field { flex: 1 1 100%; max-width: none; }
     .orders-search-bar .feedback-sort-select { flex: 1 1 140px; min-width: 0; max-width: 100%; }
 }
+
+/* Rider: "hide my location from…" control */
+.rider-share-bar { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; }
+.rider-share-bar__btn { border: 1px solid rgba(255,255,255,.7); background: rgba(255,255,255,.18); color: #fff; font-weight: 700; font-size: 13px; padding: 6px 12px; border-radius: 999px; cursor: pointer; }
+.rider-hide-panel { position: fixed; left: 8px; right: 8px; bottom: 84px; z-index: 90; max-height: 55vh; overflow-y: auto; box-sizing: border-box; padding: 14px; border-radius: 14px; background: #fff; color: #1a1a1a; box-shadow: 0 10px 30px rgba(0,0,0,.3); }
+.rider-hide-panel__title { margin: 0 0 4px; font-weight: 800; font-size: 15px; }
+.rider-hide-panel__note { margin: 0 0 10px; font-size: 12.5px; color: #666; }
+.rider-hide-panel__row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid #eee; font-size: 14px; overflow-wrap: anywhere; }
+.rider-hide-panel__row input { width: 20px; height: 20px; flex: none; }
+@media (min-width: 721px) { .rider-hide-panel { left: auto; width: 360px; right: 12px; } }

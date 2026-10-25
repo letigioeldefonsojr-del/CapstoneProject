@@ -84,7 +84,6 @@ document.addEventListener("sidebar:ready", (event) => {
   wireSearch();
   wireSort();
   wireUndeliverableModal();
-  startRiderLocationListener(); // everyone on this page sees the live rider pins
   document.getElementById("orders-show-older-btn").addEventListener("click", toggleFullHistory);
   updateShowOlderButton();
   loadOrders();
@@ -302,6 +301,7 @@ function wireSort() {
 function render() {
   document.getElementById("cancelled-subtabs").hidden = activeTab !== "cancelled";
   loadRiderNames(); // real rider names; redraws once if any arrive
+  startRiderLocationListener(); // live rider pins (follows the visible orders)
   syncRiderSharing(); // riders: start/stop sharing their location for their deliveries
 
   // Remember which order was expanded before rebuilding the table, so
@@ -989,6 +989,23 @@ let lastWriteAt = 0;
 let shareBarEl = null;
 const sharedOrderIds = new Set();
 
+// Accounts the rider has temporarily hidden their live location from. Kept for
+// this browser tab only and cleared once the rider has no deliveries left.
+const HIDDEN_KEY = "almares_loc_hidden";
+const hiddenFromUids = new Set(readHiddenList());
+let hidePanelEl = null;
+
+function readHiddenList() {
+  try { return JSON.parse(sessionStorage.getItem(HIDDEN_KEY) || "[]").filter((v) => typeof v === "string"); }
+  catch (error) { return []; }
+}
+function saveHiddenList() {
+  try {
+    if (hiddenFromUids.size) sessionStorage.setItem(HIDDEN_KEY, JSON.stringify([...hiddenFromUids]));
+    else sessionStorage.removeItem(HIDDEN_KEY);
+  } catch (error) { /* private mode: it just won't survive a reload */ }
+}
+
 function myActiveDeliveries() {
   const uid = auth.currentUser?.uid;
   if (!uid) return [];
@@ -999,14 +1016,80 @@ function showShareBar(message, kind) {
   if (!shareBarEl) {
     shareBarEl = document.createElement("div");
     shareBarEl.className = "rider-share-bar";
+    const text = document.createElement("span");
+    text.className = "rider-share-bar__text";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "rider-share-bar__btn";
+    btn.addEventListener("click", toggleHidePanel);
+    shareBarEl.append(text, btn);
     document.body.appendChild(shareBarEl);
     document.body.classList.add("has-share-bar"); // leaves room so the bar never covers content
   }
   shareBarEl.dataset.kind = kind;
-  shareBarEl.textContent = message;
+  shareBarEl.querySelector(".rider-share-bar__text").textContent = message;
+  shareBarEl.querySelector(".rider-share-bar__btn").textContent =
+    hiddenFromUids.size ? `Hidden from ${hiddenFromUids.size} ▾` : "Hide from… ▾";
+}
+
+// Dropdown checklist: untick/tick who may see this rider's live location.
+async function toggleHidePanel() {
+  if (hidePanelEl) { closeHidePanel(); return; }
+  hidePanelEl = document.createElement("div");
+  hidePanelEl.className = "rider-hide-panel";
+  hidePanelEl.innerHTML = `
+    <p class="rider-hide-panel__title">Hide my live location from:</p>
+    <p class="rider-hide-panel__note">Temporary. Everyone can see you by default, and this resets after your deliveries.</p>
+    <div class="rider-hide-panel__list">Loading…</div>`;
+  document.body.appendChild(hidePanelEl);
+  const list = hidePanelEl.querySelector(".rider-hide-panel__list");
+
+  try {
+    const [admins, employees] = await Promise.all([
+      getDocs(collection(db, "admins")),
+      getDocs(collection(db, "employees"))
+    ]);
+    const me = auth.currentUser?.uid;
+    const people = [];
+    admins.forEach((d) => people.push({ uid: d.id, role: "Admin", label: d.data().email || d.data().name || d.id }));
+    employees.forEach((d) => {
+      const data = d.data();
+      if (d.id === me || data.isDriver === true || data.approved === false) return;
+      people.push({ uid: d.id, role: "Employee", label: data.email || data.firstName || d.id });
+    });
+    if (!hidePanelEl) return;
+    list.textContent = "";
+    if (people.length === 0) { list.textContent = "No other accounts found."; return; }
+    people.forEach((person) => {
+      const row = document.createElement("label");
+      row.className = "rider-hide-panel__row";
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = hiddenFromUids.has(person.uid);
+      box.addEventListener("change", () => {
+        if (box.checked) hiddenFromUids.add(person.uid); else hiddenFromUids.delete(person.uid);
+        saveHiddenList();
+        showShareBar(shareBarEl.querySelector(".rider-share-bar__text").textContent, shareBarEl.dataset.kind);
+        writeLiveLocations(true);
+      });
+      const text = document.createElement("span");
+      text.textContent = `${person.label} (${person.role})`;
+      row.append(box, text);
+      list.appendChild(row);
+    });
+  } catch (error) {
+    console.error("Couldn't load the account list:", error);
+    list.textContent = "Couldn't load the account list.";
+  }
+}
+
+function closeHidePanel() {
+  if (hidePanelEl) hidePanelEl.remove();
+  hidePanelEl = null;
 }
 
 function hideShareBar() {
+  closeHidePanel();
   if (shareBarEl) shareBarEl.remove();
   shareBarEl = null;
   document.body.classList.remove("has-share-bar");
@@ -1037,6 +1120,7 @@ function writeLiveLocations(force) {
       lat: latestPos.lat,
       lng: latestPos.lng,
       accuracy: latestPos.accuracy,
+      hiddenFrom: [...hiddenFromUids].slice(0, 40),
       updatedAt: serverTimestamp()
     }).catch((error) => console.error("Couldn't share location:", error));
   });
@@ -1088,27 +1172,57 @@ function syncRiderSharing() {
     }
   });
 
-  if (active.length === 0) { stopLocationWatch(); return; }
+  if (active.length === 0) {
+    stopLocationWatch();
+    if (hiddenFromUids.size) { hiddenFromUids.clear(); saveHiddenList(); } // temporary: reset
+    return;
+  }
   const hadNew = active.some((o) => !sharedOrderIds.has(o.id));
   active.forEach((o) => sharedOrderIds.add(o.id));
   startLocationWatch(active.length);
   if (hadNew) writeLiveLocations(true);
 }
 
-// ---- Admin/staff side: see where the rider is ----
+// ---- Viewer side: see where the rider is ----
+// One listener per on-the-way delivery (not the whole collection): the rules
+// can hide a rider's location from specific accounts, and a collection-wide
+// query would be rejected outright if even one document were hidden.
+const locationUnsubs = new Map();
+let locationTickerStarted = false;
+
 function startRiderLocationListener() {
-  onSnapshot(
-    collection(db, LOCATIONS_COLLECTION),
-    (snap) => {
-      riderLocations.clear();
-      snap.forEach((d) => riderLocations.set(d.id, d.data()));
-      refreshRiderTracks();
-    },
-    (error) => console.error("Couldn't load rider locations:", error)
+  if (!locationTickerStarted) {
+    locationTickerStarted = true;
+    setInterval(() => {
+      document.querySelectorAll(".order-detail__track[data-ts]").forEach(renderTrackAge);
+    }, 15000);
+  }
+  const wanted = new Set(
+    allOrders.filter((o) => o.status === "on_the_way" && !isPickupOrder(o)).map((o) => o.id)
   );
-  setInterval(() => {
-    document.querySelectorAll(".order-detail__track[data-ts]").forEach(renderTrackAge);
-  }, 15000);
+  locationUnsubs.forEach((unsub, id) => {
+    if (!wanted.has(id)) { unsub(); locationUnsubs.delete(id); riderLocations.delete(id); }
+  });
+  wanted.forEach((id) => {
+    if (locationUnsubs.has(id)) return;
+    const unsub = onSnapshot(
+      doc(db, LOCATIONS_COLLECTION, id),
+      (snap) => {
+        if (snap.exists()) riderLocations.set(id, snap.data()); else riderLocations.delete(id);
+        refreshRiderTracks();
+      },
+      (error) => {
+        // Permission denied = the rider hid their location from this account.
+        riderLocations.set(id, { hidden: true });
+        unsub();
+        // Try again in a while in case they un-hide.
+        setTimeout(() => { locationUnsubs.delete(id); riderLocations.delete(id); startRiderLocationListener(); }, 20000);
+        refreshRiderTracks();
+        if (error.code !== "permission-denied") console.error("Couldn't load rider location:", error);
+      }
+    );
+    locationUnsubs.set(id, unsub);
+  });
 }
 
 function refreshRiderTracks() {
@@ -1191,6 +1305,14 @@ function fillRiderTrack(box, order) {
   if (order.status === "on_the_way") {
     const live = riderLocations.get(order.id);
     title.textContent = "Rider location (live)";
+    if (live?.hidden) {
+      delete box.dataset.ts;
+      note.classList.remove("is-stale");
+      note.textContent = "The rider has turned off live location for your account.";
+      box.querySelector(".track-map")?.remove();
+      box.querySelector(".track-link")?.remove();
+      return;
+    }
     if (live) {
       box.dataset.ts = String(live.updatedAt?.toMillis?.() || Date.now());
       renderTrackAge(box);
