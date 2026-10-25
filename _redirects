@@ -1,2 +1,4 @@
 /       /Login   302
 /Index  /Login   301
+/Forecast  /StockMonitoring  301
+/Forecast.html  /StockMonitoring  301

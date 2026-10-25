@@ -7,7 +7,7 @@ import { kMeansCluster, normalizeFeatures } from "./KMeans.js";
 import { sendPromotionPushes } from "./PromotionPush.js";
 
 // ====================================================================
-// FORECAST — AI-assisted demand trend & restock recommendations
+// STOCK MONITORING — demand trend & restock recommendations
 // ----------------------------------------------------------------
 // NOT traditional sales-history forecasting — this store has no
 // dedicated point-of-sale transaction log. What it uses instead is
@@ -46,10 +46,6 @@ const STOCK_MOVEMENTS_COLLECTION = "stockMovements";
 const ORDERS_COLLECTION = "orders";
 const CLUSTER_COUNT = 3; // Fast-Moving / Moderate / Slow-Moving
 
-// UPDATE THIS after deploying the Worker (see gemini-worker.js) — it'll
-// be shown in the Cloudflare dashboard right after deployment, looks
-// like "https://your-worker-name.your-subdomain.workers.dev"
-const GEMINI_WORKER_URL = "https://gemini-forecast-proxy.eldefonsojrletigio.workers.dev";
 
 let allProducts = [];
 let velocityByProductId = new Map();
@@ -436,10 +432,6 @@ function renderResults(clustered, productsWithoutData) {
 
   container.appendChild(buildSummaryCards(clustered, restockRecommended, possibleOverstock, productsWithoutData));
 
-  const aiPanel = buildAiInsightPanel();
-  container.insertBefore(aiPanel, container.firstChild);
-  loadAiInsight(clustered, restockRecommended, possibleOverstock, allTracked.length, productsWithoutData.length, aiPanel);
-
   if (bestSellersOut.length > 0) {
     container.appendChild(buildSection(
       "Best Sellers Out of Stock",
@@ -640,107 +632,4 @@ function buildNoDataSection(productsWithoutData) {
     <p class="forecast-section__subtitle">${productsWithoutData.length} product${productsWithoutData.length === 1 ? " hasn't" : "s haven't"} been sold through the barcode scanner yet, so there's no real velocity to compute. They'll appear in the sections above automatically once they start selling.</p>
   `;
   return section;
-}
-
-// ---- AI Insight (Gemini, via Cloud Function) ----------------------
-// Calls the secured Cloud Function (functions/index.js) with the
-// already-computed forecast summary — never raw data, never an API
-// key sitting anywhere in this file. Loads independently of the rest
-// of the page (fire-and-forget after the main sections render), so a
-// slow or failed AI response never blocks or breaks anything else.
-function buildAiInsightPanel() {
-  const panel = document.createElement("div");
-  panel.className = "panel forecast-ai-panel";
-  panel.innerHTML = `
-    <div class="forecast-ai-panel__icon">
-      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <path d="M12 3L13.8 8.2L19 10L13.8 11.8L12 17L10.2 11.8L5 10L10.2 8.2L12 3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
-        <path d="M18.5 15L19.3 17.2L21.5 18L19.3 18.8L18.5 21L17.7 18.8L15.5 18L17.7 17.2L18.5 15Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
-      </svg>
-    </div>
-    <div class="forecast-ai-panel__body">
-      <span class="forecast-ai-panel__label">AI Insight</span>
-      <p class="forecast-ai-panel__text">Generating summary...</p>
-    </div>
-  `;
-  return panel;
-}
-
-async function loadAiInsight(clustered, restockRecommended, possibleOverstock, totalTracked, noDataCount, panel) {
-  const textEl = panel.querySelector(".forecast-ai-panel__text");
-
-  try {
-    const response = await fetch(GEMINI_WORKER_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        fastMovers: clustered.fast.slice(0, 8).map((p) => ({
-          name: p.product.name || "Unnamed product",
-          velocity: Number(p.velocity.toFixed(1)),
-          currentStock: p.currentStock
-        })),
-        moderateMovers: clustered.moderate.slice(0, 5).map((p) => ({
-          name: p.product.name || "Unnamed product",
-          velocity: Number(p.velocity.toFixed(1))
-        })),
-        slowMovers: clustered.slow.slice(0, 5).map((p) => ({
-          name: p.product.name || "Unnamed product",
-          velocity: Number(p.velocity.toFixed(2)),
-          currentStock: p.currentStock
-        })),
-        restockRecommended: restockRecommended.slice(0, 8).map((p) => ({
-          name: p.product.name || "Unnamed product",
-          currentStock: p.currentStock,
-          daysUntilStockout: p.daysUntilStockout != null ? Number(p.daysUntilStockout.toFixed(1)) : null,
-          velocityTier: p.velocityTier
-        })),
-        possibleOverstock: possibleOverstock.slice(0, 8).map((p) => ({
-          name: p.product.name || "Unnamed product",
-          currentStock: p.currentStock,
-          daysOfSupply: p.daysUntilStockout != null ? Number(p.daysUntilStockout.toFixed(0)) : null
-        })),
-        totalTracked,
-        noDataCount
-      })
-    });
-
-    if (!response.ok) {
-      const detail = await response.json().catch(() => null);
-      throw new Error(`Worker returned ${response.status}: ${JSON.stringify(detail)}`);
-    }
-
-    const result = await response.json();
-    renderAiSections(textEl, result.sections);
-  } catch (error) {
-    console.error("Couldn't load AI insight:", error);
-    // Fails quietly — the rest of the forecast page (the real
-    // computed data) already rendered and works fine on its own.
-    panel.hidden = true;
-  }
-}
-
-function renderAiSections(textEl, sections) {
-  textEl.innerHTML = "";
-
-  const parts = [
-    { key: "health", label: "Inventory Health" },
-    { key: "urgent", label: "Urgent Action" },
-    { key: "opportunity", label: "Opportunity" },
-    { key: "slowStock", label: "Slow-Moving Stock" }
-  ];
-
-  parts.forEach(({ key, label }) => {
-    const value = sections?.[key];
-    if (!value) return;
-
-    const block = document.createElement("div");
-    block.className = "forecast-ai-panel__section";
-    block.innerHTML = `
-      <h4 class="forecast-ai-panel__section-label"></h4>
-      <p class="forecast-ai-panel__section-text"></p>
-    `;
-    block.querySelector(".forecast-ai-panel__section-label").textContent = label;
-    block.querySelector(".forecast-ai-panel__section-text").textContent = value;
-    textEl.appendChild(block);
-  });
 }
