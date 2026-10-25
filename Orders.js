@@ -992,6 +992,7 @@ function showShareBar(message, kind) {
     shareBarEl = document.createElement("div");
     shareBarEl.className = "rider-share-bar";
     document.body.appendChild(shareBarEl);
+    document.body.classList.add("has-share-bar"); // leaves room so the bar never covers content
   }
   shareBarEl.dataset.kind = kind;
   shareBarEl.textContent = message;
@@ -1000,6 +1001,7 @@ function showShareBar(message, kind) {
 function hideShareBar() {
   if (shareBarEl) shareBarEl.remove();
   shareBarEl = null;
+  document.body.classList.remove("has-share-bar");
 }
 
 async function requestWakeLock() {
