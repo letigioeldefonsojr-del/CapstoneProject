@@ -741,9 +741,7 @@ function wireAdminControls() {
     }
   });
 
-  document.getElementById("bulk-import-btn").addEventListener("click", () => {
-    document.getElementById("csv-file-input").click();
-  });
+  document.getElementById("bulk-import-btn").addEventListener("click", showCsvGuide);
   document.getElementById("csv-file-input").addEventListener("change", handleCsvFileSelected);
   document.getElementById("csv-ignore-qty").addEventListener("change", () => {
     if (rawCsvRows.length > 0) remapAndRenderCsvPreview();
@@ -1267,6 +1265,81 @@ function findMissingHeaders(actualFields) {
   return EXPECTED_CSV_HEADERS.filter((expected) => !normalizedActual.includes(expected));
 }
 
+// ---- Instructions shown before a CSV is chosen ----------------------
+const CSV_GUIDE_ROWS = [
+  ["sku", "Required column", "Product code or barcode number. Can be left empty on a row."],
+  ["description", "Required column", "The product name. A row with no description is skipped."],
+  ["category", "Required column", "e.g. Canned Goods. A row with no category is skipped."],
+  ["principal", "Required column", "Brand or supplier. Can be left empty on a row."],
+  ["unit", "Required column", "e.g. pc, box, kg. Can be left empty on a row."],
+  ["qty", "Required column", "Stock on hand, whole number. Ignored when \"Ignore qty\" is ticked in the preview."],
+  ["qty 1", "Required column", "Extra quantity, whole number. Can be left empty on a row."],
+  ["qty 2", "Required column", "Extra quantity, whole number. Can be left empty on a row."],
+  ["unit_price", "Required column", "Selling price per unit, numbers only (e.g. 45.50)."],
+  ["unit_ws", "Required column", "Wholesale price per unit, numbers only. Can be left empty on a row."],
+  ["selling_type", "Optional column", "ream, bulk or piece. If the column is missing, nothing is set."]
+];
+
+function downloadCsvTemplate() {
+  const headers = ["sku", "description", "category", "principal", "unit", "qty", "qty 1", "qty 2", "unit_price", "unit_ws", "selling_type"];
+  const sample = ["4800010001234", "Sample Product 100g", "Canned Goods", "Sample Brand", "pc", "24", "", "", "45.50", "42.00", "piece"];
+  const blob = new Blob([headers.join(",") + "\r\n" + sample.join(",") + "\r\n"], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "almares-products-template.csv";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function showCsvGuide() {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay confirm-overlay";
+  const rowsHtml = CSV_GUIDE_ROWS.map(([name, kind, note]) => `
+    <tr>
+      <td><code>${name}</code></td>
+      <td class="csv-guide__kind${kind.startsWith("Optional") ? " is-optional" : ""}">${kind}</td>
+      <td>${note}</td>
+    </tr>`).join("");
+  overlay.innerHTML = `
+    <div class="modal confirm-dialog csv-guide">
+      <div class="modal__header"><h3>Before you import a CSV</h3></div>
+      <div class="modal__body">
+        <p class="csv-guide__lead">The first row of your file must contain these column names, spelled exactly like this. If any required column is missing, the file is rejected.</p>
+        <div class="csv-guide__table-wrap">
+          <table class="csv-guide__table">
+            <thead><tr><th>Column</th><th></th><th>What to put</th></tr></thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+        <ul class="csv-guide__tips">
+          <li>Save the file as <strong>.csv</strong> (Excel: Save As → CSV).</li>
+          <li>Column order doesn't matter. Capital letters don't matter.</li>
+          <li>You'll see a preview and can cancel before anything is saved.</li>
+        </ul>
+      </div>
+      <div class="modal__footer csv-guide__footer">
+        <button type="button" class="btn-outline" data-act="template">Download template</button>
+        <button type="button" class="btn-outline" data-act="cancel">Cancel</button>
+        <button type="button" class="btn-primary" data-act="choose">Choose CSV file</button>
+      </div>
+    </div>`;
+
+  const close = () => { overlay.remove(); document.removeEventListener("keydown", onKey); };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) { close(); return; }
+    const act = e.target.closest("[data-act]")?.dataset.act;
+    if (act === "template") downloadCsvTemplate();
+    if (act === "cancel") close();
+    if (act === "choose") { close(); document.getElementById("csv-file-input").click(); }
+  });
+  document.addEventListener("keydown", onKey);
+  document.body.appendChild(overlay);
+}
+
 function handleCsvFileSelected(event) {
   const file = event.target.files[0];
   event.target.value = ""; // allow re-selecting the same file later
@@ -1314,7 +1387,7 @@ function showCsvHeaderError(missingHeaders) {
   document.getElementById("csv-confirm-import").disabled = true;
 
   const el = document.getElementById("csv-status");
-  el.textContent = `Please upload the correct CSV. Missing column${missingHeaders.length === 1 ? "" : "s"}: ${missingHeaders.join(", ")}`;
+  el.textContent = `Please upload the correct CSV. Missing column${missingHeaders.length === 1 ? "" : "s"}: ${missingHeaders.join(", ")}. Required: ${EXPECTED_CSV_HEADERS.join(", ")}.`;
   el.dataset.kind = "error";
   el.hidden = false;
 }

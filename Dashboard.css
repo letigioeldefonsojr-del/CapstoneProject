@@ -3342,3 +3342,20 @@ body.has-share-bar { padding-bottom: 76px; }
 .rider-hide-panel__row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid #eee; font-size: 14px; overflow-wrap: anywhere; }
 .rider-hide-panel__row input { width: 20px; height: 20px; flex: none; }
 @media (min-width: 721px) { .rider-hide-panel { left: auto; width: 360px; right: 12px; } }
+
+/* Bulk import: instructions dialog */
+.csv-guide { max-width: 640px; width: calc(100vw - 32px); max-height: calc(100vh - 40px); display: flex; flex-direction: column; }
+.csv-guide .modal__body { overflow-y: auto; }
+.csv-guide__lead { margin: 0 0 12px; font-size: 14px; }
+.csv-guide__table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+.csv-guide__table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.csv-guide__table th, .csv-guide__table td { padding: 8px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+.csv-guide__table tr:last-child td { border-bottom: none; }
+.csv-guide__table code { font-weight: 700; background: rgba(0,0,0,.06); padding: 1px 6px; border-radius: 6px; white-space: nowrap; }
+.csv-guide__kind { white-space: nowrap; font-weight: 700; color: var(--brand-green); }
+.csv-guide__kind.is-optional { color: var(--muted); font-weight: 600; }
+.csv-guide__tips { margin: 12px 0 0; padding-left: 18px; font-size: 13px; color: var(--muted); }
+.csv-guide__footer { flex-wrap: wrap; gap: 8px; }
+@media (max-width: 600px) { .csv-guide__footer button { flex: 1 1 100%; } }
+.confirm-overlay .confirm-dialog.csv-guide { max-width: 700px; width: calc(100vw - 32px); }
+.csv-guide__footer { justify-content: flex-end; }
