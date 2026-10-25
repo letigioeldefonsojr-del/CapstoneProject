@@ -123,7 +123,10 @@ service cloud.firestore {
          // Drivers: delivery steps only (on the way, delivered, undeliverable).
          (isDriver() &&
           request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['status', 'isPaid', 'deliveryIssueReason', 'driverUid', 'driverEmail', 'driverName']) &&
+            .hasOnly(['status', 'isPaid', 'deliveryIssueReason', 'driverUid', 'driverEmail', 'driverName',
+                      'onTheWayLocation', 'deliveredLocation']) &&
+          request.resource.data.get('onTheWayLocation', {'lat': 0, 'lng': 0, 'accuracy': 0, 'at': 0}).keys().hasOnly(['lat', 'lng', 'accuracy', 'at']) &&
+          request.resource.data.get('deliveredLocation', {'lat': 0, 'lng': 0, 'accuracy': 0, 'at': 0}).keys().hasOnly(['lat', 'lng', 'accuracy', 'at']) &&
           request.resource.data.get('driverName', '') is string &&
           request.resource.data.get('driverName', '').size() <= 60 &&
           // The driver record must be the signed-in driver's own (no spoofing).
@@ -233,6 +236,18 @@ service cloud.firestore {
     // pattern as loginAttempts/otpVerifications.
     match /resetEmailAttempts/{email} {
       allow read, write: if true;
+    }
+    // Live rider location while a delivery is on the way. Each doc is named
+    // after the order. Only the rider handling that order may write it, and
+    // only while it is on the way; staff read it; it is deleted when done.
+    match /driverLocations/{orderId} {
+      allow read: if isAdmin() || isEmployee() || isDriver();
+      allow create, update: if isDriver() &&
+        request.resource.data.driverUid == request.auth.uid &&
+        request.resource.data.keys().hasOnly(['orderId', 'driverUid', 'lat', 'lng', 'accuracy', 'updatedAt']) &&
+        get(/databases/$(database)/documents/orders/$(orderId)).data.status == 'on_the_way' &&
+        get(/databases/$(database)/documents/orders/$(orderId)).data.get('driverUid', '') == request.auth.uid;
+      allow delete: if isAdmin() || (isDriver() && resource.data.driverUid == request.auth.uid);
     }
     // Per-user read/cleared notification tracking — private to each
     // account (moved off localStorage so it survives a domain

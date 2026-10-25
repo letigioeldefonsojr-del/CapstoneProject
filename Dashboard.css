@@ -3293,3 +3293,11 @@ body.page-cashier .pos-change.has-change {
 }
 .order-detail__rider strong { font-weight: 800; color: var(--brand-green); }
 .order-detail__rider .order-detail__rider--none { color: var(--muted); font-weight: 600; }
+
+/* Rider location (live + proof of delivery) */
+.order-detail__track { margin: 12px 0; padding: 12px 14px; border-radius: 12px; background: rgba(0,0,0,.04); }
+.order-detail__track .track-title { margin: 0 0 4px; font-weight: 700; font-size: 15px; }
+.order-detail__track .track-note { margin: 0 0 8px; font-size: 14px; }
+.order-detail__track .track-note.is-stale { color: #b45309; font-weight: 600; }
+.rider-share-bar { position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 80; padding: 12px 14px; border-radius: 12px; font-size: 14px; font-weight: 600; color: #fff; background: #15803d; box-shadow: 0 6px 20px rgba(0,0,0,.25); text-align: center; }
+.rider-share-bar[data-kind="warn"] { background: #b45309; }

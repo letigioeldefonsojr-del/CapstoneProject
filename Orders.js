@@ -1,6 +1,6 @@
 import { db, auth } from "./firebase-config.js";
 import {
-  collection, doc, getDoc, updateDoc, onSnapshot, query, where, Timestamp, serverTimestamp
+  collection, doc, getDoc, setDoc, deleteDoc, updateDoc, onSnapshot, query, where, Timestamp, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { confirmDialog } from "./ConfirmDialog.js";
 
@@ -84,6 +84,7 @@ document.addEventListener("sidebar:ready", (event) => {
   wireSearch();
   wireSort();
   wireUndeliverableModal();
+  if (!currentIsDriver) startRiderLocationListener(); // admin/staff: live rider pins
   document.getElementById("orders-show-older-btn").addEventListener("click", toggleFullHistory);
   updateShowOlderButton();
   loadOrders();
@@ -301,6 +302,7 @@ function wireSort() {
 function render() {
   document.getElementById("cancelled-subtabs").hidden = activeTab !== "cancelled";
   loadRiderNames(); // real rider names; redraws once if any arrive
+  syncRiderSharing(); // riders: start/stop sharing their location for their deliveries
 
   // Remember which order was expanded before rebuilding the table, so
   // a live update elsewhere doesn't silently collapse whatever the
@@ -716,6 +718,9 @@ function buildOrderDetailRow(order) {
       wrap.appendChild(riderLine);
     }
 
+    const track = buildRiderTrack(order);
+    if (track) wrap.appendChild(track);
+
     if (order.customerAddress || (toCoord(order.deliveryLat, 90) !== null && toCoord(order.deliveryLng, 180) !== null)) {
       wrap.appendChild(buildAddressMap(order));
     }
@@ -911,6 +916,304 @@ async function currentDriverStamp() {
   };
 }
 
+
+// ====================================================================
+// RIDER LOCATION
+// ----------------------------------------------------------------
+// Two things, both written by the rider's own phone:
+//  1) Snapshots saved on the order — where the rider was when they tapped
+//     "On the Way" (onTheWayLocation) and when they finished the delivery
+//     (deliveredLocation). Works every time, no background tracking needed.
+//  2) Live location while a delivery is on the way (driverLocations/{orderId}),
+//     sent every ~10 s. A website can only do this while the page is open and
+//     the screen is on — browsers pause it in the background — so the admin
+//     sees "Updated … ago" and a warning when the pin stops moving.
+// ====================================================================
+const LOCATIONS_COLLECTION = "driverLocations";
+const SHARE_INTERVAL_MS = 10000;
+const STALE_AFTER_MS = 2 * 60 * 1000;
+const riderLocations = new Map(); // orderId -> live location doc (admin/staff side)
+
+function positionToPlain(pos) {
+  return {
+    lat: Number(pos.coords.latitude.toFixed(6)),
+    lng: Number(pos.coords.longitude.toFixed(6)),
+    accuracy: Math.round(pos.coords.accuracy || 0),
+    at: Date.now()
+  };
+}
+
+// One-shot reading; resolves null if the phone can't or won't share.
+function readPosition(timeoutMs = 7000) {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve(positionToPlain(pos)),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 10000 }
+    );
+  });
+}
+
+// Riders only: a one-off reading saved on the order. Empty if unavailable.
+async function locationField(name) {
+  if (!currentIsDriver) return {};
+  const pos = await readPosition();
+  return pos ? { [name]: pos } : {};
+}
+
+function distanceMeters(a, b) {
+  const rad = (d) => (d * Math.PI) / 180;
+  const h = Math.sin(rad(b.lat - a.lat) / 2) ** 2 +
+    Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(rad(b.lng - a.lng) / 2) ** 2;
+  return 2 * 6371000 * Math.asin(Math.sqrt(h));
+}
+
+function formatDistance(m) {
+  return m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`;
+}
+
+// ---- Rider side: share live location while a delivery is on the way ----
+let geoWatchId = null;
+let wakeLock = null;
+let latestPos = null;
+let lastWriteAt = 0;
+let shareBarEl = null;
+const sharedOrderIds = new Set();
+
+function myActiveDeliveries() {
+  const uid = auth.currentUser?.uid;
+  if (!uid) return [];
+  return allOrders.filter((o) => o.status === "on_the_way" && !isPickupOrder(o) && o.driverUid === uid);
+}
+
+function showShareBar(message, kind) {
+  if (!shareBarEl) {
+    shareBarEl = document.createElement("div");
+    shareBarEl.className = "rider-share-bar";
+    document.body.appendChild(shareBarEl);
+  }
+  shareBarEl.dataset.kind = kind;
+  shareBarEl.textContent = message;
+}
+
+function hideShareBar() {
+  if (shareBarEl) shareBarEl.remove();
+  shareBarEl = null;
+}
+
+async function requestWakeLock() {
+  try {
+    if ("wakeLock" in navigator && !wakeLock) {
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release", () => { wakeLock = null; });
+    }
+  } catch (error) { /* not supported or refused: tracking still works while the screen is on */ }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && geoWatchId !== null) requestWakeLock();
+});
+
+function writeLiveLocations(force) {
+  const uid = auth.currentUser?.uid;
+  if (!uid || !latestPos) return;
+  if (!force && Date.now() - lastWriteAt < SHARE_INTERVAL_MS) return;
+  lastWriteAt = Date.now();
+  myActiveDeliveries().forEach((order) => {
+    setDoc(doc(db, LOCATIONS_COLLECTION, order.id), {
+      orderId: order.id,
+      driverUid: uid,
+      lat: latestPos.lat,
+      lng: latestPos.lng,
+      accuracy: latestPos.accuracy,
+      updatedAt: serverTimestamp()
+    }).catch((error) => console.error("Couldn't share location:", error));
+  });
+}
+
+function startLocationWatch(count) {
+  const label = `Sharing your location for ${count} deliver${count === 1 ? "y" : "ies"}. Keep this page open and the screen on.`;
+  if (geoWatchId !== null) { showShareBar(label, "ok"); return; }
+  if (!navigator.geolocation) {
+    showShareBar("This phone can't share its location.", "warn");
+    return;
+  }
+  showShareBar(label, "ok");
+  geoWatchId = navigator.geolocation.watchPosition(
+    (pos) => {
+      latestPos = positionToPlain(pos);
+      writeLiveLocations(false);
+      showShareBar(`Sharing your location for ${myActiveDeliveries().length || count} deliver${(myActiveDeliveries().length || count) === 1 ? "y" : "ies"}. Keep this page open and the screen on.`, "ok");
+    },
+    (error) => {
+      if (error.code === 1) {
+        showShareBar("Location is blocked. Allow location for this site in Chrome so the admin can see where you are.", "warn");
+      }
+    },
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 }
+  );
+  requestWakeLock();
+}
+
+function stopLocationWatch() {
+  if (geoWatchId !== null) navigator.geolocation.clearWatch(geoWatchId);
+  geoWatchId = null;
+  latestPos = null;
+  if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+  hideShareBar();
+}
+
+// Called on every render: starts/stops sharing to match this rider's open
+// deliveries, and removes the live pin of any delivery that has finished.
+function syncRiderSharing() {
+  if (!currentIsDriver) return;
+  const active = myActiveDeliveries();
+  const activeIds = new Set(active.map((o) => o.id));
+
+  sharedOrderIds.forEach((id) => {
+    if (!activeIds.has(id)) {
+      deleteDoc(doc(db, LOCATIONS_COLLECTION, id)).catch(() => {});
+      sharedOrderIds.delete(id);
+    }
+  });
+
+  if (active.length === 0) { stopLocationWatch(); return; }
+  const hadNew = active.some((o) => !sharedOrderIds.has(o.id));
+  active.forEach((o) => sharedOrderIds.add(o.id));
+  startLocationWatch(active.length);
+  if (hadNew) writeLiveLocations(true);
+}
+
+// ---- Admin/staff side: see where the rider is ----
+function startRiderLocationListener() {
+  onSnapshot(
+    collection(db, LOCATIONS_COLLECTION),
+    (snap) => {
+      riderLocations.clear();
+      snap.forEach((d) => riderLocations.set(d.id, d.data()));
+      refreshRiderTracks();
+    },
+    (error) => console.error("Couldn't load rider locations:", error)
+  );
+  setInterval(() => {
+    document.querySelectorAll(".order-detail__track[data-ts]").forEach(renderTrackAge);
+  }, 15000);
+}
+
+function refreshRiderTracks() {
+  document.querySelectorAll(".order-detail__track").forEach((box) => {
+    const order = allOrders.find((o) => o.id === box.dataset.orderId);
+    if (order) fillRiderTrack(box, order);
+  });
+}
+
+function trackEl(box, tag, cls) {
+  let el = box.querySelector(`.${cls}`);
+  if (!el) {
+    el = document.createElement(tag);
+    el.className = cls;
+    box.appendChild(el);
+  }
+  return el;
+}
+
+function mapsPointUrl(p) {
+  return `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`;
+}
+
+// Embedded map: a route line when there are two points, otherwise one pin.
+function showTrackMap(box, from, to) {
+  const key = `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to ? `${to.lat},${to.lng}` : ""}`;
+  let wrap = box.querySelector(".track-map");
+  if (!wrap) {
+    wrap = document.createElement("div");
+    wrap.className = "order-detail__map-wrap track-map";
+    const iframe = document.createElement("iframe");
+    iframe.className = "order-detail__map";
+    iframe.loading = "lazy";
+    iframe.referrerPolicy = "no-referrer-when-downgrade";
+    iframe.title = "Rider location map";
+    wrap.appendChild(iframe);
+    box.appendChild(wrap);
+  }
+  if (wrap.dataset.key === key) return; // hasn't moved: don't reload the map
+  wrap.dataset.key = key;
+  wrap.querySelector("iframe").src = to
+    ? `https://maps.google.com/maps?saddr=${from.lat},${from.lng}&daddr=${to.lat},${to.lng}&output=embed`
+    : `https://maps.google.com/maps?q=${from.lat},${from.lng}&output=embed`;
+}
+
+function renderTrackAge(box) {
+  const note = box.querySelector(".track-note");
+  const ts = Number(box.dataset.ts);
+  if (!note || !ts) return;
+  const ms = Math.max(0, Date.now() - ts);
+  const secs = Math.round(ms / 1000);
+  const ago = secs < 60 ? `${secs} s ago` : `${Math.round(secs / 60)} min ago`;
+  const stale = ms > STALE_AFTER_MS;
+  note.textContent = stale
+    ? `Last seen ${ago}. The rider may have left the page or lost signal.`
+    : `Updated ${ago}`;
+  note.classList.toggle("is-stale", stale);
+}
+
+function buildRiderTrack(order) {
+  if (isPickupOrder(order)) return null;
+  if (order.status !== "on_the_way" && !order.deliveredLocation && !order.onTheWayLocation) return null;
+  const box = document.createElement("div");
+  box.className = "order-detail__track";
+  box.dataset.orderId = order.id;
+  fillRiderTrack(box, order);
+  return box;
+}
+
+function fillRiderTrack(box, order) {
+  const cust = toCoord(order.deliveryLat, 90) !== null && toCoord(order.deliveryLng, 180) !== null
+    ? { lat: toCoord(order.deliveryLat, 90), lng: toCoord(order.deliveryLng, 180) }
+    : null;
+  const start = order.onTheWayLocation && toCoord(order.onTheWayLocation.lat, 90) !== null ? order.onTheWayLocation : null;
+  const end = order.deliveredLocation && toCoord(order.deliveredLocation.lat, 90) !== null ? order.deliveredLocation : null;
+  const title = trackEl(box, "p", "track-title");
+  const note = trackEl(box, "p", "track-note");
+  let link = box.querySelector(".track-link");
+
+  if (order.status === "on_the_way") {
+    const live = riderLocations.get(order.id);
+    title.textContent = "Rider location (live)";
+    if (live) {
+      box.dataset.ts = String(live.updatedAt?.toMillis?.() || Date.now());
+      renderTrackAge(box);
+      showTrackMap(box, live, cust);
+      if (!link) { link = document.createElement("a"); link.className = "order-detail__map-link track-link"; link.target = "_blank"; link.rel = "noopener noreferrer"; box.appendChild(link); }
+      link.href = mapsPointUrl(live);
+      link.textContent = "Open rider location in Google Maps ↗";
+      return;
+    }
+    delete box.dataset.ts;
+    note.classList.remove("is-stale");
+    note.textContent = "Waiting for the rider's live location. Their phone must keep this page open with location allowed.";
+    if (start) showTrackMap(box, start, cust);
+    return;
+  }
+
+  // Finished delivery: show where the rider was.
+  delete box.dataset.ts;
+  note.classList.remove("is-stale");
+  if (!end && !start) { box.remove(); return; }
+  title.textContent = order.status === "delivered" ? "Delivery location" : "Where the rider was";
+  const parts = [];
+  if (end) {
+    parts.push(`${order.status === "delivered" ? "Delivered" : "Marked undeliverable"} here: ${formatDistance(cust ? distanceMeters(end, cust) : 0)}${cust ? " from the customer's pin" : ""}`.replace(/: 0 m$/, ""));
+  }
+  if (start) parts.push("Set off from the point where \"On the Way\" was tapped.");
+  note.textContent = parts.join(" ");
+  showTrackMap(box, start || end, start && end ? end : null);
+  if (!link) { link = document.createElement("a"); link.className = "order-detail__map-link track-link"; link.target = "_blank"; link.rel = "noopener noreferrer"; box.appendChild(link); }
+  link.href = mapsPointUrl(end || start);
+  link.textContent = "Open in Google Maps ↗";
+}
+
 // What the admin sees as the rider: the profile name when we have it, else
 // the name saved on the order, else the email (very old orders).
 const riderNamesByUid = new Map(); // uid -> real name from the employee profile
@@ -957,7 +1260,8 @@ async function handleMarkOnTheWay(order) {
 
   await updateDoc(doc(db, ORDERS_COLLECTION, order.id), {
     status: "on_the_way",
-    ...(await currentDriverStamp())
+    ...(await currentDriverStamp()),
+    ...(await locationField("onTheWayLocation"))
   });
   sendOrderNotification(order, "Order On The Way", `Your order #${shortOrderId(order.id)} is on its way!`);
   await reloadAfterAction();
@@ -976,7 +1280,8 @@ async function handleMarkDelivered(order) {
     status: "delivered",
     isPaid: true,
     // Orders already stamped when they went "on the way" keep that driver.
-    ...(order.driverUid ? {} : await currentDriverStamp())
+    ...(order.driverUid ? {} : await currentDriverStamp()),
+    ...(await locationField("deliveredLocation"))
   });
   sendOrderNotification(order, "Order Delivered", `Your order #${shortOrderId(order.id)} has been delivered. Thank you!`);
   await reloadAfterAction();
@@ -1061,7 +1366,8 @@ async function handleConfirmUndeliverable() {
     await updateDoc(doc(db, ORDERS_COLLECTION, pendingUndeliverableOrderId), {
       status: "undelivered",
       deliveryIssueReason: reason,
-      ...(affectedOrder?.driverUid ? {} : await currentDriverStamp())
+      ...(affectedOrder?.driverUid ? {} : await currentDriverStamp()),
+      ...(await locationField("deliveredLocation"))
     });
     if (affectedOrder) {
       sendOrderNotification(affectedOrder, "Delivery Issue", `There was a delivery issue with your order #${shortOrderId(affectedOrder.id)}: ${reason}`);
