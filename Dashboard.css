@@ -3242,3 +3242,27 @@ body.page-cashier .pos-change.has-change {
 @media (prefers-reduced-motion: reduce) {
     .confirm-overlay, .confirm-overlay .confirm-dialog { animation: none; }
 }
+
+
+/* Orders: pickup tag + extra order detail line */
+.order-tag {
+    display: inline-block;
+    margin-top: 4px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.5;
+    white-space: nowrap;
+}
+.order-tag--pickup {
+    background: #e7edfc;
+    color: var(--blue);
+    border: 1px solid rgba(37, 99, 235, 0.25);
+}
+.order-detail__address .order-tag { margin-top: 0; }
+.order-detail__meta {
+    font-size: 12.5px;
+    color: var(--muted);
+    margin: -4px 0 10px;
+}

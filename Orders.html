@@ -234,6 +234,12 @@
                 <option value="oldest">Oldest first</option>
             </select>
 
+            <select id="orders-fulfillment-select" class="feedback-sort-select" aria-label="Filter by pickup or delivery">
+                <option value="all">Pickup &amp; delivery</option>
+                <option value="pickup">Pickup only</option>
+                <option value="delivery">Delivery only</option>
+            </select>
+
             <select id="orders-group-select" class="feedback-sort-select">
                 <option value="none">No grouping</option>
                 <option value="week">Group by week</option>
@@ -301,6 +307,6 @@
 
 <script type="module" src="firebase-config.js"></script>
 <script type="module" src="Sidebar.js"></script>
-<script type="module" src="Orders.js?v=20261011e"></script>
+<script type="module" src="Orders.js?v=20261025a"></script>
 </body>
 </html>

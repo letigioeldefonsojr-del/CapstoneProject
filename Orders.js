@@ -57,6 +57,7 @@ const STATUS_META = {
 let allOrders = [];
 let searchQuery = "";
 let sortOrder = "newest"; // "newest" | "oldest"
+let fulfillmentFilter = "all"; // "all" | "pickup" | "delivery"
 let groupBy = "none"; // "none" | "week" | "month" | "year"
 let expandedGroupLabel; // undefined = never set yet (auto-expand first group); null = user deliberately collapsed everything (stay collapsed); a string = that specific group is open
 let activeTab = "all";
@@ -208,13 +209,18 @@ function ordersForActiveTab() {
     orders = !statuses ? allOrders : allOrders.filter((o) => statuses.includes(o.status));
   }
 
+  if (fulfillmentFilter !== "all") {
+    orders = orders.filter((o) => (isPickupOrder(o) ? "pickup" : "delivery") === fulfillmentFilter);
+  }
+
   if (searchQuery.trim()) {
     const q = searchQuery.trim().toLowerCase();
     orders = orders.filter((order) => {
       const idMatch = shortOrderId(order.id).toLowerCase().includes(q);
       const nameMatch = (order.customerName || "").toLowerCase().includes(q);
       const dateMatch = formatOrderDate(order).toLowerCase().includes(q);
-      return idMatch || nameMatch || dateMatch;
+      const branchMatch = isPickupOrder(order) && pickupBranchName(order).toLowerCase().includes(q);
+      return idMatch || nameMatch || dateMatch || branchMatch;
     });
   }
 
@@ -273,6 +279,13 @@ function wireSort() {
     sortOrder = event.target.value;
     render();
   });
+  const fulfillmentSelect = document.getElementById("orders-fulfillment-select");
+  if (fulfillmentSelect) {
+    fulfillmentSelect.addEventListener("change", (event) => {
+      fulfillmentFilter = event.target.value;
+      render();
+    });
+  }
   document.getElementById("orders-group-select").addEventListener("change", (event) => {
     groupBy = event.target.value;
     expandedGroupLabel = undefined; // let render() auto-pick the first group under the new scheme
@@ -420,6 +433,17 @@ function handleTargetOrderJump() {
   setTimeout(() => targetRow.classList.remove("is-highlighted-from-notification"), 3000);
 }
 
+// Orders from before "Pick Up In Store" have no fulfillmentType at all —
+// those are deliveries. Pickup orders also skip the delivery-only fields
+// (map pin, distance, delivery branch), so nothing below may assume those exist.
+function isPickupOrder(order) {
+  return order.fulfillmentType === "pickup";
+}
+
+function pickupBranchName(order) {
+  return typeof order.pickupBranch === "string" ? order.pickupBranch.trim() : "";
+}
+
 function shortOrderId(id) {
   return id.slice(0, 8).toUpperCase();
 }
@@ -532,6 +556,19 @@ function formatOrderDate(order) {
   return new Date(millis).toLocaleDateString(undefined, { dateStyle: "medium" });
 }
 
+// "Pickup · Main Branch" pill shown in the list and in the order details.
+function buildPickupTag(order) {
+  const tag = document.createElement("span");
+  tag.className = "order-tag order-tag--pickup";
+  const branch = pickupBranchName(order);
+  tag.textContent = branch ? `Pickup · ${branch}` : "Pickup";
+  return tag;
+}
+
+function formatPeso(value) {
+  return typeof value === "number" && Number.isFinite(value) ? `₱${value.toFixed(2)}` : null;
+}
+
 function buildOrderRow(order) {
   const row = document.createElement("tr");
   row.className = "inventory-row inventory-row--expandable";
@@ -557,6 +594,11 @@ function buildOrderRow(order) {
   const cells = row.querySelectorAll("td");
   cells[0].textContent = `#${shortOrderId(order.id)}`;
   cells[1].textContent = order.customerName || "—";
+  if (isPickupOrder(order)) {
+    const tag = buildPickupTag(order);
+    cells[1].appendChild(document.createElement("br"));
+    cells[1].appendChild(tag);
+  }
   cells[2].textContent = itemsSummary;
   cells[3].textContent = typeof order.total === "number" ? `₱${order.total.toFixed(2)}` : "—";
   cells[4].textContent = formatOrderDate(order);
@@ -581,35 +623,76 @@ function buildOrderDetailRow(order) {
   const wrap = document.createElement("div");
   wrap.className = "order-detail";
 
-  const addressLine = document.createElement("p");
-  addressLine.className = "order-detail__address";
-  const addressText = document.createElement("span");
-  addressText.className = "order-detail__address-text";
-  if (order.customerAddress) {
+  const pickup = isPickupOrder(order);
+
+  if (pickup) {
+    // Store pickup: no address, pin or map. (customerAddress may be empty or
+    // stale on these orders, so it is deliberately not shown.)
+    const pickupLine = document.createElement("p");
+    pickupLine.className = "order-detail__address";
+    const pickupText = document.createElement("span");
+    pickupText.className = "order-detail__address-text";
     const label = document.createElement("strong");
-    label.textContent = "Deliver to: ";
-    addressText.append(label, order.customerAddress);
+    label.textContent = "Pick up at: ";
+    const branch = pickupBranchName(order);
+    pickupText.append(label, branch || "Store");
+    pickupLine.appendChild(pickupText);
+    pickupLine.appendChild(buildPickupTag(order));
+    wrap.appendChild(pickupLine);
+
+    const na = document.createElement("p");
+    na.className = "order-detail__meta";
+    na.textContent = "Delivery address and map: N/A — Store Pickup. No delivery fee.";
+    wrap.appendChild(na);
   } else {
-    addressText.textContent = "No address on file.";
-  }
-  addressLine.appendChild(addressText);
+    const addressLine = document.createElement("p");
+    addressLine.className = "order-detail__address";
+    const addressText = document.createElement("span");
+    addressText.className = "order-detail__address-text";
+    if (order.customerAddress) {
+      const label = document.createElement("strong");
+      label.textContent = "Deliver to: ";
+      addressText.append(label, order.customerAddress);
+    } else {
+      addressText.textContent = "No address on file.";
+    }
+    addressLine.appendChild(addressText);
 
-  // Exact pin from the customer app (only on orders where the delivery fee
-  // was calculated). Hidden entirely when missing or not a real web link.
-  const mapUrl = safeMapUrl(order.deliveryMapUrl);
-  if (mapUrl) {
-    const mapLink = document.createElement("a");
-    mapLink.className = "order-detail__pin-link";
-    mapLink.href = mapUrl;
-    mapLink.target = "_blank";
-    mapLink.rel = "noopener noreferrer";
-    mapLink.textContent = "View on map ↗";
-    addressLine.appendChild(mapLink);
-  }
-  wrap.appendChild(addressLine);
+    // Exact pin from the customer app (only on orders where the delivery fee
+    // was calculated). Hidden entirely when missing or not a real web link.
+    const mapUrl = safeMapUrl(order.deliveryMapUrl);
+    if (mapUrl) {
+      const mapLink = document.createElement("a");
+      mapLink.className = "order-detail__pin-link";
+      mapLink.href = mapUrl;
+      mapLink.target = "_blank";
+      mapLink.rel = "noopener noreferrer";
+      mapLink.textContent = "View on map ↗";
+      addressLine.appendChild(mapLink);
+    }
+    wrap.appendChild(addressLine);
 
-  if (order.customerAddress || (toCoord(order.deliveryLat, 90) !== null && toCoord(order.deliveryLng, 180) !== null)) {
-    wrap.appendChild(buildAddressMap(order));
+    // Delivery details — each part only when the order actually has it.
+    const parts = [];
+    const fee = formatPeso(order.deliveryFee);
+    if (fee) parts.push(`Delivery fee: ${fee}`);
+    if (typeof order.deliveryDistanceKm === "number" && Number.isFinite(order.deliveryDistanceKm)) {
+      parts.push(`Distance: ${order.deliveryDistanceKm.toFixed(1)} km`);
+    }
+    if (typeof order.deliveryBranch === "string" && order.deliveryBranch.trim()) {
+      parts.push(`From: ${order.deliveryBranch.trim()}`);
+    }
+    if (order.deliveryFeeUnresolved === true) parts.push("Delivery fee not calculated");
+    if (parts.length > 0) {
+      const meta = document.createElement("p");
+      meta.className = "order-detail__meta";
+      meta.textContent = parts.join(" · ");
+      wrap.appendChild(meta);
+    }
+
+    if (order.customerAddress || (toCoord(order.deliveryLat, 90) !== null && toCoord(order.deliveryLng, 180) !== null)) {
+      wrap.appendChild(buildAddressMap(order));
+    }
   }
 
   const items = Array.isArray(order.items) ? order.items : [];
@@ -679,6 +762,15 @@ function buildActionsForOrder(order) {
   //   Driver            delivery steps only (on the way, delivered, undeliverable)
   //   Regular employee  view only — no order actions at all
   const isAdminUser = currentRole === "admin";
+  // Pickup orders skip the delivery steps (on the way / delivered / undeliverable):
+  // after approval there is nothing for a driver to do.
+  if (isPickupOrder(order) && ["approved", "on_the_way"].includes(order.status)) {
+    const note = document.createElement("span");
+    note.className = "orders-table__view-only";
+    note.textContent = "Store pickup";
+    wrap.appendChild(note);
+    return wrap;
+  }
   const actionable = ["pending", "approved", "on_the_way"].includes(order.status);
   const allowed = order.status === "pending" ? isAdminUser : currentIsDriver;
 
