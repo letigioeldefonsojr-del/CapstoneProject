@@ -7,6 +7,7 @@ import { getClearedSet, loadReadStatus } from "./ReadStatus.js";
 import { setPreferences } from "./NotificationPreferences.js";
 import { getLatestProducts, getLatestNotifications } from "./Sidebar.js";
 import { sendPromotionPush } from "./PromotionPush.js";
+import { confirmDialog } from "./ConfirmDialog.js";
 
 // ====================================================================
 // CHUNK 0 — CONFIG
@@ -537,17 +538,30 @@ async function handleBannerSave(event) {
 }
 
 async function handleBannerRemove(banner) {
-  const confirmed = window.confirm(`Delete the promotion "${banner.offer || banner.description || "untitled"}"? Customers will stop seeing it immediately.`);
+  const label = banner.offer || banner.description || "untitled";
+  const confirmed = await confirmDialog(
+    `Delete the promotion "${label}"? Customers will stop seeing it immediately.`,
+    { title: "Delete promotion?", confirmLabel: "Delete", cancelLabel: "Cancel", danger: true }
+  );
   if (!confirmed) return;
 
   try {
     await deleteDoc(doc(db, BANNERS_COLLECTION, banner.id));
     if (editingBannerId === banner.id) closeBannerForm();
-    await loadBannerPanel();
-    await syncLegacyBanner();
+
+    // Update the list from memory. Do NOT re-run loadBannerPanel() here:
+    // when the last promotion is deleted it sees an empty list, finds the
+    // old single-banner copy in settings/storeBanner and "imports" it
+    // straight back — which is why the promotion seemed undeletable.
+    banners = banners.filter((b) => b.id !== banner.id);
+    banners.sort((x, y) => (x.sortOrder || 0) - (y.sortOrder || 0));
+    await syncLegacyBanner(); // removes (or updates) the old copy so it can't come back
+    renderBannerList();
   } catch (error) {
     console.error("Couldn't remove banner:", error);
-    window.alert("Couldn't delete the promotion. Please try again.");
+    await confirmDialog("Couldn't delete the promotion. Please try again.", {
+      title: "Delete failed", confirmLabel: "OK", cancelLabel: "Close"
+    });
   }
 }
 
