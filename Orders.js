@@ -1,6 +1,6 @@
 import { db, auth } from "./firebase-config.js";
 import {
-  collection, doc, updateDoc, onSnapshot, query, where, Timestamp
+  collection, doc, updateDoc, onSnapshot, query, where, Timestamp, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { confirmDialog } from "./ConfirmDialog.js";
 
@@ -38,6 +38,7 @@ const TAB_STATUS_MAP = {
   all: null,
   pending: ["pending"],
   approved: ["approved"],
+  ready_for_pickup: ["ready_for_pickup"],
   on_the_way: ["on_the_way"],
   delivered: ["delivered"],
   cancelled: ["cancelled", "rejected"],
@@ -47,6 +48,7 @@ const TAB_STATUS_MAP = {
 const STATUS_META = {
   pending: { label: "Pending", badgeClass: "order-badge--pending" },
   approved: { label: "Approved", badgeClass: "order-badge--approved" },
+  ready_for_pickup: { label: "Ready for Pickup", badgeClass: "order-badge--ready" },
   on_the_way: { label: "On the Way", badgeClass: "order-badge--on-the-way" },
   delivered: { label: "Delivered", badgeClass: "order-badge--delivered" },
   cancelled: { label: "Cancelled", badgeClass: "order-badge--cancelled" },
@@ -605,7 +607,8 @@ function buildOrderRow(order) {
 
   const badge = document.createElement("span");
   badge.className = `order-badge ${meta.badgeClass}`;
-  badge.textContent = meta.label;
+  // A finished pickup order reads "Picked Up" rather than "Delivered".
+  badge.textContent = isPickupOrder(order) && order.status === "delivered" ? "Picked Up" : meta.label;
   cells[5].appendChild(badge);
 
   cells[6].appendChild(buildActionsForOrder(order));
@@ -762,13 +765,30 @@ function buildActionsForOrder(order) {
   //   Driver            delivery steps only (on the way, delivered, undeliverable)
   //   Regular employee  view only — no order actions at all
   const isAdminUser = currentRole === "admin";
-  // Pickup orders skip the delivery steps (on the way / delivered / undeliverable):
-  // after approval there is nothing for a driver to do.
-  if (isPickupOrder(order) && ["approved", "on_the_way"].includes(order.status)) {
-    const note = document.createElement("span");
-    note.className = "orders-table__view-only";
-    note.textContent = "Store pickup";
-    wrap.appendChild(note);
+  // Pickup orders have their own steps, and only the admin runs them:
+  //   approved -> "Mark Ready for Pickup" (customer gets a push)
+  //   ready_for_pickup -> "Mark Picked Up" (completes the order, marks it paid)
+  // They never use the driver's delivery steps.
+  if (isPickupOrder(order) && ["approved", "ready_for_pickup", "on_the_way"].includes(order.status)) {
+    if (!isAdminUser) {
+      if (!currentIsDriver) {
+        const note = document.createElement("span");
+        note.className = "orders-table__view-only";
+        note.textContent = "View only";
+        wrap.appendChild(note);
+      }
+      return wrap;
+    }
+    if (order.status === "approved") {
+      wrap.appendChild(buildActionButton("Mark Ready for Pickup", "btn-primary", () => handleMarkReadyForPickup(order)));
+    } else if (order.status === "ready_for_pickup") {
+      wrap.appendChild(buildActionButton("Mark Picked Up", "btn-primary", () => handleMarkPickedUp(order)));
+    } else {
+      const note = document.createElement("span");
+      note.className = "orders-table__view-only";
+      note.textContent = "Store pickup";
+      wrap.appendChild(note);
+    }
     return wrap;
   }
   const actionable = ["pending", "approved", "on_the_way"].includes(order.status);
@@ -873,6 +893,43 @@ async function handleMarkDelivered(order) {
     isPaid: true
   });
   sendOrderNotification(order, "Order Delivered", `Your order #${shortOrderId(order.id)} has been delivered. Thank you!`);
+  await reloadAfterAction();
+}
+
+// ---- Store pickup (admin only; see firestore.rules) ----------------
+async function handleMarkReadyForPickup(order) {
+  const branch = pickupBranchName(order);
+  const confirmed = await confirmDialog(
+    `Tell ${order.customerName || "the customer"} that order #${shortOrderId(order.id)} is ready for pickup${branch ? ` at ${branch}` : ""}? They'll get a notification.`,
+    { title: "Ready for pickup?", confirmLabel: "Yes, Ready" }
+  );
+  if (!confirmed) return;
+
+  await updateDoc(doc(db, ORDERS_COLLECTION, order.id), {
+    status: "ready_for_pickup",
+    readyForPickupAt: serverTimestamp()
+  });
+  sendOrderNotification(
+    order,
+    "Ready for Pickup",
+    `Your order #${shortOrderId(order.id)} is ready for pickup${branch ? ` at ${branch}` : ""}!`
+  );
+  await reloadAfterAction();
+}
+
+async function handleMarkPickedUp(order) {
+  const confirmed = await confirmDialog(
+    `Confirm that ${order.customerName || "the customer"} picked up order #${shortOrderId(order.id)} and has paid.`,
+    { title: "Order picked up?", confirmLabel: "Yes, Picked Up" }
+  );
+  if (!confirmed) return;
+
+  await updateDoc(doc(db, ORDERS_COLLECTION, order.id), {
+    status: "delivered", // the completed state every report already counts
+    isPaid: true,
+    pickedUpAt: serverTimestamp()
+  });
+  sendOrderNotification(order, "Order Picked Up", `Your order #${shortOrderId(order.id)} was picked up. Thank you!`);
   await reloadAfterAction();
 }
 

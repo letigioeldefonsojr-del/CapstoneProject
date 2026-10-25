@@ -106,6 +106,19 @@ service cloud.firestore {
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
           resource.data.status == 'pending' &&
           request.resource.data.status in ['approved', 'rejected']) ||
+         // Store pickup (admin only): approved -> ready for pickup, then
+         // ready for pickup -> picked up (stored as 'delivered' so every
+         // report counts it). Never touches delivery orders.
+         (isAdmin() &&
+          resource.data.get('fulfillmentType', 'delivery') == 'pickup' &&
+          ((resource.data.status == 'approved' &&
+            request.resource.data.status == 'ready_for_pickup' &&
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'readyForPickupAt'])) ||
+           (resource.data.status == 'ready_for_pickup' &&
+            request.resource.data.status == 'delivered' &&
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'isPaid', 'pickedUpAt'])))) ||
          resource.data.userId == request.auth.uid ||
          // Drivers: delivery steps only (on the way, delivered, undeliverable).
          (isDriver() &&
