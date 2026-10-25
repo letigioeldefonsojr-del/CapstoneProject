@@ -1251,6 +1251,15 @@ async function loadRiderNames() {
   if (found) render();
 }
 
+// Reminder for riders: live tracking only works while this page stays open.
+function showKeepOpenNotice() {
+  confirmDialog(
+    "Keep this page open and your screen on while you deliver, so the store can see where you are. Don't switch to other apps or lock your phone. If you need to leave the page, your last location stays saved.",
+    { title: "Keep this page open", confirmLabel: "Got it" }
+  );
+  document.querySelector('.confirm-overlay [data-action="cancel"]')?.remove();
+}
+
 async function handleMarkOnTheWay(order) {
   const confirmed = await confirmDialog(
     `Mark order #${shortOrderId(order.id)} as on the way?`,
@@ -1264,6 +1273,7 @@ async function handleMarkOnTheWay(order) {
     ...(await locationField("onTheWayLocation"))
   });
   sendOrderNotification(order, "Order On The Way", `Your order #${shortOrderId(order.id)} is on its way!`);
+  if (currentIsDriver) showKeepOpenNotice();
   await reloadAfterAction();
 }
 
