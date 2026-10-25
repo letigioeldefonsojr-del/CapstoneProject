@@ -1308,7 +1308,7 @@ function fillRiderTrack(box, order) {
     if (live?.hidden) {
       delete box.dataset.ts;
       note.classList.remove("is-stale");
-      note.textContent = "The rider has turned off live location for your account.";
+      note.textContent = "The rider has turned off live location.";
       box.querySelector(".track-map")?.remove();
       box.querySelector(".track-link")?.remove();
       return;
