@@ -84,7 +84,7 @@ document.addEventListener("sidebar:ready", (event) => {
   wireSearch();
   wireSort();
   wireUndeliverableModal();
-  if (!currentIsDriver) startRiderLocationListener(); // admin/staff: live rider pins
+  startRiderLocationListener(); // everyone on this page sees the live rider pins
   document.getElementById("orders-show-older-btn").addEventListener("click", toggleFullHistory);
   updateShowOlderButton();
   loadOrders();
@@ -896,6 +896,14 @@ async function handleReject(order) {
 // Records WHICH driver account handled the delivery, so the admin can see
 // who it was. The driver's own sign-in is the record (the rules require the
 // uid/email to match the person writing it, so it can't be faked).
+// The employee profile keeps the real name in "firstName" (what the greeting uses).
+function profileName(snap) {
+  if (!snap.exists()) return "";
+  const data = snap.data();
+  const value = [data.firstName, data.name].find((v) => typeof v === "string" && v.trim());
+  return value ? value.trim() : "";
+}
+
 async function currentDriverStamp() {
   const user = auth.currentUser;
   if (!user) return {};
@@ -905,7 +913,7 @@ async function currentDriverStamp() {
   let name = "";
   try {
     const snap = await getDoc(doc(db, "employees", user.uid));
-    if (snap.exists() && typeof snap.data().name === "string") name = snap.data().name;
+    name = profileName(snap);
   } catch (error) {
     console.error("Couldn't read the rider's profile name:", error);
   }
@@ -1241,9 +1249,9 @@ async function loadRiderNames() {
   await Promise.all(uids.map(async (uid) => {
     try {
       const snap = await getDoc(doc(db, "employees", uid));
-      const name = snap.exists() ? snap.data().name : "";
-      if (typeof name === "string" && name.trim()) {
-        riderNamesByUid.set(uid, name.trim());
+      const name = profileName(snap);
+      if (name) {
+        riderNamesByUid.set(uid, name);
         found = true;
       }
     } catch (error) {

@@ -3324,3 +3324,11 @@ body.has-share-bar { padding-bottom: 76px; }
     .rider-share-bar { font-size: 13px; padding: 10px 12px; }
     body.has-share-bar { padding-bottom: 68px; }
 }
+.rider-share-bar { left: 8px; right: 8px; bottom: 8px; box-sizing: border-box; border-radius: 12px; overflow-wrap: anywhere; }
+
+/* Orders search/sort row: wrap on phones instead of running off the screen */
+@media (max-width: 900px) {
+    .orders-search-bar { flex-wrap: wrap; }
+    .orders-search-bar .search-field { flex: 1 1 100%; max-width: none; }
+    .orders-search-bar .feedback-sort-select { flex: 1 1 140px; min-width: 0; max-width: 100%; }
+}
