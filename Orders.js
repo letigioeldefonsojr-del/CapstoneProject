@@ -610,6 +610,13 @@ function buildOrderRow(order) {
   // A finished pickup order reads "Picked Up" rather than "Delivered".
   badge.textContent = isPickupOrder(order) && order.status === "delivered" ? "Picked Up" : meta.label;
   cells[5].appendChild(badge);
+  // Which driver account handled it (set when they mark it on the way).
+  if (!isPickupOrder(order) && order.driverEmail && ["on_the_way", "delivered", "undelivered"].includes(order.status)) {
+    const by = document.createElement("div");
+    by.className = "order-handled-by";
+    by.textContent = `Driver: ${order.driverEmail}`;
+    cells[5].appendChild(by);
+  }
 
   cells[6].appendChild(buildActionsForOrder(order));
 
@@ -686,6 +693,7 @@ function buildOrderDetailRow(order) {
       parts.push(`From: ${order.deliveryBranch.trim()}`);
     }
     if (order.deliveryFeeUnresolved === true) parts.push("Delivery fee not calculated");
+    if (order.driverEmail) parts.push(`Driver: ${order.driverEmail}`);
     if (parts.length > 0) {
       const meta = document.createElement("p");
       meta.className = "order-detail__meta";
@@ -865,6 +873,15 @@ async function handleReject(order) {
   await reloadAfterAction();
 }
 
+// Records WHICH driver account handled the delivery, so the admin can see
+// who it was. The driver's own sign-in is the record (the rules require the
+// uid/email to match the person writing it, so it can't be faked).
+function currentDriverStamp() {
+  const user = auth.currentUser;
+  if (!user) return {};
+  return { driverUid: user.uid, driverEmail: user.email || "" };
+}
+
 async function handleMarkOnTheWay(order) {
   const confirmed = await confirmDialog(
     `Mark order #${shortOrderId(order.id)} as on the way?`,
@@ -873,7 +890,8 @@ async function handleMarkOnTheWay(order) {
   if (!confirmed) return;
 
   await updateDoc(doc(db, ORDERS_COLLECTION, order.id), {
-    status: "on_the_way"
+    status: "on_the_way",
+    ...currentDriverStamp()
   });
   sendOrderNotification(order, "Order On The Way", `Your order #${shortOrderId(order.id)} is on its way!`);
   await reloadAfterAction();
@@ -890,7 +908,9 @@ async function handleMarkDelivered(order) {
 
   await updateDoc(doc(db, ORDERS_COLLECTION, order.id), {
     status: "delivered",
-    isPaid: true
+    isPaid: true,
+    // Orders already stamped when they went "on the way" keep that driver.
+    ...(order.driverUid ? {} : currentDriverStamp())
   });
   sendOrderNotification(order, "Order Delivered", `Your order #${shortOrderId(order.id)} has been delivered. Thank you!`);
   await reloadAfterAction();
@@ -971,11 +991,12 @@ async function handleConfirmUndeliverable() {
   confirmBtn.textContent = "Saving...";
 
   try {
+    const affectedOrder = allOrders.find((o) => o.id === pendingUndeliverableOrderId);
     await updateDoc(doc(db, ORDERS_COLLECTION, pendingUndeliverableOrderId), {
       status: "undelivered",
-      deliveryIssueReason: reason
+      deliveryIssueReason: reason,
+      ...(affectedOrder?.driverUid ? {} : currentDriverStamp())
     });
-    const affectedOrder = allOrders.find((o) => o.id === pendingUndeliverableOrderId);
     if (affectedOrder) {
       sendOrderNotification(affectedOrder, "Delivery Issue", `There was a delivery issue with your order #${shortOrderId(affectedOrder.id)}: ${reason}`);
     }

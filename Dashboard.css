@@ -3272,3 +3272,10 @@ body.page-cashier .pos-change.has-change {
 }
 
 .order-badge--ready { background: #e7edfc; color: var(--blue); }
+
+.order-handled-by {
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+}
