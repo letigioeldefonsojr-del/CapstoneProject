@@ -3303,3 +3303,24 @@ body.page-cashier .pos-change.has-change {
 .rider-share-bar[data-kind="warn"] { background: #b45309; }
 body.has-share-bar { padding-bottom: 76px; }
 .rider-share-bar { left: 0; right: 0; bottom: 0; border-radius: 0; padding: 12px 16px; box-shadow: 0 -4px 14px rgba(0,0,0,.18); }
+
+/* Orders on phones: the table is wider than the screen and scrolls sideways,
+   so pin the detail panel to the visible area instead of the full table width. */
+@media (max-width: 900px) {
+    .orders-table .inventory-variant-row > td { padding: 0; }
+    .orders-table .order-detail {
+        position: sticky;
+        left: 0;
+        box-sizing: border-box;
+        width: calc(100vw - 40px);
+        max-width: 100%;
+        padding: 14px 16px 18px;
+        overflow-wrap: anywhere;
+    }
+    .orders-table .order-detail__address { font-size: 15px; }
+    .orders-table .order-detail__meta { font-size: 13px; }
+    .orders-table .order-detail__map { height: 200px; }
+    .orders-table .order-detail__track { padding: 10px 12px; }
+    .rider-share-bar { font-size: 13px; padding: 10px 12px; }
+    body.has-share-bar { padding-bottom: 68px; }
+}
