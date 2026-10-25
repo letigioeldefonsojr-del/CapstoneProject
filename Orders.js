@@ -1,6 +1,6 @@
 import { db, auth } from "./firebase-config.js";
 import {
-  collection, doc, updateDoc, onSnapshot, query, where, Timestamp, serverTimestamp
+  collection, doc, getDoc, updateDoc, onSnapshot, query, where, Timestamp, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { confirmDialog } from "./ConfirmDialog.js";
 
@@ -300,6 +300,7 @@ function wireSort() {
 // ====================================================================
 function render() {
   document.getElementById("cancelled-subtabs").hidden = activeTab !== "cancelled";
+  loadRiderNames(); // real rider names; redraws once if any arrive
 
   // Remember which order was expanded before rebuilding the table, so
   // a live update elsewhere doesn't silently collapse whatever the
@@ -693,16 +694,26 @@ function buildOrderDetailRow(order) {
       parts.push(`From: ${order.deliveryBranch.trim()}`);
     }
     if (order.deliveryFeeUnresolved === true) parts.push("Delivery fee not calculated");
-    if (riderLabel(order)) {
-      parts.push(`Rider: ${riderLabel(order)}`);
-    } else if (["approved", "on_the_way"].includes(order.status)) {
-      parts.push("Rider: not on the way yet");
-    }
+
     if (parts.length > 0) {
       const meta = document.createElement("p");
       meta.className = "order-detail__meta";
       meta.textContent = parts.join(" · ");
       wrap.appendChild(meta);
+    }
+
+    // Rider: the person who tapped "Mark On the Way".
+    const rider = riderLabel(order);
+    if (rider || ["approved", "on_the_way"].includes(order.status)) {
+      const riderLine = document.createElement("p");
+      riderLine.className = "order-detail__rider";
+      const riderTitle = document.createElement("span");
+      riderTitle.textContent = "Rider: ";
+      const riderName = document.createElement("strong");
+      riderName.textContent = rider || "not on the way yet";
+      if (!rider) riderName.className = "order-detail__rider--none";
+      riderLine.append(riderTitle, riderName);
+      wrap.appendChild(riderLine);
     }
 
     if (order.customerAddress || (toCoord(order.deliveryLat, 90) !== null && toCoord(order.deliveryLng, 180) !== null)) {
@@ -880,20 +891,61 @@ async function handleReject(order) {
 // Records WHICH driver account handled the delivery, so the admin can see
 // who it was. The driver's own sign-in is the record (the rules require the
 // uid/email to match the person writing it, so it can't be faked).
-function currentDriverStamp() {
+async function currentDriverStamp() {
   const user = auth.currentUser;
   if (!user) return {};
+  // The real name lives on the employee profile (the same one the greeting
+  // uses). The sign-in's own display name can be a username, so it is only
+  // the fallback.
+  let name = "";
+  try {
+    const snap = await getDoc(doc(db, "employees", user.uid));
+    if (snap.exists() && typeof snap.data().name === "string") name = snap.data().name;
+  } catch (error) {
+    console.error("Couldn't read the rider's profile name:", error);
+  }
   return {
     driverUid: user.uid,
     driverEmail: user.email || "",
-    driverName: (user.displayName || "").trim().slice(0, 60)
+    driverName: (name || user.displayName || "").trim().slice(0, 60)
   };
 }
 
-// What the admin sees as the rider: the account's name, or its email for
-// orders saved before names were recorded.
+// What the admin sees as the rider: the profile name when we have it, else
+// the name saved on the order, else the email (very old orders).
+const riderNamesByUid = new Map(); // uid -> real name from the employee profile
+const riderLookupsStarted = new Set();
+
 function riderLabel(order) {
-  return (typeof order.driverName === "string" && order.driverName.trim()) || order.driverEmail || "";
+  const profileName = order.driverUid ? riderNamesByUid.get(order.driverUid) : "";
+  return profileName
+    || (typeof order.driverName === "string" && order.driverName.trim())
+    || order.driverEmail
+    || "";
+}
+
+// Looks up the real names of any riders on the loaded orders, once each,
+// and redraws the table when new names arrive.
+async function loadRiderNames() {
+  const uids = [...new Set(allOrders.map((o) => o.driverUid).filter(Boolean))]
+    .filter((uid) => !riderLookupsStarted.has(uid));
+  if (uids.length === 0) return;
+  uids.forEach((uid) => riderLookupsStarted.add(uid));
+
+  let found = false;
+  await Promise.all(uids.map(async (uid) => {
+    try {
+      const snap = await getDoc(doc(db, "employees", uid));
+      const name = snap.exists() ? snap.data().name : "";
+      if (typeof name === "string" && name.trim()) {
+        riderNamesByUid.set(uid, name.trim());
+        found = true;
+      }
+    } catch (error) {
+      console.error("Couldn't load a rider's name:", error);
+    }
+  }));
+  if (found) render();
 }
 
 async function handleMarkOnTheWay(order) {
@@ -905,7 +957,7 @@ async function handleMarkOnTheWay(order) {
 
   await updateDoc(doc(db, ORDERS_COLLECTION, order.id), {
     status: "on_the_way",
-    ...currentDriverStamp()
+    ...(await currentDriverStamp())
   });
   sendOrderNotification(order, "Order On The Way", `Your order #${shortOrderId(order.id)} is on its way!`);
   await reloadAfterAction();
@@ -924,7 +976,7 @@ async function handleMarkDelivered(order) {
     status: "delivered",
     isPaid: true,
     // Orders already stamped when they went "on the way" keep that driver.
-    ...(order.driverUid ? {} : currentDriverStamp())
+    ...(order.driverUid ? {} : await currentDriverStamp())
   });
   sendOrderNotification(order, "Order Delivered", `Your order #${shortOrderId(order.id)} has been delivered. Thank you!`);
   await reloadAfterAction();
@@ -1009,7 +1061,7 @@ async function handleConfirmUndeliverable() {
     await updateDoc(doc(db, ORDERS_COLLECTION, pendingUndeliverableOrderId), {
       status: "undelivered",
       deliveryIssueReason: reason,
-      ...(affectedOrder?.driverUid ? {} : currentDriverStamp())
+      ...(affectedOrder?.driverUid ? {} : await currentDriverStamp())
     });
     if (affectedOrder) {
       sendOrderNotification(affectedOrder, "Delivery Issue", `There was a delivery issue with your order #${shortOrderId(affectedOrder.id)}: ${reason}`);

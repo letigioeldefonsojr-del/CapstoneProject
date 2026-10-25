@@ -3274,8 +3274,22 @@ body.page-cashier .pos-change.has-change {
 .order-badge--ready { background: #e7edfc; color: var(--blue); }
 
 .order-handled-by {
-    margin-top: 4px;
-    font-size: 11px;
-    color: var(--muted);
+    margin-top: 5px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--ink);
     overflow-wrap: anywhere;
 }
+
+/* Orders: bigger delivery details + rider line */
+.order-detail__meta {
+    font-size: 14px;
+    margin: -2px 0 10px;
+}
+.order-detail__rider {
+    font-size: 16px;
+    color: var(--ink);
+    margin: 0 0 12px;
+}
+.order-detail__rider strong { font-weight: 800; color: var(--brand-green); }
+.order-detail__rider .order-detail__rider--none { color: var(--muted); font-weight: 600; }
