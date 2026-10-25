@@ -611,10 +611,10 @@ function buildOrderRow(order) {
   badge.textContent = isPickupOrder(order) && order.status === "delivered" ? "Picked Up" : meta.label;
   cells[5].appendChild(badge);
   // Which driver account handled it (set when they mark it on the way).
-  if (!isPickupOrder(order) && order.driverEmail && ["on_the_way", "delivered", "undelivered"].includes(order.status)) {
+  if (!isPickupOrder(order) && riderLabel(order) && ["on_the_way", "delivered", "undelivered"].includes(order.status)) {
     const by = document.createElement("div");
     by.className = "order-handled-by";
-    by.textContent = `Driver: ${order.driverEmail}`;
+    by.textContent = `Rider: ${riderLabel(order)}`;
     cells[5].appendChild(by);
   }
 
@@ -693,7 +693,11 @@ function buildOrderDetailRow(order) {
       parts.push(`From: ${order.deliveryBranch.trim()}`);
     }
     if (order.deliveryFeeUnresolved === true) parts.push("Delivery fee not calculated");
-    if (order.driverEmail) parts.push(`Driver: ${order.driverEmail}`);
+    if (riderLabel(order)) {
+      parts.push(`Rider: ${riderLabel(order)}`);
+    } else if (["approved", "on_the_way"].includes(order.status)) {
+      parts.push("Rider: not on the way yet");
+    }
     if (parts.length > 0) {
       const meta = document.createElement("p");
       meta.className = "order-detail__meta";
@@ -879,7 +883,17 @@ async function handleReject(order) {
 function currentDriverStamp() {
   const user = auth.currentUser;
   if (!user) return {};
-  return { driverUid: user.uid, driverEmail: user.email || "" };
+  return {
+    driverUid: user.uid,
+    driverEmail: user.email || "",
+    driverName: (user.displayName || "").trim().slice(0, 60)
+  };
+}
+
+// What the admin sees as the rider: the account's name, or its email for
+// orders saved before names were recorded.
+function riderLabel(order) {
+  return (typeof order.driverName === "string" && order.driverName.trim()) || order.driverEmail || "";
 }
 
 async function handleMarkOnTheWay(order) {

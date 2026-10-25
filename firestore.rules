@@ -123,7 +123,9 @@ service cloud.firestore {
          // Drivers: delivery steps only (on the way, delivered, undeliverable).
          (isDriver() &&
           request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['status', 'isPaid', 'deliveryIssueReason', 'driverUid', 'driverEmail']) &&
+            .hasOnly(['status', 'isPaid', 'deliveryIssueReason', 'driverUid', 'driverEmail', 'driverName']) &&
+          request.resource.data.get('driverName', '') is string &&
+          request.resource.data.get('driverName', '').size() <= 60 &&
           // The driver record must be the signed-in driver's own (no spoofing).
           request.resource.data.get('driverUid', request.auth.uid) == request.auth.uid &&
           request.resource.data.get('driverEmail', request.auth.token.email) == request.auth.token.email &&
