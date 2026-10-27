@@ -16,7 +16,7 @@ import { collection, getDocs } from "https://www.gstatic.com/firebasejs/10.13.0/
 // call invalidateProductsCache() after any write to force a fresh read.
 // ====================================================================
 const PRODUCTS_COLLECTION = "products";
-const CACHE_TTL_MS = 90000; // 90 seconds
+const CACHE_TTL_MS = 600000; // 10 minutes
 const DB_NAME = "almares_cache";
 const STORE = "kv";
 const KEY = "products";

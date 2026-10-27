@@ -3,7 +3,7 @@ import {
   collection, addDoc, updateDoc, doc, writeBatch, serverTimestamp, runTransaction,
   getDocs, query, orderBy, limit, deleteField, Timestamp, onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
-import { getProducts, invalidateProductsCache, primeProductsCache } from "./ProductCache.js?v=2";
+import { getProducts, invalidateProductsCache, primeProductsCache } from "./ProductCache.js?v=3";
 import { confirmDialog } from "./ConfirmDialog.js";
 import { promptPasswordConfirm } from "./PasswordConfirm.js";
 import { fuzzyMatch } from "./FuzzySearch.js";

@@ -2,7 +2,7 @@ import { db } from "./firebase-config.js";
 import {
   collection, getDocs, query, where, Timestamp, writeBatch, doc, deleteField, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
-import { getProducts, invalidateProductsCache } from "./ProductCache.js";
+import { getProducts, invalidateProductsCache } from "./ProductCache.js?v=3";
 import { kMeansCluster, normalizeFeatures } from "./KMeans.js";
 import { sendPromotionPushes } from "./PromotionPush.js";
 

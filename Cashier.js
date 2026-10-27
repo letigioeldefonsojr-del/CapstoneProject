@@ -2,7 +2,7 @@ import { db } from "./firebase-config.js";
 import {
   collection, doc, getDoc, runTransaction, serverTimestamp, getDocs, query, where, orderBy, Timestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
-import { getProducts, invalidateProductsCache } from "./ProductCache.js";
+import { getProducts, primeProductsCache } from "./ProductCache.js?v=3";
 import {
   candidatesForProduct, findCandidateByBarcode, searchProducts,
   addToCart, setLineQty, setLineMode, removeLine,
@@ -29,7 +29,8 @@ let method = "cash";
 let currentUser = null;
 let currentRole = "employee";
 let busy = false;
-let lastLoadedAt = 0;
+let lastLoadedAt = 0;      // last time anything was refreshed
+let lastFullLoadAt = 0;    // last time the WHOLE catalog was downloaded
 let searchTimer = null;
 let saleCustomer = null;      // optional: who this sale is for (see CUSTOMER below)
 let customerList = null;      // registered customers, loaded the first time the box is used
@@ -86,11 +87,21 @@ document.addEventListener("keydown", (event) => {
 window.addEventListener("focus", () => { if (!anyModalOpen()) focusScanInput(); });
 window.addEventListener("pageshow", () => focusScanInput());
 
+// Keeps the shared saved copy of the catalog in step with this register's
+// own sales and refunds, so coming back to this page (or opening another
+// page that needs the products) within a few minutes costs no reads.
+let primeTimer = null;
+function saveProductsCopy() {
+  clearTimeout(primeTimer);
+  primeTimer = setTimeout(() => primeProductsCache(products), 1500);
+}
+
 async function loadProducts() {
-  invalidateProductsCache();
+  // Uses the saved copy when it is recent (10 minutes); otherwise downloads fresh.
   try {
     products = await getProducts();
     lastLoadedAt = Date.now();
+    lastFullLoadAt = lastLoadedAt;
   } catch (error) {
     console.error("Couldn't load products:", error);
     showMessage("Couldn't load products. Check the connection and refresh.", true);
@@ -106,6 +117,7 @@ function applyLocalUpdates(updates) {
     const product = products.find((p) => p.id === productId);
     if (product) Object.assign(product, update);
   }
+  saveProductsCopy();
 }
 
 // Re-reads ONLY the products currently in the cart (a few reads), so a
@@ -127,6 +139,7 @@ async function refreshCartProducts() {
     }
   }
   lastLoadedAt = Date.now();
+  saveProductsCopy();
 }
 
 // ----------------------------- UI WIRING ------------------------------
@@ -249,11 +262,13 @@ function wireUi() {
   });
   // Stock/prices may change from other devices while the page sits open.
   // Only the cart's items are re-read; a full reload happens only after
-  // the page has sat unused for a long time.
+  // the catalog is several hours old.
   window.addEventListener("focus", async () => {
     if (busy) return;
     const idleMs = Date.now() - lastLoadedAt;
-    if (idleMs > 30 * 60000) {
+    // Whole catalog costs one read per product, so it is re-downloaded
+    // only rarely (e.g. a register left open since the day before).
+    if (Date.now() - lastFullLoadAt > 3 * 60 * 60000) {
       await loadProducts();
       refreshCartFromProducts();
       renderAll();
