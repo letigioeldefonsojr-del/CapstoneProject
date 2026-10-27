@@ -26,6 +26,7 @@ const SHOW_LIMIT = 10;
 
 let period = "all";
 let showAll = false;
+let searchText = "";
 let ranked = [];
 let el = null;
 
@@ -58,10 +59,11 @@ async function load() {
     const [orders, pos] = await Promise.all([getDocs(orderQ), getDocs(posQ)]);
 
     const people = new Map();
-    const touch = (key, name, kind) => {
-      if (!people.has(key)) people.set(key, { key, name: "", kind, online: 0, store: 0, spent: 0, last: 0 });
+    // The name shown is the one on the customer's most recent purchase.
+    const touch = (key, name, kind, when) => {
+      if (!people.has(key)) people.set(key, { key, name: "", nameAt: -1, kind, online: 0, store: 0, spent: 0, last: 0 });
       const person = people.get(key);
-      if (name && (!person.name || person.name === "—")) person.name = name;
+      if (name && name !== "—" && when >= person.nameAt) { person.name = name; person.nameAt = when; }
       return person;
     };
 
@@ -69,7 +71,7 @@ async function load() {
       const o = d.data();
       const key = o.userId ? `u:${o.userId}` : (o.customerName ? `n:${String(o.customerName).trim().toLowerCase()}` : null);
       if (!key) return;
-      const person = touch(key, o.customerName, o.userId ? "registered" : "walkin");
+      const person = touch(key, o.customerName, o.userId ? "registered" : "walkin", o.createdAt?.toMillis?.() ?? 0);
       person.online += 1;
       person.spent += typeof o.total === "number" ? o.total : 0;
       person.last = Math.max(person.last, o.createdAt?.toMillis?.() ?? 0);
@@ -80,7 +82,7 @@ async function load() {
       if (!s.customerName) return;
       if (s.refundStatus === "full") return;
       const key = s.customerId ? `u:${s.customerId}` : `n:${String(s.customerName).trim().toLowerCase()}`;
-      const person = touch(key, s.customerName, s.customerId ? "registered" : "walkin");
+      const person = touch(key, s.customerName, s.customerId ? "registered" : "walkin", s.createdAt?.toMillis?.() ?? 0);
       const kept = typeof s.total === "number" ? Math.max(0, s.total - (typeof s.refundedTotal === "number" ? s.refundedTotal : 0)) : 0;
       person.store += 1;
       person.spent += kept;
@@ -98,14 +100,18 @@ async function load() {
 }
 
 function render() {
-  const rows = showAll ? ranked : ranked.slice(0, SHOW_LIMIT);
+  const needle = searchText.trim().toLowerCase();
+  const searching = needle.length > 0;
+  const pool = searching ? ranked.filter((c) => c.name.toLowerCase().includes(needle)) : ranked;
+  const rankOf = new Map(ranked.map((c, i) => [c.key, i + 1]));
+  const rows = searching || showAll ? pool : pool.slice(0, SHOW_LIMIT);
   const options = PERIODS.map((p) => `<option value="${p.key}"${p.key === period ? " selected" : ""}>${p.label}</option>`).join("");
 
   const list = rows.length === 0
-    ? `<p class="forecast-loading">No customer purchases in this period yet. In-store sales only count once the cashier picks a customer on the sale.</p>`
+    ? (searching ? `<p class="forecast-loading">No customer matching "${esc(searchText.trim())}" has a completed purchase in this period.</p>` : `<p class="forecast-loading">No customer purchases in this period yet. In-store sales only count once the cashier picks a customer on the sale.</p>`)
     : rows.map((c, i) => `
       <div class="topcust__row">
-        <div class="topcust__rank">${i + 1}</div>
+        <div class="topcust__rank">${rankOf.get(c.key)}</div>
         <div>
           <div class="topcust__name">${esc(c.name)}</div>
           <div class="topcust__meta">${c.kind === "registered" ? "Registered customer" : "Walk-in"} · last purchase ${c.last ? new Date(c.last).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "—"}</div>
@@ -127,10 +133,20 @@ function render() {
         <select id="topcust-period" class="feedback-sort-select" aria-label="Period">${options}</select>
       </div>
       <p class="topcust__sub">Ranked by number of purchases, online and in-store combined. Ties are ordered by total spent.</p>
+      <input type="search" id="topcust-search" class="topcust__search" placeholder="Search a customer by name" value="${esc(searchText)}" autocomplete="off">
       <div class="topcust__list">${list}</div>
-      ${ranked.length > SHOW_LIMIT ? `<button type="button" class="btn-outline" id="topcust-more" style="margin-top:12px">${showAll ? "Show top 10 only" : `Show all ${ranked.length}`}</button>` : ""}
+      ${!searching && ranked.length > SHOW_LIMIT ? `<button type="button" class="btn-outline" id="topcust-more" style="margin-top:12px">${showAll ? "Show top 10 only" : `Show all ${ranked.length}`}</button>` : ""}
     </section>`;
 
   document.getElementById("topcust-period").addEventListener("change", (e) => { period = e.target.value; showAll = false; load(); });
+  const box = document.getElementById("topcust-search");
+  box.addEventListener("input", () => {
+    searchText = box.value;
+    const pos = box.selectionStart;
+    render();
+    const again = document.getElementById("topcust-search");
+    again.focus();
+    again.setSelectionRange(pos, pos);
+  });
   document.getElementById("topcust-more")?.addEventListener("click", () => { showAll = !showAll; render(); });
 }
