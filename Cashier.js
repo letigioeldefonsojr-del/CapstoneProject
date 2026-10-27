@@ -31,6 +31,8 @@ let currentRole = "employee";
 let busy = false;
 let lastLoadedAt = 0;
 let searchTimer = null;
+let saleCustomer = null;      // optional: who this sale is for (see CUSTOMER below)
+let customerList = null;      // registered customers, loaded the first time the box is used
 
 const $ = (id) => document.getElementById(id);
 
@@ -194,10 +196,12 @@ function wireUi() {
     cart = [];
     $("pos-tendered").value = "";
     $("pos-gcash-ref").value = "";
+    setSaleCustomer(null);
     renderAll();
     $("pos-input").focus({ preventScroll: true });
   });
   $("pos-complete").addEventListener("click", completeSale);
+  wireCustomerPicker();
 
   $("pos-receipt-print").addEventListener("click", () => {
     document.body.classList.add("pos-printing");
@@ -481,6 +485,7 @@ async function completeSale() {
   const movementRefs = lines.map(() => doc(collection(db, "stockMovements")));
   const productIds = [...new Set(lines.map((l) => l.productId))];
   const cashierEmail = currentUser?.email || "unknown";
+  const soldTo = saleCustomer;
 
   try {
     await runTransaction(db, async (tx) => {
@@ -522,6 +527,7 @@ async function completeSale() {
         cashierUid: currentUser.uid,
         cashierEmail,
         cashierRole: currentRole,
+        ...customerFields(saleCustomer),
         createdAt: serverTimestamp()
       });
 
@@ -564,8 +570,102 @@ async function completeSale() {
     receiptNo, lines, total, units,
     paymentMethod: method, tendered: pay.tendered, change: pay.change,
     gcashRef: method === "gcash" ? $("pos-gcash-ref").value.trim() : "",
-    cashierEmail, when: new Date()
+    cashierEmail, when: new Date(),
+    customerName: soldTo?.name || ""
   });
+}
+
+
+// ----------------------------- CUSTOMER (optional) --------------------
+// The cashier can attach the sale to a registered customer (same account
+// they use for online orders) or just type a name for a regular who isn't
+// registered. This is what lets the admin's "Top Customers" list count a
+// person's online and in-store purchases together. Leaving it empty is
+// normal: the sale is simply anonymous, as before.
+function customerFields(customer) {
+  if (!customer) return {};
+  return {
+    customerType: customer.type,
+    customerName: customer.name,
+    customerId: customer.uid || null,
+    customerMobile: customer.mobile || null
+  };
+}
+
+function setSaleCustomer(customer) {
+  saleCustomer = customer;
+  const picked = $("pos-customer-picked");
+  const input = $("pos-customer-input");
+  if (!picked || !input) return;
+  picked.hidden = !customer;
+  input.hidden = Boolean(customer);
+  input.value = "";
+  $("pos-customer-results").hidden = true;
+  if (customer) {
+    $("pos-customer-name").textContent = customer.type === "registered"
+      ? `${customer.name}${customer.mobile ? " · " + customer.mobile : ""}`
+      : `${customer.name} (walk-in)`;
+  }
+}
+
+async function loadCustomerList() {
+  if (customerList) return customerList;
+  try {
+    const snap = await getDocs(collection(db, "users"));
+    customerList = snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        uid: d.id,
+        name: String(data.fullName || data.name || "").trim(),
+        mobile: String(data.mobileNumber || data.phone || "").trim()
+      };
+    }).filter((c) => c.name);
+  } catch (error) {
+    console.error("Couldn't load customers:", error);
+    customerList = [];
+  }
+  return customerList;
+}
+
+function wireCustomerPicker() {
+  const input = $("pos-customer-input");
+  const results = $("pos-customer-results");
+  if (!input) return;
+
+  async function showMatches() {
+    const text = input.value.trim();
+    if (!text) { results.hidden = true; return; }
+    const needle = text.toLowerCase();
+    const digits = text.replace(/\D/g, "");
+    const list = await loadCustomerList();
+    if (input.value.trim() !== text) return; // typed more while loading
+    const matches = list.filter((c) =>
+      c.name.toLowerCase().includes(needle) || (digits.length >= 3 && c.mobile.replace(/\D/g, "").includes(digits))
+    ).slice(0, 6);
+
+    results.innerHTML = "";
+    matches.forEach((c) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "pos-customer__option";
+      btn.textContent = c.mobile ? `${c.name} · ${c.mobile}` : c.name;
+      btn.addEventListener("click", () => setSaleCustomer({ type: "registered", uid: c.uid, name: c.name, mobile: c.mobile }));
+      results.appendChild(btn);
+    });
+    if (!/^\d+$/.test(text)) {
+      const walk = document.createElement("button");
+      walk.type = "button";
+      walk.className = "pos-customer__option pos-customer__option--walkin";
+      walk.textContent = `Use "${text}" as a walk-in customer`;
+      walk.addEventListener("click", () => setSaleCustomer({ type: "walkin", name: text.slice(0, 60) }));
+      results.appendChild(walk);
+    }
+    results.hidden = results.children.length === 0;
+  }
+
+  input.addEventListener("input", showMatches);
+  input.addEventListener("focus", () => { loadCustomerList(); });
+  $("pos-customer-clear").addEventListener("click", () => setSaleCustomer(null));
 }
 
 // ----------------------------- RECEIPT --------------------------------
@@ -582,6 +682,7 @@ function showReceipt(sale) {
       <span>${esc(sale.receiptNo)}</span>
       <span>${esc(sale.when.toLocaleString())}</span>
       <span>Cashier: ${esc(sale.cashierEmail)}</span>
+      ${sale.customerName ? `<span>Customer: ${esc(sale.customerName)}</span>` : ""}
     </div>
     <table>${rows}</table>
     <div class="pos-receipt__sum">
@@ -601,6 +702,7 @@ async function newSale() {
   cart = [];
   $("pos-tendered").value = "";
   $("pos-gcash-ref").value = "";
+  setSaleCustomer(null);
   $("pos-input").value = "";
   await loadProducts();      // stock just changed — show fresh numbers
   renderAll();

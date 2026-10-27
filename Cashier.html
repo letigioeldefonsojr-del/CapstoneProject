@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="Dashboard.css">
+    <link rel="stylesheet" href="Dashboard.css?v=20261027a">
 </head>
 <body class="page-cashier">
 
@@ -176,6 +176,16 @@
                     <p class="notif-list__empty">No items yet. Scan or search to add.</p>
                 </div>
 
+                <div class="pos-customer">
+                    <label for="pos-customer-input">Customer <span class="pos-customer__opt">(optional)</span></label>
+                    <div class="pos-customer__picked" id="pos-customer-picked" hidden>
+                        <span id="pos-customer-name"></span>
+                        <button type="button" id="pos-customer-clear" aria-label="Remove customer">&times;</button>
+                    </div>
+                    <input type="text" id="pos-customer-input" placeholder="Search registered customer by name or mobile" autocomplete="off">
+                    <div class="pos-customer__results" id="pos-customer-results" hidden></div>
+                </div>
+
                 <div class="pos-totals">
                     <div class="pos-totals__row"><span>Items</span><span id="pos-units">0</span></div>
                     <div class="pos-totals__row pos-totals__row--total"><span>Total</span><span id="pos-total">₱0.00</span></div>
@@ -313,6 +323,6 @@
 
 <script type="module" src="firebase-config.js"></script>
 <script type="module" src="Sidebar.js"></script>
-<script type="module" src="Cashier.js?v=20261011a"></script>
+<script type="module" src="Cashier.js?v=20261027a"></script>
 </body>
 </html>
