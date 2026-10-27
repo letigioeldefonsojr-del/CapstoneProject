@@ -118,7 +118,7 @@ async function syncSalesTiersToProducts(productsWithData, productsWithoutData) {
       }
     });
 
-    // Sold before but nothing in the last 90 days anymore — clear the tag.
+    // Sold before but nothing in the last 60 days anymore — clear the tag.
     productsWithoutData.forEach(({ product }) => {
       if (product.salesTier !== undefined || product.bestSeller === true) {
         updates.push({
@@ -204,7 +204,7 @@ async function loadForecast() {
 // is "how fast is this selling right now" — so this is both faster
 // (less data fetched) AND a more honest calculation, not just a
 // performance compromise.
-const VELOCITY_WINDOW_DAYS = 90;
+const VELOCITY_WINDOW_DAYS = 60;
 
 function windowCutoffTimestamp() {
   return Timestamp.fromDate(new Date(Date.now() - VELOCITY_WINDOW_DAYS * 24 * 60 * 60 * 1000));
@@ -266,9 +266,9 @@ async function fetchDeliveredOrderItems() {
 // A 14-day window for the primary "moving average" velocity — this
 // is what actually moved the needle on the honesty gap: sales from
 // 80 days ago no longer count equally with sales from yesterday.
-// Falls back to the full 90-day baseline only when a product had
+// Falls back to the full 60-day baseline only when a product had
 // literally zero sales in the last 14 days (but did sell earlier in
-// the 90-day window) — otherwise a product that's just had a quiet
+// the 60-day window) — otherwise a product that's just had a quiet
 // couple of weeks would incorrectly look like it has zero velocity,
 // rather than genuinely slowed down.
 const RECENT_WINDOW_DAYS = 14;
@@ -307,7 +307,7 @@ function computeVelocities(depletionEvents) {
     const recentVelocity = recentUnitsSold / RECENT_WINDOW_DAYS;
 
     // Use the recent moving average whenever there's actually recent
-    // activity to base it on; otherwise the 90-day baseline is a more
+    // activity to base it on; otherwise the 60-day baseline is a more
     // honest number than "0" for a product that's simply had a quiet
     // stretch but is still a real, ongoing seller.
     const velocity = recentUnitsSold > 0 ? recentVelocity : baselineVelocity;
@@ -475,7 +475,7 @@ function renderResults(clustered, productsWithoutData) {
   if (clustered.fast.length > 0) {
     container.appendChild(buildSection(
       "Fast-Moving Products",
-      "Grouped automatically by K-Means clustering based on real sales velocity — not a fixed threshold.",
+      "High-demand items that sell quickly and move off the shelf in a short time, based on recent sales.",
       clustered.fast,
       "trend",
       "trend"
@@ -575,8 +575,8 @@ function buildEntryRow(entry, mode) {
     : `~${(entry.velocity * 7).toFixed(1)} units/week`;
   // Makes the actual output transparent — this product's number came
   // from real sales in the last 14 days, or (rarer) fell back to the
-  // 90-day baseline because there were none.
-  const windowLabel = entry.usedRecentWindow ? "last 14 days" : "90-day avg, no recent sales";
+  // 60-day baseline because there were none.
+  const windowLabel = entry.usedRecentWindow ? "last 14 days" : "60-day avg, no recent sales";
 
   const stockoutLabel = entry.currentStock === 0
     ? "Out of stock"

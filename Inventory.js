@@ -169,8 +169,9 @@ let liveRenderTimer = null;     // groups rapid changes (e.g. bulk delete) into 
 
 // Keeps the list in sync with Firestore: deletes, additions and edits made
 // here or anywhere else show up without a refresh.
-function startLiveProducts() {
+function startLiveProducts(onFirst, onFirstError) {
   if (productsUnsub) return;
+  let gotFirst = false;
   productsUnsub = onSnapshot(
     collection(db, PRODUCTS_COLLECTION),
     (snap) => {
@@ -182,6 +183,12 @@ function startLiveProducts() {
         if (!liveIds.has(id)) { selectedProductIds.delete(id); selectionChanged = true; }
       });
       primeProductsCache(allProducts); // other pages reuse this fresh copy
+      if (!gotFirst) {
+        gotFirst = true;
+        populateCategoryFilter(allProducts);
+        if (onFirst) onFirst();
+        return;
+      }
       clearTimeout(liveRenderTimer);
       liveRenderTimer = setTimeout(() => {
         populateCategoryFilter(allProducts);
@@ -192,21 +199,33 @@ function startLiveProducts() {
     (error) => {
       console.error("Live product updates stopped:", error);
       productsUnsub = null;
+      if (!gotFirst && onFirstError) { gotFirst = true; onFirstError(error); }
     }
   );
 }
 
 async function loadInventory() {
+  // One read path only: the live listener. Its first result fills the
+  // page, so products are downloaded once (not once for the page plus
+  // once more for the listener).
+  const firstDraw = new Promise((resolve, reject) => {
+    startLiveProducts(resolve, reject);
+  });
   try {
-    allProducts = await getProducts(); // fast first paint from the cache
-    populateCategoryFilter(allProducts);
+    await firstDraw;
     applyUrlFilter();
     applyFiltersAndRender();
-    startLiveProducts();               // then stay live
   } catch (error) {
     console.error("Couldn't load products:", error);
-    document.getElementById("inventory-tbody").innerHTML =
-      `<tr><td colspan="5" class="inventory-empty">Couldn't load products right now.</td></tr>`;
+    try {
+      allProducts = await getProducts(); // fallback: one-time load
+      populateCategoryFilter(allProducts);
+      applyUrlFilter();
+      applyFiltersAndRender();
+    } catch (err2) {
+      document.getElementById("inventory-tbody").innerHTML =
+        `<tr><td colspan="5" class="inventory-empty">Couldn't load products right now.</td></tr>`;
+    }
   }
 }
 
