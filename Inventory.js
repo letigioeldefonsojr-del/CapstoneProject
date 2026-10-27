@@ -1374,7 +1374,241 @@ function handleCsvFileSelected(event) {
 function remapAndRenderCsvPreview() {
   const ignoreQty = document.getElementById("csv-ignore-qty").checked;
   parsedCsvRows = rawCsvRows.map((row) => csvRowToProduct(row, ignoreQty));
+  csvGroups = buildCsvGroups(parsedCsvRows);
   renderCsvPreview();
+}
+
+// ---- Suggested variant groups --------------------------------------
+// The CSV has no "variant" column, so rows that look like the same
+// product in different sizes/packs (e.g. several "Emperador Light"
+// rows) are SUGGESTED as one product with variants. Nothing is grouped
+// unless the admin leaves the group ticked in the preview. Groups
+// whose rows sit in different categories start unticked, since that is
+// where a name match is most likely to be a coincidence.
+let csvGroups = [];
+const csvGroupChoice = new Map(); // group key -> ticked/unticked, kept while the preview is open
+
+const PACK_WORD = "(?:cases?|cs|box|boxes|pack|packs|pcs|pc|blt|bottle|dz|dozen)";
+const SIZE_UNIT = "(?:ml|l|ltr|ltrs|lt|liter|litre|liters|g|gm|gms|kg|kgs|mg|oz|cl|pcs|pc|s|yrs|yr|mos|mo)";
+
+function groupingKey(description) {
+  let t = ` ${String(description || "").toLowerCase()} `
+    .replace(/[()\[\],;:*]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  // leading pack words, e.g. "1/2 case", "case", "1 box", "3pcs"
+  for (let i = 0; i < 3; i++) {
+    t = t
+      .replace(new RegExp(`^\\d+\\s*/\\s*\\d+\\s*${PACK_WORD}\\b\\s*`), "")
+      .replace(new RegExp(`^\\d+\\s*${PACK_WORD}\\b\\s*`), "")
+      .replace(new RegExp(`^${PACK_WORD}\\b\\s*`), "");
+  }
+  t = t
+    .replace(new RegExp(`\\b${PACK_WORD}\\b`, "g"), " ")
+    .replace(new RegExp(`\\b\\d+(?:\\.\\d+)?\\s*${SIZE_UNIT}\\b`, "g"), " ")
+    .replace(/\bx\s*\d+\b|\b\d+\s*x\b|\/\s*\d+%?|\b\d+%/g, " ")
+    .replace(/[^a-z0-9 ]/g, " ");
+  const tokens = t.split(/\s+/).filter(Boolean);
+  // numbers after the first word are sizes/counts, not part of the name
+  const kept = tokens.filter((tok, i) => i === 0 || !/^\d+$/.test(tok));
+  const key = kept.join(" ").trim();
+  return /[a-z]{3,}/.test(key) ? key : "";
+}
+
+function tidyText(text) {
+  return String(text || "").replace(/\s+/g, " ").trim();
+}
+
+function pickParentName(key, descriptions) {
+  const pattern = new RegExp(key.split(" ").map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[^a-z0-9]+"), "i");
+  const seen = new Map();
+  descriptions.forEach((d) => {
+    const m = tidyText(d).match(pattern);
+    if (m) seen.set(m[0], (seen.get(m[0]) || 0) + 1);
+  });
+  const mixed = [...seen.entries()].filter(([text]) => /[a-z]/.test(text) && /[A-Z]/.test(text)).sort((a, b) => b[1] - a[1]);
+  if (mixed.length) return mixed[0][0];
+  return key.replace(/\b[a-z]/g, (c) => c.toUpperCase());
+}
+
+function variantLabel(description, key) {
+  const original = tidyText(description);
+  const pattern = new RegExp(key.split(" ").map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[^a-z0-9]+"), "i");
+  const rest = tidyText(original.replace(pattern, " ")).replace(/^[-–/,.\s]+|[-–/,.\s]+$/g, "");
+  return rest.length >= 2 ? rest : original;
+}
+
+function mostCommon(values) {
+  const counts = new Map();
+  values.filter(Boolean).forEach((v) => counts.set(v, (counts.get(v) || 0) + 1));
+  let best = null;
+  counts.forEach((n, v) => { if (!best || n > best.n) best = { v, n }; });
+  return best ? best.v : null;
+}
+
+function buildCsvGroups(rows) {
+  const byKey = new Map();
+  rows.forEach((row, index) => {
+    if (!row._valid) return;
+    const key = groupingKey(row[PRODUCT_NAME_FIELD]);
+    if (!key) return;
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(index);
+  });
+
+  const groups = [];
+  byKey.forEach((indexes, key) => {
+    if (indexes.length < 2) return;
+    const members = indexes.map((i) => rows[i]);
+    const categories = [...new Set(members.map((m) => String(m[PRODUCT_CATEGORY_FIELD] || "").trim().toLowerCase()))];
+    const mixed = categories.length > 1;
+    const defaultTicked = !mixed;
+    groups.push({
+      key,
+      name: pickParentName(key, members.map((m) => m[PRODUCT_NAME_FIELD])),
+      indexes,
+      categoriesLabel: [...new Set(members.map((m) => String(m[PRODUCT_CATEGORY_FIELD] || "").trim()))].join(", "),
+      mixed,
+      ticked: csvGroupChoice.has(key) ? csvGroupChoice.get(key) : defaultTicked
+    });
+  });
+  return groups.sort((a, b) => b.indexes.length - a.indexes.length || a.name.localeCompare(b.name));
+}
+
+// What will actually be written: one product per ticked group (with a
+// variant for each row), and one product for every other valid row.
+function buildImportDocs() {
+  const ignoreQty = document.getElementById("csv-ignore-qty").checked;
+  const grouped = new Set();
+  const docs = [];
+
+  csvGroups.filter((g) => g.ticked).forEach((g) => {
+    const members = g.indexes.map((i) => parsedCsvRows[i]);
+    g.indexes.forEach((i) => grouped.add(i));
+
+    const flavors = members.map((m) => {
+      const stock = typeof m[STOCK_FIELD] === "number" ? m[STOCK_FIELD] : null;
+      return {
+        name: variantLabel(m[PRODUCT_NAME_FIELD], g.key),
+        [VARIANT_STOCK_FIELD]: stock,
+        [PRODUCT_PRICE_FIELD]: m[PRODUCT_PRICE_FIELD],
+        wholesalePrice: m.wholesalePrice ?? null,
+        [PRODUCT_IMAGE_FIELD]: null,
+        [BARCODE_FIELD]: m.sku || null,
+        sku: m.sku || null,
+        qty1: m.qty1 ?? null,
+        qty2: m.qty2 ?? null,
+        [PRODUCT_AVAILABLE_FIELD]: stock === null ? null : stock > 0
+      };
+    });
+    // Two variants can't share a label, or the cashier can't tell them apart.
+    const taken = new Map();
+    flavors.forEach((f, i) => {
+      const n = (taken.get(f.name.toLowerCase()) || 0) + 1;
+      taken.set(f.name.toLowerCase(), n);
+      if (n > 1) f.name = `${f.name} (${members[i].sku || n})`;
+    });
+
+    docs.push({
+      [PRODUCT_NAME_FIELD]: g.name,
+      [PRODUCT_CATEGORY_FIELD]: mostCommon(members.map((m) => m[PRODUCT_CATEGORY_FIELD])) || members[0][PRODUCT_CATEGORY_FIELD],
+      principal: mostCommon(members.map((m) => (String(m.principal || "").toLowerCase() === "none" ? null : m.principal))),
+      unit: mostCommon(members.map((m) => m.unit)),
+      [PRODUCT_SELLING_TYPE_FIELD]: null,
+      [PRODUCT_VARIANTS_FIELD]: flavors,
+      [STOCK_FIELD]: null,
+      [PRODUCT_PRICE_FIELD]: null,
+      [PRODUCT_AVAILABLE_FIELD]: ignoreQty ? null : flavors.some((f) => f[PRODUCT_AVAILABLE_FIELD])
+    });
+  });
+
+  parsedCsvRows.forEach((row, i) => {
+    if (!row._valid || grouped.has(i)) return;
+    const { _valid, ...productData } = row;
+    docs.push(productData);
+  });
+  return docs;
+}
+
+function renderCsvGroups() {
+  const box = document.getElementById("csv-groups");
+  if (!box) return;
+  if (csvGroups.length === 0) { box.hidden = true; box.innerHTML = ""; return; }
+  box.hidden = false;
+
+  const ticked = csvGroups.filter((g) => g.ticked).length;
+  const rowsInGroups = csvGroups.filter((g) => g.ticked).reduce((n, g) => n + g.indexes.length, 0);
+  box.innerHTML = `
+    <div class="csv-groups__head">
+      <strong>Suggested variants</strong>
+      <span class="csv-groups__count">${ticked} of ${csvGroups.length} groups ticked · ${rowsInGroups} rows become variants</span>
+    </div>
+    <p class="csv-groups__hint">Rows with the same product name but different sizes or packs can be saved as ONE product with variants. Untick any group that is not really the same product. Groups spanning several categories start unticked.</p>
+    <div class="csv-groups__tools">
+      <button type="button" class="btn-outline" data-act="same">Tick same-category groups</button>
+      <button type="button" class="btn-outline" data-act="all">Tick all</button>
+      <button type="button" class="btn-outline" data-act="none">Untick all</button>
+    </div>
+    <div class="csv-groups__list"></div>`;
+
+  const list = box.querySelector(".csv-groups__list");
+  const frag = document.createDocumentFragment();
+  csvGroups.forEach((g) => {
+    const det = document.createElement("details");
+    det.className = "csv-group" + (g.mixed ? " is-mixed" : "");
+    const sum = document.createElement("summary");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = g.ticked;
+    cb.addEventListener("click", (e) => e.stopPropagation());
+    cb.addEventListener("change", () => {
+      g.ticked = cb.checked;
+      csvGroupChoice.set(g.key, g.ticked);
+      updateCsvSummary();
+      refreshGroupCount();
+    });
+    g.checkbox = cb;
+    const title = document.createElement("span");
+    title.className = "csv-group__title";
+    title.textContent = `${g.name} · ${g.indexes.length} variants`;
+    const cat = document.createElement("span");
+    cat.className = "csv-group__cat";
+    cat.textContent = g.mixed ? `Mixed categories: ${g.categoriesLabel}` : g.categoriesLabel;
+    sum.append(cb, title, cat);
+    const ul = document.createElement("ul");
+    g.indexes.forEach((i) => {
+      const li = document.createElement("li");
+      li.textContent = `${variantLabel(parsedCsvRows[i][PRODUCT_NAME_FIELD], g.key)} — ${parsedCsvRows[i][PRODUCT_PRICE_FIELD]}${parsedCsvRows[i].sku ? " · " + parsedCsvRows[i].sku : ""}`;
+      ul.appendChild(li);
+    });
+    det.append(sum, ul);
+    frag.appendChild(det);
+  });
+  list.appendChild(frag);
+
+  function setAll(fn) {
+    csvGroups.forEach((g) => { g.ticked = fn(g); csvGroupChoice.set(g.key, g.ticked); if (g.checkbox) g.checkbox.checked = g.ticked; });
+    updateCsvSummary();
+    refreshGroupCount();
+  }
+  function refreshGroupCount() {
+    const t = csvGroups.filter((g) => g.ticked);
+    box.querySelector(".csv-groups__count").textContent = `${t.length} of ${csvGroups.length} groups ticked · ${t.reduce((n, g) => n + g.indexes.length, 0)} rows become variants`;
+  }
+  box.querySelector('[data-act="same"]').addEventListener("click", () => setAll((g) => !g.mixed));
+  box.querySelector('[data-act="all"]').addEventListener("click", () => setAll(() => true));
+  box.querySelector('[data-act="none"]').addEventListener("click", () => setAll(() => false));
+}
+
+function updateCsvSummary() {
+  const summary = document.getElementById("csv-summary");
+  const validCount = parsedCsvRows.filter((r) => r._valid).length;
+  const invalidCount = parsedCsvRows.length - validCount;
+  const productCount = buildImportDocs().length;
+  const parts = [`${validCount} rows → ${productCount} product${productCount === 1 ? "" : "s"}`];
+  if (invalidCount > 0) parts.push(`${invalidCount} skipped (missing name or category)`);
+  summary.textContent = parts.join(" · ");
+  document.getElementById("csv-confirm-import").disabled = validCount === 0;
 }
 
 // Rejects the file entirely — no preview, no row data, Confirm Import
@@ -1422,6 +1656,8 @@ function csvRowToProduct(rawRow, ignoreQty) {
     [PRODUCT_NAME_FIELD]: name,
     [PRODUCT_CATEGORY_FIELD]: category,
     sku: get("sku") || null,
+    // The cashier scans the "barcode" field, so imported codes go there too.
+    [BARCODE_FIELD]: get("sku") || null,
     principal: get("principal") || null,
     unit: get("unit") || null,
     [PRODUCT_SELLING_TYPE_FIELD]: sellingType,
@@ -1439,22 +1675,15 @@ function csvRowToProduct(rawRow, ignoreQty) {
   };
 }
 
+const CSV_PREVIEW_LIMIT = 300;
+
 function renderCsvPreview() {
   const tbody = document.getElementById("csv-preview-tbody");
-  const summary = document.getElementById("csv-summary");
-  const confirmBtn = document.getElementById("csv-confirm-import");
-
-  const validCount = parsedCsvRows.filter((r) => r._valid).length;
-  const invalidCount = parsedCsvRows.length - validCount;
-
-  summary.textContent = invalidCount > 0
-    ? `${validCount} valid, ${invalidCount} skipped (missing name or category)`
-    : `${validCount} product${validCount === 1 ? "" : "s"} ready to import`;
-
-  confirmBtn.disabled = validCount === 0;
+  updateCsvSummary();
+  renderCsvGroups();
 
   tbody.innerHTML = "";
-  parsedCsvRows.forEach((row) => {
+  parsedCsvRows.slice(0, CSV_PREVIEW_LIMIT).forEach((row) => {
     const tr = document.createElement("tr");
     if (!row._valid) tr.style.opacity = "0.45";
     tr.innerHTML = `
@@ -1469,6 +1698,15 @@ function renderCsvPreview() {
     cells[5].textContent = row.sku || "—";
     tbody.appendChild(tr);
   });
+  if (parsedCsvRows.length > CSV_PREVIEW_LIMIT) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 6;
+    td.textContent = `…and ${parsedCsvRows.length - CSV_PREVIEW_LIMIT} more rows (all of them are imported).`;
+    td.style.fontStyle = "italic";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
 }
 
 function closeCsvModal() {
@@ -1476,14 +1714,21 @@ function closeCsvModal() {
   hideCsvStatus();
   parsedCsvRows = [];
   rawCsvRows = [];
+  csvGroups = [];
+  csvGroupChoice.clear();
+  const groupsBox = document.getElementById("csv-groups");
+  if (groupsBox) { groupsBox.hidden = true; groupsBox.innerHTML = ""; }
 }
 
 async function handleConfirmCsvImport() {
-  const validRows = parsedCsvRows.filter((r) => r._valid);
+  const validRows = buildImportDocs();
   if (validRows.length === 0) return;
+  const variantProducts = validRows.filter((d) => Array.isArray(d[PRODUCT_VARIANTS_FIELD]) && d[PRODUCT_VARIANTS_FIELD].length > 0).length;
 
   const confirmed = await confirmDialog(
-    "This can't be undone automatically once imported.",
+    variantProducts > 0
+      ? `${variantProducts} of them will have variants. This can't be undone automatically once imported.`
+      : "This can't be undone automatically once imported.",
     {
       title: `Import ${validRows.length} product${validRows.length === 1 ? "" : "s"}?`,
       confirmLabel: "Confirm Import"
@@ -1501,7 +1746,7 @@ async function handleConfirmCsvImport() {
       const chunk = validRows.slice(i, i + BATCH_LIMIT);
       const batch = writeBatch(db);
       chunk.forEach((row) => {
-        const { _valid, ...productData } = row;
+        const productData = { ...row };
         productData.createdAt = serverTimestamp();
         const newDocRef = doc(collection(db, PRODUCTS_COLLECTION));
         batch.set(newDocRef, productData);

@@ -3392,3 +3392,20 @@ body.has-share-bar { padding-bottom: 76px; }
 .topcust__spent { font-size: 13px; font-weight: 700; }
 @media (max-width: 520px) { .topcust__row { grid-template-columns: 30px 1fr; } .topcust__nums { grid-column: 2; text-align: left; display: flex; gap: 12px; align-items: baseline; } }
 .topcust__search { width: 100%; box-sizing: border-box; margin: 0 0 12px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 14px; background: var(--card-bg); }
+
+/* Bulk import: suggested variant groups */
+.csv-groups { margin: 12px 0; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: rgba(0,0,0,.03); }
+.csv-groups__head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; font-size: 14px; }
+.csv-groups__count { color: var(--muted); font-size: 13px; }
+.csv-groups__hint { margin: 6px 0 8px; font-size: 12.5px; color: var(--muted); }
+.csv-groups__tools { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.csv-groups__tools .btn-outline { padding: 6px 12px; font-size: 12.5px; min-height: 0; }
+.csv-groups__list { max-height: 240px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--card-bg, #fff); }
+.csv-group { border-bottom: 1px solid var(--border); }
+.csv-group:last-child { border-bottom: none; }
+.csv-group > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 9px 12px; cursor: pointer; font-size: 13.5px; }
+.csv-group > summary input { width: 18px; height: 18px; flex: none; }
+.csv-group__title { font-weight: 700; }
+.csv-group__cat { font-size: 12px; color: var(--muted); }
+.csv-group.is-mixed .csv-group__cat { color: #b45309; font-weight: 600; }
+.csv-group ul { margin: 0; padding: 0 12px 10px 40px; font-size: 12.5px; color: var(--muted); }
