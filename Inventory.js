@@ -2447,42 +2447,73 @@ async function handleBulkDelete() {
 }
 
 // Removes EVERY product, not just the rows on screen (the table shows
-// them in batches, so "select all" only reaches what is loaded). A backup
-// CSV is downloaded first, then the admin's password is asked for.
-async function handleDeleteAllProducts() {
-  if (!isAdmin) return;
+// them in batches, so "select all" only reaches what is loaded).
+let deleteAllRunning = false;
 
-  // Ask the database, not the screen, so nothing is missed.
-  const snap = await getDocs(collection(db, PRODUCTS_COLLECTION));
-  const ids = snap.docs.map((d) => d.id);
-  if (ids.length === 0) {
-    window.alert("There are no products to delete.");
-    return;
+function showDeleteProgress(text) {
+  let box = document.getElementById("delete-progress");
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "delete-progress";
+    box.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;font-family:inherit;";
+    box.innerHTML = '<div style="background:#fff;border-radius:16px;padding:24px 32px;min-width:260px;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.25)"><div style="font-weight:700;font-size:16px;margin-bottom:10px">Deleting products...</div><div id="delete-progress-text" style="font-size:14px;color:#555;margin-bottom:14px"></div><div style="height:8px;background:#eee;border-radius:99px;overflow:hidden"><div id="delete-progress-bar" style="height:100%;width:0;background:#c0392b;transition:width .2s"></div></div><div style="font-size:12px;color:#888;margin-top:12px">Please keep this page open.</div></div>';
+    document.body.appendChild(box);
   }
+  document.getElementById("delete-progress-text").textContent = text.label;
+  document.getElementById("delete-progress-bar").style.width = text.pct + "%";
+}
 
-  exportInventoryCsv(); // safety copy before anything is removed
+function hideDeleteProgress() {
+  document.getElementById("delete-progress")?.remove();
+}
 
-  const verified = await promptPasswordConfirm(
-    `A backup CSV of your inventory was just downloaded. Enter your password to permanently delete ALL ${ids.length.toLocaleString()} products. This can't be undone.`,
-    {
-      title: `Delete all ${ids.length.toLocaleString()} products?`,
-      confirmLabel: "Delete Everything"
-    }
-  );
-  if (!verified) return;
+async function handleDeleteAllProducts() {
+  if (!isAdmin || deleteAllRunning) return;
+  deleteAllRunning = true; // blocks repeat clicks right away
 
   const btn = document.getElementById("delete-all-btn");
-  const originalHtml = btn.innerHTML;
   btn.disabled = true;
 
   try {
-    const BATCH_LIMIT = 450; // Firestore allows 500 operations per batch
-    for (let i = 0; i < ids.length; i += BATCH_LIMIT) {
-      btn.textContent = `Deleting ${Math.min(i + BATCH_LIMIT, ids.length).toLocaleString()} / ${ids.length.toLocaleString()}...`;
-      const batch = writeBatch(db);
-      ids.slice(i, i + BATCH_LIMIT).forEach((id) => batch.delete(doc(db, PRODUCTS_COLLECTION, id)));
-      await batch.commit();
+    // Products are already loaded in memory, so no extra database read
+    // (and no waiting) before the confirmation appears.
+    const ids = allProducts.map((p) => p.id);
+    if (ids.length === 0) {
+      window.alert("There are no products to delete.");
+      return;
     }
+
+    const verified = await promptPasswordConfirm(
+      `Enter your password to permanently delete ALL ${ids.length.toLocaleString()} products. This can't be undone. Tip: use "Save as CSV" first if you want a backup.`,
+      {
+        title: `Delete all ${ids.length.toLocaleString()} products?`,
+        confirmLabel: "Delete Everything"
+      }
+    );
+    if (!verified) return;
+
+    const BATCH_LIMIT = 450; // Firestore allows 500 operations per batch
+    const chunks = [];
+    for (let i = 0; i < ids.length; i += BATCH_LIMIT) chunks.push(ids.slice(i, i + BATCH_LIMIT));
+
+    let done = 0;
+    showDeleteProgress({ label: `0 of ${ids.length.toLocaleString()} deleted`, pct: 0 });
+
+    // Run a few batches at the same time so thousands of products go fast.
+    const CONCURRENCY = 4;
+    let next = 0;
+    const worker = async () => {
+      while (next < chunks.length) {
+        const chunk = chunks[next++];
+        const batch = writeBatch(db);
+        chunk.forEach((id) => batch.delete(doc(db, PRODUCTS_COLLECTION, id)));
+        await batch.commit();
+        done += chunk.length;
+        showDeleteProgress({ label: `${done.toLocaleString()} of ${ids.length.toLocaleString()} deleted`, pct: Math.round((done / ids.length) * 100) });
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, chunks.length) }, worker));
+
     selectedProductIds.clear();
     await reloadAfterWrite();
     updateBulkDeleteBar();
@@ -2491,8 +2522,9 @@ async function handleDeleteAllProducts() {
     window.alert("Something went wrong while deleting. Some products may still be left. Reload the page to see what remains, then try again.");
     try { await reloadAfterWrite(); } catch (e) { /* ignore */ }
   } finally {
+    hideDeleteProgress();
+    deleteAllRunning = false;
     btn.disabled = false;
-    btn.innerHTML = originalHtml;
   }
 }
 
