@@ -1294,6 +1294,8 @@ button {
 
 .btn-primary svg { width: 15px; height: 15px; }
 .btn-outline svg { width: 15px; height: 15px; }
+.admin-toolbar .btn-danger-outline { display: flex; align-items: center; gap: 8px; }
+.btn-danger-outline svg { width: 15px; height: 15px; flex-shrink: 0; }
 
 /* ===========================
    PER-ROW ADMIN ACTIONS
