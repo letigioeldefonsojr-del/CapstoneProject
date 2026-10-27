@@ -742,6 +742,7 @@ function wireAdminControls() {
   });
 
   document.getElementById("bulk-import-btn").addEventListener("click", showCsvGuide);
+  document.getElementById("export-csv-btn")?.addEventListener("click", exportInventoryCsv);
   document.getElementById("csv-file-input").addEventListener("change", handleCsvFileSelected);
   document.getElementById("csv-ignore-qty").addEventListener("change", () => {
     if (rawCsvRows.length > 0) remapAndRenderCsvPreview();
@@ -1263,6 +1264,71 @@ const EXPECTED_CSV_HEADERS = Object.keys(CSV_COLUMN_MAP);
 function findMissingHeaders(actualFields) {
   const normalizedActual = (actualFields || []).map((h) => h.trim().toLowerCase());
   return EXPECTED_CSV_HEADERS.filter((expected) => !normalizedActual.includes(expected));
+}
+
+// ---- Save the current inventory as a CSV (backup / copy) -------------
+// Same columns the importer expects, so the file can be imported again.
+// A product with variants becomes one row per variant. Extra columns
+// (barcode, product_name, variant_name) are ignored by the importer.
+function csvCell(value) {
+  const text = value === null || value === undefined ? "" : String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+function priceNumber(value) {
+  if (typeof value === "number") return value;
+  const n = parseFloat(String(value ?? "").replace(/[^\d.]/g, ""));
+  return isNaN(n) ? "" : n;
+}
+
+function exportInventoryCsv() {
+  const headers = ["sku", "description", "category", "principal", "unit", "qty", "qty 1", "qty 2", "unit_price", "unit_ws", "selling_type", "barcode", "product_name", "variant_name"];
+  const lines = [headers.join(",")];
+
+  const sorted = [...allProducts].sort((a, b) => String(a[PRODUCT_NAME_FIELD] || "").localeCompare(String(b[PRODUCT_NAME_FIELD] || "")));
+  sorted.forEach((p) => {
+    const variants = getVariants(p);
+    if (variants.length > 0) {
+      variants.forEach((v) => {
+        const isObj = v && typeof v === "object";
+        const vName = isObj ? (v.name || "") : String(v);
+        lines.push([
+          isObj ? (v.sku || v[BARCODE_FIELD] || "") : "",
+          `${p[PRODUCT_NAME_FIELD] || ""} ${vName}`.trim(),
+          p[PRODUCT_CATEGORY_FIELD], p.principal, p.unit,
+          isObj && typeof v[VARIANT_STOCK_FIELD] === "number" ? v[VARIANT_STOCK_FIELD] : "",
+          isObj ? (v.qty1 ?? "") : "", isObj ? (v.qty2 ?? "") : "",
+          isObj ? priceNumber(v[PRODUCT_PRICE_FIELD]) : "",
+          isObj ? priceNumber(v.wholesalePrice) : "",
+          p[PRODUCT_SELLING_TYPE_FIELD], isObj ? (v[BARCODE_FIELD] || "") : "",
+          p[PRODUCT_NAME_FIELD], vName
+        ].map(csvCell).join(","));
+      });
+    } else {
+      lines.push([
+        p.sku || p[BARCODE_FIELD] || "",
+        p[PRODUCT_NAME_FIELD], p[PRODUCT_CATEGORY_FIELD], p.principal, p.unit,
+        typeof p[STOCK_FIELD] === "number" ? p[STOCK_FIELD] : "",
+        p.qty1 ?? "", p.qty2 ?? "",
+        priceNumber(p[PRODUCT_PRICE_FIELD]), priceNumber(p.wholesalePrice),
+        p[PRODUCT_SELLING_TYPE_FIELD], p[BARCODE_FIELD] || "",
+        "", ""
+      ].map(csvCell).join(","));
+    }
+  });
+
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  // The BOM makes Excel read accents and the peso sign correctly.
+  const blob = new Blob(["\uFEFF" + lines.join("\r\n") + "\r\n"], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `almares-inventory-${stamp}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 // ---- Instructions shown before a CSV is chosen ----------------------
