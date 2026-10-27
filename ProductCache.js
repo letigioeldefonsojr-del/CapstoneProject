@@ -53,6 +53,13 @@ export async function getProducts() {
   return inflight;
 }
 
+// Called by a live listener so the cache always holds the latest list.
+export function primeProductsCache(products) {
+  generation++;
+  memory = { timestamp: Date.now(), products };
+  idbWrite(memory);
+}
+
 export function invalidateProductsCache() {
   memory = null;
   generation++;

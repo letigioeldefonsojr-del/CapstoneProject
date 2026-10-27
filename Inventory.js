@@ -1,9 +1,9 @@
 import { db } from "./firebase-config.js";
 import {
   collection, addDoc, updateDoc, doc, writeBatch, serverTimestamp, runTransaction,
-  getDocs, query, orderBy, limit, deleteField, Timestamp
+  getDocs, query, orderBy, limit, deleteField, Timestamp, onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
-import { getProducts, invalidateProductsCache } from "./ProductCache.js";
+import { getProducts, invalidateProductsCache, primeProductsCache } from "./ProductCache.js?v=2";
 import { confirmDialog } from "./ConfirmDialog.js";
 import { promptPasswordConfirm } from "./PasswordConfirm.js";
 import { fuzzyMatch } from "./FuzzySearch.js";
@@ -164,12 +164,45 @@ document.addEventListener("sidebar:ready", (event) => {
 // CHUNK 2 — LOAD (via the shared cache — see ProductCache.js. On a
 // cache hit this resolves near-instantly with zero network request.)
 // ====================================================================
+let productsUnsub = null;       // live listener handle
+let liveRenderTimer = null;     // groups rapid changes (e.g. bulk delete) into one redraw
+
+// Keeps the list in sync with Firestore: deletes, additions and edits made
+// here or anywhere else show up without a refresh.
+function startLiveProducts() {
+  if (productsUnsub) return;
+  productsUnsub = onSnapshot(
+    collection(db, PRODUCTS_COLLECTION),
+    (snap) => {
+      allProducts = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      // drop selections for products that no longer exist
+      const liveIds = new Set(allProducts.map((p) => p.id));
+      let selectionChanged = false;
+      selectedProductIds.forEach((id) => {
+        if (!liveIds.has(id)) { selectedProductIds.delete(id); selectionChanged = true; }
+      });
+      primeProductsCache(allProducts); // other pages reuse this fresh copy
+      clearTimeout(liveRenderTimer);
+      liveRenderTimer = setTimeout(() => {
+        populateCategoryFilter(allProducts);
+        applyFiltersAndRender();
+        if (selectionChanged) updateBulkDeleteBar();
+      }, 250);
+    },
+    (error) => {
+      console.error("Live product updates stopped:", error);
+      productsUnsub = null;
+    }
+  );
+}
+
 async function loadInventory() {
   try {
-    allProducts = await getProducts();
+    allProducts = await getProducts(); // fast first paint from the cache
     populateCategoryFilter(allProducts);
     applyUrlFilter();
     applyFiltersAndRender();
+    startLiveProducts();               // then stay live
   } catch (error) {
     console.error("Couldn't load products:", error);
     document.getElementById("inventory-tbody").innerHTML =
@@ -178,6 +211,11 @@ async function loadInventory() {
 }
 
 async function reloadAfterWrite() {
+  if (productsUnsub) {
+    // The live listener already delivers the change; just redraw now.
+    applyFiltersAndRender();
+    return;
+  }
   invalidateProductsCache();
   allProducts = await getProducts();
   populateCategoryFilter(allProducts);
