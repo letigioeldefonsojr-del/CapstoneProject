@@ -16,15 +16,22 @@ import {
 // attached can't be credited to anyone and are not counted here.
 // Fully refunded in-store sales are left out.
 // ====================================================================
-const PERIODS = [
-  { key: "30", label: "Last 30 days", days: 30 },
-  { key: "90", label: "Last 90 days", days: 90 },
-  { key: "365", label: "Last 12 months", days: 365 },
-  { key: "all", label: "All time", days: null }
-];
+// The ranking is per calendar year and starts again from zero on January 1
+// at 12:00 midnight (the clock of the device the admin is using). Earlier
+// years stay available in the dropdown, and "All time" is there too.
+const THIS_YEAR = () => new Date().getFullYear();
+function periodOptions() {
+  const y = THIS_YEAR();
+  return [
+    { key: `y${y}`, label: `This year (${y})`, year: y },
+    { key: `y${y - 1}`, label: String(y - 1), year: y - 1 },
+    { key: `y${y - 2}`, label: String(y - 2), year: y - 2 },
+    { key: "all", label: "All time", year: null }
+  ];
+}
 const SHOW_LIMIT = 10;
 
-let period = "all";
+let period = `y${new Date().getFullYear()}`;
 let showAll = false;
 let searchText = "";
 let ranked = [];
@@ -46,15 +53,18 @@ function esc(v) {
 
 async function load() {
   el.innerHTML = `<p class="forecast-loading">Loading top customers...</p>`;
-  const p = PERIODS.find((x) => x.key === period);
-  const since = p.days ? Timestamp.fromDate(new Date(Date.now() - p.days * 86400000)) : null;
+  // If the page was left open past New Year, fall back to the new current year.
+  if (!periodOptions().some((x) => x.key === period)) period = `y${THIS_YEAR()}`;
+  const p = periodOptions().find((x) => x.key === period);
+  const since = p.year ? Timestamp.fromDate(new Date(p.year, 0, 1, 0, 0, 0, 0)) : null;
+  const until = p.year ? Timestamp.fromDate(new Date(p.year + 1, 0, 1, 0, 0, 0, 0)) : null;
 
   try {
     const orderQ = since
-      ? query(collection(db, "orders"), where("status", "==", "delivered"), where("createdAt", ">=", since))
+      ? query(collection(db, "orders"), where("status", "==", "delivered"), where("createdAt", ">=", since), where("createdAt", "<", until))
       : query(collection(db, "orders"), where("status", "==", "delivered"));
     const posQ = since
-      ? query(collection(db, "posSales"), where("createdAt", ">=", since))
+      ? query(collection(db, "posSales"), where("createdAt", ">=", since), where("createdAt", "<", until))
       : collection(db, "posSales");
     const [orders, pos] = await Promise.all([getDocs(orderQ), getDocs(posQ)]);
 
@@ -105,7 +115,7 @@ function render() {
   const pool = searching ? ranked.filter((c) => c.name.toLowerCase().includes(needle)) : ranked;
   const rankOf = new Map(ranked.map((c, i) => [c.key, i + 1]));
   const rows = searching || showAll ? pool : pool.slice(0, SHOW_LIMIT);
-  const options = PERIODS.map((p) => `<option value="${p.key}"${p.key === period ? " selected" : ""}>${p.label}</option>`).join("");
+  const options = periodOptions().map((p) => `<option value="${p.key}"${p.key === period ? " selected" : ""}>${p.label}</option>`).join("");
 
   const list = rows.length === 0
     ? (searching ? `<p class="forecast-loading">No customer matching "${esc(searchText.trim())}" has a completed purchase in this period.</p>` : `<p class="forecast-loading">No customer purchases in this period yet. In-store sales only count once the cashier picks a customer on the sale.</p>`)
@@ -132,7 +142,7 @@ function render() {
         <h3 class="panel__title">Top Customers</h3>
         <select id="topcust-period" class="feedback-sort-select" aria-label="Period">${options}</select>
       </div>
-      <p class="topcust__sub">Ranked by number of purchases, online and in-store combined. Ties are ordered by total spent.</p>
+      <p class="topcust__sub">Ranked by number of purchases, online and in-store combined. Ties are ordered by total spent. The count starts again from zero every January 1.</p>
       <input type="search" id="topcust-search" class="topcust__search" placeholder="Search a customer by name" value="${esc(searchText)}" autocomplete="off">
       <div class="topcust__list">${list}</div>
       ${!searching && ranked.length > SHOW_LIMIT ? `<button type="button" class="btn-outline" id="topcust-more" style="margin-top:12px">${showAll ? "Show top 10 only" : `Show all ${ranked.length}`}</button>` : ""}
