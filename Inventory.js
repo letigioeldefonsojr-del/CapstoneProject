@@ -1479,6 +1479,18 @@ function handleCsvFileSelected(event) {
 function remapAndRenderCsvPreview() {
   const ignoreQty = document.getElementById("csv-ignore-qty").checked;
   parsedCsvRows = rawCsvRows.map((row) => csvRowToProduct(row, ignoreQty));
+  // Keep categories in sync: a CSV category that matches an existing one
+  // (ignoring capitals and extra spaces) reuses the existing spelling, so
+  // "canned goods" never becomes a second "Canned Goods". Truly new
+  // categories are kept and appear in every category list automatically.
+  const knownCategories = new Map(existingCategories().map((c) => [c.toLowerCase(), c]));
+  parsedCsvRows.forEach((row) => {
+    const name = normalizeCategoryName(row[PRODUCT_CATEGORY_FIELD]);
+    if (!name) return;
+    const key = name.toLowerCase();
+    if (!knownCategories.has(key)) knownCategories.set(key, name);
+    row[PRODUCT_CATEGORY_FIELD] = knownCategories.get(key);
+  });
   csvGroups = buildCsvGroups(parsedCsvRows);
   renderCsvPreview();
 }
