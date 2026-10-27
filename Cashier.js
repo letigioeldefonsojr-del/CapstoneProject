@@ -1,6 +1,6 @@
 import { db } from "./firebase-config.js";
 import {
-  collection, doc, runTransaction, serverTimestamp, getDocs, query, where, orderBy, Timestamp
+  collection, doc, getDoc, runTransaction, serverTimestamp, getDocs, query, where, orderBy, Timestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getProducts, invalidateProductsCache } from "./ProductCache.js";
 import {
@@ -95,6 +95,38 @@ async function loadProducts() {
     console.error("Couldn't load products:", error);
     showMessage("Couldn't load products. Check the connection and refresh.", true);
   }
+}
+
+// After a sale or refund we already know exactly which products changed,
+// so the on-screen list is updated in place instead of re-downloading the
+// whole catalog (which costs one database read per product).
+function applyLocalUpdates(updates) {
+  if (!updates) return;
+  for (const [productId, update] of updates) {
+    const product = products.find((p) => p.id === productId);
+    if (product) Object.assign(product, update);
+  }
+}
+
+// Re-reads ONLY the products currently in the cart (a few reads), so a
+// price or stock change on those still shows up.
+async function refreshCartProducts() {
+  const ids = [...new Set(cart.map((l) => l.productId))];
+  for (const id of ids) {
+    try {
+      const snap = await getDoc(doc(db, "products", id));
+      const index = products.findIndex((p) => p.id === id);
+      if (snap.exists()) {
+        const fresh = { id, ...snap.data() };
+        if (index >= 0) products[index] = fresh; else products.push(fresh);
+      } else if (index >= 0) {
+        products.splice(index, 1);
+      }
+    } catch (error) {
+      console.error("Couldn't refresh a cart product:", error);
+    }
+  }
+  lastLoadedAt = Date.now();
 }
 
 // ----------------------------- UI WIRING ------------------------------
@@ -216,9 +248,17 @@ function wireUi() {
     if (cart.length > 0 && !busy) { event.preventDefault(); event.returnValue = ""; }
   });
   // Stock/prices may change from other devices while the page sits open.
+  // Only the cart's items are re-read; a full reload happens only after
+  // the page has sat unused for a long time.
   window.addEventListener("focus", async () => {
-    if (!busy && Date.now() - lastLoadedAt > 60000) {
+    if (busy) return;
+    const idleMs = Date.now() - lastLoadedAt;
+    if (idleMs > 30 * 60000) {
       await loadProducts();
+      refreshCartFromProducts();
+      renderAll();
+    } else if (idleMs > 60000 && cart.length > 0) {
+      await refreshCartProducts();
       refreshCartFromProducts();
       renderAll();
     }
@@ -487,6 +527,7 @@ async function completeSale() {
   const cashierEmail = currentUser?.email || "unknown";
   const soldTo = saleCustomer;
 
+  let soldUpdates = null; // what the sale changed, applied on screen afterwards
   try {
     await runTransaction(db, async (tx) => {
       const fresh = new Map();
@@ -510,6 +551,7 @@ async function completeSale() {
 
       const plan = planStockUpdates(fresh, lines);
       if (plan.error) throw new SaleError(plan.error);
+      soldUpdates = plan.updates;
 
       for (const [productId, update] of plan.updates) {
         tx.update(doc(db, "products", productId), update);
@@ -550,7 +592,7 @@ async function completeSale() {
   } catch (error) {
     console.error("Sale failed:", error);
     if (error instanceof SaleError) {
-      await loadProducts();
+      await refreshCartProducts();
       refreshCartFromProducts();
       renderAll();
       showMessage(error.message, true);
@@ -563,6 +605,7 @@ async function completeSale() {
     return;
   }
 
+  applyLocalUpdates(soldUpdates);
   busy = false;
   btn.textContent = "Complete sale";
   loadHistory();
@@ -704,8 +747,7 @@ async function newSale() {
   $("pos-gcash-ref").value = "";
   setSaleCustomer(null);
   $("pos-input").value = "";
-  await loadProducts();      // stock just changed — show fresh numbers
-  renderAll();
+  renderAll();               // stock was already updated on screen after the sale
   $("pos-input").focus({ preventScroll: true });
 }
 
@@ -942,7 +984,7 @@ async function confirmRefund() {
         });
       });
 
-      return { total: plan.total, skipped: stock.skipped, receiptNo: sale.receiptNo };
+      return { total: plan.total, skipped: stock.skipped, receiptNo: sale.receiptNo, updates: stock.updates };
     });
   } catch (error) {
     console.error("Refund failed:", error);
@@ -965,7 +1007,7 @@ async function confirmRefund() {
   let msg = `Refunded ${formatMoney(outcome.total)} (${method}) for ${outcome.receiptNo || "the sale"}.`;
   if (outcome.skipped.length) msg += ` Not returned to stock (item no longer exists): ${outcome.skipped.join(", ")}.`;
   showMessage(msg, false);
-  await loadProducts();
+  applyLocalUpdates(outcome.updates);
   refreshCartFromProducts();
   renderAll();
   loadHistory();
