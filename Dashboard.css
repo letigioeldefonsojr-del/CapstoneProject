@@ -3391,3 +3391,4 @@ body.has-share-bar { padding-bottom: 76px; }
 .topcust__count small { display: block; font-size: 11.5px; font-weight: 600; color: var(--muted); }
 .topcust__spent { font-size: 13px; font-weight: 700; }
 @media (max-width: 520px) { .topcust__row { grid-template-columns: 30px 1fr; } .topcust__nums { grid-column: 2; text-align: left; display: flex; gap: 12px; align-items: baseline; } }
+.topcust__search { width: 100%; box-sizing: border-box; margin: 0 0 12px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 14px; background: var(--card-bg); }
