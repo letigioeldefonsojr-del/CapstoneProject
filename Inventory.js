@@ -743,6 +743,7 @@ function wireAdminControls() {
 
   document.getElementById("bulk-import-btn").addEventListener("click", showCsvGuide);
   document.getElementById("export-csv-btn")?.addEventListener("click", exportInventoryCsv);
+  document.getElementById("delete-all-btn")?.addEventListener("click", handleDeleteAllProducts);
   document.getElementById("csv-file-input").addEventListener("change", handleCsvFileSelected);
   document.getElementById("csv-ignore-qty").addEventListener("change", () => {
     if (rawCsvRows.length > 0) remapAndRenderCsvPreview();
@@ -2442,6 +2443,56 @@ async function handleBulkDelete() {
     deleteBtn.disabled = false;
     deleteBtn.textContent = "Delete Selected";
     updateBulkDeleteBar();
+  }
+}
+
+// Removes EVERY product, not just the rows on screen (the table shows
+// them in batches, so "select all" only reaches what is loaded). A backup
+// CSV is downloaded first, then the admin's password is asked for.
+async function handleDeleteAllProducts() {
+  if (!isAdmin) return;
+
+  // Ask the database, not the screen, so nothing is missed.
+  const snap = await getDocs(collection(db, PRODUCTS_COLLECTION));
+  const ids = snap.docs.map((d) => d.id);
+  if (ids.length === 0) {
+    window.alert("There are no products to delete.");
+    return;
+  }
+
+  exportInventoryCsv(); // safety copy before anything is removed
+
+  const verified = await promptPasswordConfirm(
+    `A backup CSV of your inventory was just downloaded. Enter your password to permanently delete ALL ${ids.length.toLocaleString()} products. This can't be undone.`,
+    {
+      title: `Delete all ${ids.length.toLocaleString()} products?`,
+      confirmLabel: "Delete Everything"
+    }
+  );
+  if (!verified) return;
+
+  const btn = document.getElementById("delete-all-btn");
+  const originalHtml = btn.innerHTML;
+  btn.disabled = true;
+
+  try {
+    const BATCH_LIMIT = 450; // Firestore allows 500 operations per batch
+    for (let i = 0; i < ids.length; i += BATCH_LIMIT) {
+      btn.textContent = `Deleting ${Math.min(i + BATCH_LIMIT, ids.length).toLocaleString()} / ${ids.length.toLocaleString()}...`;
+      const batch = writeBatch(db);
+      ids.slice(i, i + BATCH_LIMIT).forEach((id) => batch.delete(doc(db, PRODUCTS_COLLECTION, id)));
+      await batch.commit();
+    }
+    selectedProductIds.clear();
+    await reloadAfterWrite();
+    updateBulkDeleteBar();
+  } catch (error) {
+    console.error("Couldn't delete all products:", error);
+    window.alert("Something went wrong while deleting. Some products may still be left. Reload the page to see what remains, then try again.");
+    try { await reloadAfterWrite(); } catch (e) { /* ignore */ }
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalHtml;
   }
 }
 
