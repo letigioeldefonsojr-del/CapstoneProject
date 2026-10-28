@@ -440,7 +440,8 @@ function renderResults() {
   // Nothing typed: show the whole catalogue (A–Z) so the cashier can tap items
   // instead of leaving this panel empty.
   const browsing = !term;
-  if (indexed && browsing && products.length === 0) {
+  // No catalogue list: nothing is shown until the cashier scans or types.
+  if (browsing) {
     box.innerHTML = `<p class="notif-list__empty">Scan a barcode or type a product name to find items.</p>`;
     return;
   }
