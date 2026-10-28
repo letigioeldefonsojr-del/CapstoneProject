@@ -287,9 +287,18 @@ function applyFilterAndRender() {
   });
 
   const tbody = panel.querySelector("#accounts-tbody");
-  const visibleAccounts = roleFilter === "all"
+  let visibleAccounts = roleFilter === "all"
     ? allAccounts
     : allAccounts.filter((a) => a.role === roleFilter);
+  // While something is typed in the search box, narrow the table to people
+  // who match it (staff by name, email, username or phone; customers are
+  // already the ones the search found).
+  const searchText = customerQuery.trim().toLowerCase();
+  if (searchText) {
+    visibleAccounts = visibleAccounts.filter((a) =>
+      a.role === "customer" ||
+      [a.name, a.email, a.username, a.phone].some((v) => String(v || "").toLowerCase().includes(searchText)));
+  }
 
   if (visibleAccounts.length === 0) {
     tbody.innerHTML = `<tr><td colspan="6" class="inventory-empty">${
