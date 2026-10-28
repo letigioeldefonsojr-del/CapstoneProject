@@ -3,6 +3,7 @@ import {
   collection, getDocs, query, where, Timestamp, writeBatch, doc, deleteField, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getProducts, invalidateProductsCache } from "./ProductCache.js?v=3";
+import { SALES_DAILY_COLLECTION, dayKey, dayKeyToMillis } from "./SalesDaily.js";
 import { kMeansCluster, normalizeFeatures } from "./KMeans.js";
 import { sendPromotionPushes } from "./PromotionPush.js";
 
@@ -210,22 +211,59 @@ function windowCutoffTimestamp() {
   return Timestamp.fromDate(new Date(Date.now() - VELOCITY_WINDOW_DAYS * 24 * 60 * 60 * 1000));
 }
 
+// Sales come from two places:
+//   1. The daily tally (salesDaily): one small document per day, so at
+//      most ~60 reads for the whole window, however many sales were made.
+//   2. The individual sale lines in stockMovements, but ONLY for days
+//      before the tally existed. This part shrinks to nothing as the
+//      60-day window moves past the day the tally started.
 async function fetchSaleMovements() {
-  const q = query(
-    collection(db, STOCK_MOVEMENTS_COLLECTION),
-    where("type", "==", "sale"),
-    where("createdAt", ">=", windowCutoffTimestamp())
-  );
-  const snap = await getDocs(q);
+  const cutoffDate = new Date(Date.now() - VELOCITY_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const events = [];
+  let earliestTallyDay = null;
 
-  return snap.docs
-    .map((docSnap) => {
+  try {
+    const tallySnap = await getDocs(query(
+      collection(db, SALES_DAILY_COLLECTION),
+      where("date", ">=", dayKey(cutoffDate))
+    ));
+    tallySnap.forEach((docSnap) => {
       const data = docSnap.data();
-      const unitsSold = (data.previousStock ?? 0) - (data.newStock ?? 0);
-      const timestampMillis = data.createdAt?.toMillis?.();
-      return { productId: data.productId, unitsSold, timestampMillis };
-    })
-    .filter((entry) => entry.productId && entry.unitsSold > 0 && entry.timestampMillis);
+      if (!data.date || typeof data.units !== "object") return;
+      if (earliestTallyDay === null || data.date < earliestTallyDay) earliestTallyDay = data.date;
+      const timestampMillis = dayKeyToMillis(data.date, 12);
+      Object.entries(data.units).forEach(([productId, unitsSold]) => {
+        if (productId && typeof unitsSold === "number" && unitsSold > 0) {
+          events.push({ productId, unitsSold, timestampMillis });
+        }
+      });
+    });
+  } catch (error) {
+    // Tally unreadable (e.g. rules not published yet): fall back to sale lines for the whole window.
+    console.error("Couldn't read the daily sales tally:", error);
+    earliestTallyDay = null;
+    events.length = 0;
+  }
+
+  const constraints = [
+    where("type", "==", "sale"),
+    where("createdAt", ">=", Timestamp.fromDate(cutoffDate))
+  ];
+  if (earliestTallyDay) {
+    constraints.push(where("createdAt", "<", Timestamp.fromMillis(dayKeyToMillis(earliestTallyDay))));
+  }
+  const snap = await getDocs(query(collection(db, STOCK_MOVEMENTS_COLLECTION), ...constraints));
+
+  snap.docs.forEach((docSnap) => {
+    const data = docSnap.data();
+    const unitsSold = (data.previousStock ?? 0) - (data.newStock ?? 0);
+    const timestampMillis = data.createdAt?.toMillis?.();
+    if (data.productId && unitsSold > 0 && timestampMillis) {
+      events.push({ productId: data.productId, unitsSold, timestampMillis });
+    }
+  });
+
+  return events;
 }
 
 // Only "delivered" orders count — pending/approved/on_the_way haven't

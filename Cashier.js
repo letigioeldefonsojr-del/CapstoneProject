@@ -4,6 +4,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getProducts, primeProductsCache } from "./ProductCache.js?v=3";
 import { queryToken } from "./ProductIndex.js";
+import { recordSaleTally } from "./SalesDaily.js";
 import {
   candidatesForProduct, findCandidateByBarcode, searchProducts,
   addToCart, setLineQty, setLineMode, removeLine,
@@ -650,6 +651,7 @@ async function completeSale() {
   const soldTo = saleCustomer;
 
   let soldUpdates = null; // what the sale changed, applied on screen afterwards
+  let soldMovements = null; // per-product stock changes, used for the daily sales tally
   let savedSale = null;   // the sale record as saved, added to today's list without re-reading it
   try {
     await runTransaction(db, async (tx) => {
@@ -675,6 +677,7 @@ async function completeSale() {
       const plan = planStockUpdates(fresh, lines);
       if (plan.error) throw new SaleError(plan.error);
       soldUpdates = plan.updates;
+      soldMovements = plan.movements;
 
       for (const [productId, update] of plan.updates) {
         tx.update(doc(db, "products", productId), update);
@@ -730,6 +733,7 @@ async function completeSale() {
   }
 
   applyLocalUpdates(soldUpdates);
+  recordSaleTally(soldMovements); // after the sale is saved; never blocks it
   busy = false;
   btn.textContent = "Complete sale";
   addSaleToHistory({ id: saleRef.id, ...savedSale, createdAt: Timestamp.now() });

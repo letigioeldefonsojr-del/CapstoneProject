@@ -8,6 +8,7 @@ import { confirmDialog } from "./ConfirmDialog.js";
 import { promptPasswordConfirm } from "./PasswordConfirm.js";
 import { fuzzyMatch } from "./FuzzySearch.js";
 import { buildSearchFields, needsIndexUpdate } from "./ProductIndex.js";
+import { recordSaleTally } from "./SalesDaily.js";
 import { sendPromotionPushes } from "./PromotionPush.js";
 
 // ====================================================================
@@ -2120,6 +2121,9 @@ async function handleScannerAction() {
       newStock: result.newStock,
       unitPrice: scannerMode === "sale" ? result.unitPrice : null
     });
+    if (scannerMode === "sale") {
+      recordSaleTally([{ productId: result.productId, previousStock: result.previousStock, newStock: result.newStock }]);
+    }
 
     scannerCurrentMatch = null;
     document.getElementById("scanner-found").hidden = true;

@@ -166,6 +166,13 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow write: if isEmployee() || isAdmin();
     }
+    // Daily sales tally: one document per day with units sold per product.
+    // Written by the Cashier / scanner after each sale, read by Stock
+    // Monitoring. Staff only; never deleted from the app.
+    match /salesDaily/{day} {
+      allow read: if isEmployee() || isAdmin();
+      allow create, update: if isEmployee() || isAdmin();
+    }
     // Stock movement log: append-only audit trail of inventory stock
     // changes (barcode scanner sales/counts, manual edits). Both roles
     // can read and create; nothing is ever updated or deleted here —
