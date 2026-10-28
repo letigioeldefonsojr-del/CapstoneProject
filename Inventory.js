@@ -1,12 +1,13 @@
 import { db } from "./firebase-config.js";
 import {
   collection, addDoc, updateDoc, doc, writeBatch, serverTimestamp, runTransaction,
-  getDocs, query, orderBy, limit, deleteField, Timestamp, onSnapshot
+  getDocs, query, orderBy, limit, deleteField, Timestamp, onSnapshot, setDoc
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getProducts, invalidateProductsCache, primeProductsCache } from "./ProductCache.js?v=3";
 import { confirmDialog } from "./ConfirmDialog.js";
 import { promptPasswordConfirm } from "./PasswordConfirm.js";
 import { fuzzyMatch } from "./FuzzySearch.js";
+import { buildSearchFields, needsIndexUpdate } from "./ProductIndex.js";
 import { sendPromotionPushes } from "./PromotionPush.js";
 
 // ====================================================================
@@ -801,6 +802,7 @@ function wireAdminControls() {
   document.getElementById("bulk-import-btn").addEventListener("click", showCsvGuide);
   document.getElementById("export-csv-btn")?.addEventListener("click", exportInventoryCsv);
   document.getElementById("delete-all-btn")?.addEventListener("click", handleDeleteAllProducts);
+  document.getElementById("index-products-btn")?.addEventListener("click", handleIndexProducts);
   document.getElementById("csv-file-input").addEventListener("change", handleCsvFileSelected);
   document.getElementById("csv-ignore-qty").addEventListener("change", () => {
     if (rawCsvRows.length > 0) remapAndRenderCsvPreview();
@@ -1189,10 +1191,12 @@ async function handleProductFormSubmit(event) {
 
   try {
     if (isEditing) {
+      Object.assign(productData, buildSearchFields({ ...editOriginalProduct, ...productData }));
       await updateDoc(doc(db, PRODUCTS_COLLECTION, editingProductId), productData);
       logManualStockChanges(editOriginalProduct, productData, name, editingProductId);
     } else {
       productData.createdAt = serverTimestamp();
+      Object.assign(productData, buildSearchFields(productData));
       await addDoc(collection(db, PRODUCTS_COLLECTION), productData);
     }
 
@@ -1883,6 +1887,7 @@ async function handleConfirmCsvImport() {
       const batch = writeBatch(db);
       chunk.forEach((row) => {
         const productData = { ...row };
+        Object.assign(productData, buildSearchFields(productData));
         productData.createdAt = serverTimestamp();
         const newDocRef = doc(collection(db, PRODUCTS_COLLECTION));
         batch.set(newDocRef, productData);
@@ -2525,15 +2530,61 @@ function showDeleteProgress(text) {
     box = document.createElement("div");
     box.id = "delete-progress";
     box.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;font-family:inherit;";
-    box.innerHTML = '<div style="background:#fff;border-radius:16px;padding:24px 32px;min-width:260px;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.25)"><div style="font-weight:700;font-size:16px;margin-bottom:10px">Deleting products...</div><div id="delete-progress-text" style="font-size:14px;color:#555;margin-bottom:14px"></div><div style="height:8px;background:#eee;border-radius:99px;overflow:hidden"><div id="delete-progress-bar" style="height:100%;width:0;background:#c0392b;transition:width .2s"></div></div><div style="font-size:12px;color:#888;margin-top:12px">Please keep this page open.</div></div>';
+    box.innerHTML = '<div style="background:#fff;border-radius:16px;padding:24px 32px;min-width:260px;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.25)"><div id="delete-progress-title" style="font-weight:700;font-size:16px;margin-bottom:10px">Deleting products...</div><div id="delete-progress-text" style="font-size:14px;color:#555;margin-bottom:14px"></div><div style="height:8px;background:#eee;border-radius:99px;overflow:hidden"><div id="delete-progress-bar" style="height:100%;width:0;background:#c0392b;transition:width .2s"></div></div><div style="font-size:12px;color:#888;margin-top:12px">Please keep this page open.</div></div>';
     document.body.appendChild(box);
   }
+  document.getElementById("delete-progress-title").textContent = text.title || "Deleting products...";
   document.getElementById("delete-progress-text").textContent = text.label;
   document.getElementById("delete-progress-bar").style.width = text.pct + "%";
 }
 
 function hideDeleteProgress() {
   document.getElementById("delete-progress")?.remove();
+}
+
+// One-time (and safe to repeat) tool: adds the search helper fields to every
+// product that lacks them, then tells the Cashier it may look products up on
+// demand. Uses the product list already on screen, so it reads nothing extra.
+let indexRunning = false;
+
+async function handleIndexProducts() {
+  if (!isAdmin || indexRunning) return;
+  const todo = allProducts.filter((p) => needsIndexUpdate(p));
+  const confirmed = await confirmDialog(
+    todo.length === 0
+      ? "Every product is already prepared. Mark the Cashier as ready for fast search?"
+      : `This updates ${todo.length.toLocaleString()} product${todo.length === 1 ? "" : "s"} (a search helper field only; names, prices and stock are not touched). It takes about a minute. Keep this page open.`,
+    { title: "Prepare products for fast Cashier search?", confirmLabel: "Start" }
+  );
+  if (!confirmed) return;
+
+  indexRunning = true;
+  const btn = document.getElementById("index-products-btn");
+  btn.disabled = true;
+  const title = "Preparing products...";
+  try {
+    const BATCH_LIMIT = 450;
+    let done = 0;
+    showDeleteProgress({ title, label: `0 of ${todo.length.toLocaleString()} prepared`, pct: 0 });
+    for (let i = 0; i < todo.length; i += BATCH_LIMIT) {
+      const chunk = todo.slice(i, i + BATCH_LIMIT);
+      const batch = writeBatch(db);
+      chunk.forEach((p) => batch.update(doc(db, PRODUCTS_COLLECTION, p.id), buildSearchFields(p)));
+      await batch.commit();
+      done += chunk.length;
+      showDeleteProgress({ title, label: `${done.toLocaleString()} of ${todo.length.toLocaleString()} prepared`, pct: Math.round((done / Math.max(todo.length, 1)) * 100) });
+    }
+    await setDoc(doc(db, "settings", "productIndex"), { ready: true, count: allProducts.length, updatedAt: serverTimestamp() });
+    hideDeleteProgress();
+    window.alert("Done. The Cashier will now find products with quick lookups instead of downloading the whole catalogue.");
+  } catch (error) {
+    console.error("Couldn't prepare products:", error);
+    hideDeleteProgress();
+    window.alert("Something went wrong. Nothing is broken, you can run this again to finish the rest.");
+  } finally {
+    indexRunning = false;
+    btn.disabled = false;
+  }
 }
 
 async function handleDeleteAllProducts() {

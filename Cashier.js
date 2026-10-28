@@ -1,8 +1,9 @@
 import { db } from "./firebase-config.js";
 import {
-  collection, doc, getDoc, runTransaction, serverTimestamp, getDocs, query, where, orderBy, Timestamp
+  collection, doc, getDoc, runTransaction, serverTimestamp, getDocs, query, where, orderBy, limit, Timestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getProducts, primeProductsCache } from "./ProductCache.js?v=3";
+import { queryToken } from "./ProductIndex.js";
 import {
   candidatesForProduct, findCandidateByBarcode, searchProducts,
   addToCart, setLineQty, setLineMode, removeLine,
@@ -23,7 +24,9 @@ import {
 // ====================================================================
 const STORE_NAME = "Almares 328";
 
-let products = [];
+let products = [];         // the working set: everything looked up or loaded so far
+let indexed = false;       // true = products are found with database queries, not a full download
+const seenAt = new Map();  // product id -> when this copy was fetched (to refresh old copies)
 let cart = [];
 let method = "cash";
 let currentUser = null;
@@ -46,7 +49,7 @@ document.addEventListener("sidebar:ready", async (event) => {
   currentRole = event.detail.role || "employee";
   wireUi();
   wireHistory();
-  await loadProducts();
+  await initCatalog();
   renderAll();
   loadHistory();
   focusScanInput();
@@ -87,11 +90,94 @@ document.addEventListener("keydown", (event) => {
 window.addEventListener("focus", () => { if (!anyModalOpen()) focusScanInput(); });
 window.addEventListener("pageshow", () => focusScanInput());
 
+// ------------------------- ON-DEMAND PRODUCT LOOKUP -------------------
+// Once an admin has run "Prepare Cashier Search" in Inventory (it sets
+// settings/productIndex), the Cashier no longer downloads the whole
+// catalogue (one database read per product). It asks the database for just
+// the product that was scanned or typed, which costs a few reads. Until
+// that setup is done it keeps working the old way, so nothing breaks.
+const FRESH_MS = 10 * 60000; // a looked-up product is re-fetched after 10 minutes
+const SEARCH_LIMIT = 60;
+
+async function initCatalog() {
+  try {
+    const flag = await getDoc(doc(db, "settings", "productIndex"));
+    indexed = flag.exists() && flag.data().ready === true;
+  } catch (error) {
+    console.error("Couldn't check the search setup:", error);
+    indexed = false;
+  }
+  if (!indexed) await loadProducts();
+  else products = [];
+}
+
+function mergeIntoWorkingSet(list) {
+  const now = Date.now();
+  list.forEach((product) => {
+    const index = products.findIndex((p) => p.id === product.id);
+    if (index >= 0) products[index] = product; else products.push(product);
+    seenAt.set(product.id, now);
+  });
+}
+
+async function fetchProducts(q) {
+  const snap = await getDocs(q);
+  const found = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  mergeIntoWorkingSet(found);
+  return found;
+}
+
+function isFresh(candidate) {
+  return Date.now() - (seenAt.get(candidate.productId) || 0) < FRESH_MS;
+}
+
+// Finds a scanned code: in this session's working set first, then in the database.
+async function lookupBarcode(code) {
+  const local = findCandidateByBarcode(products, code);
+  if (!indexed) return local;
+  if (local && isFresh(local)) return local;
+  const col = collection(db, "products");
+  const attempts = [
+    where("barcodes", "array-contains", code), // all codes incl. variants
+    where("barcode", "==", code),               // older products
+    where("sku", "==", code)
+  ];
+  try {
+    for (const condition of attempts) {
+      const found = await fetchProducts(query(col, condition, limit(3)));
+      const hit = findCandidateByBarcode(found, code);
+      if (hit) return hit;
+    }
+  } catch (error) {
+    console.error("Barcode lookup failed:", error);
+  }
+  return findCandidateByBarcode(products, code);
+}
+
+// Asks the database for products with a word starting like the typed text,
+// then the usual fuzzy matching narrows it down on screen.
+const searchedTokens = new Map(); // token -> when it was last searched
+async function remoteSearch(term) {
+  if (!indexed) return;
+  if (/^\d{6,}$/.test(term)) return; // looks like a barcode, handled by lookupBarcode
+  const token = queryToken(term);
+  if (!token) return;
+  if (Date.now() - (searchedTokens.get(token) || 0) < 60000) return; // searched a moment ago
+  searchedTokens.set(token, Date.now());
+  try {
+    await fetchProducts(query(collection(db, "products"), where("searchTokens", "array-contains", token), limit(SEARCH_LIMIT)));
+  } catch (error) {
+    console.error("Search failed:", error);
+    searchedTokens.delete(token);
+  }
+}
+
 // Keeps the shared saved copy of the catalog in step with this register's
 // own sales and refunds, so coming back to this page (or opening another
 // page that needs the products) within a few minutes costs no reads.
 let primeTimer = null;
 function saveProductsCopy() {
+  if (indexed) return; // the working set is only part of the catalogue; never share it as if it were all
   clearTimeout(primeTimer);
   primeTimer = setTimeout(() => primeProductsCache(products), 1500);
 }
@@ -131,6 +217,7 @@ async function refreshCartProducts() {
       if (snap.exists()) {
         const fresh = { id, ...snap.data() };
         if (index >= 0) products[index] = fresh; else products.push(fresh);
+        seenAt.set(id, Date.now());
       } else if (index >= 0) {
         products.splice(index, 1);
       }
@@ -160,26 +247,42 @@ function wireUi() {
       }
     }
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(renderResults, 120);
+    renderResults();
+    if (indexed) {
+      // Ask the database only after the typing pauses (a scanner types in an instant).
+      searchTimer = setTimeout(async () => {
+        const term = input.value.trim();
+        if (!term) return;
+        await remoteSearch(term);
+        if (input.value.trim() === term) renderResults();
+      }, 400);
+    } else {
+      searchTimer = setTimeout(renderResults, 120);
+    }
   });
 
-  input.addEventListener("keydown", (event) => {
+  input.addEventListener("keydown", async (event) => {
     if (event.key !== "Enter") return;
     event.preventDefault();
     const value = input.value.trim();
     if (!value) return;
-    const hit = findCandidateByBarcode(products, value);
-    if (hit) {
-      add(hit);
-    } else {
-      const first = searchProducts(products, value)
-        .flatMap((p) => candidatesForProduct(p))
-        .find((c) => c.inStock);
-      if (first) add(first);
-      else showMessage(`Nothing in stock matches "${value}".`, true);
+    clearTimeout(searchTimer);
+    input.value = ""; // cleared at once so the next scan can start while this one is looked up
+    try {
+      const hit = await lookupBarcode(value);
+      if (hit) {
+        add(hit);
+      } else {
+        await remoteSearch(value);
+        const first = searchProducts(products, value)
+          .flatMap((p) => candidatesForProduct(p))
+          .find((c) => c.inStock);
+        if (first) add(first);
+        else showMessage(`Nothing in stock matches "${value}".`, true);
+      }
+    } finally {
+      renderResults();
     }
-    input.value = "";
-    renderResults();
   });
 
   $("pos-results").addEventListener("click", (event) => {
@@ -268,7 +371,7 @@ function wireUi() {
     const idleMs = Date.now() - lastLoadedAt;
     // Whole catalog costs one read per product, so it is re-downloaded
     // only rarely (e.g. a register left open since the day before).
-    if (Date.now() - lastFullLoadAt > 3 * 60 * 60000) {
+    if (!indexed && Date.now() - lastFullLoadAt > 3 * 60 * 60000) {
       await loadProducts();
       refreshCartFromProducts();
       renderAll();
@@ -336,6 +439,10 @@ function renderResults() {
   // Nothing typed: show the whole catalogue (A–Z) so the cashier can tap items
   // instead of leaving this panel empty.
   const browsing = !term;
+  if (indexed && browsing && products.length === 0) {
+    box.innerHTML = `<p class="notif-list__empty">Scan a barcode or type a product name to find items.</p>`;
+    return;
+  }
   const rows = (browsing ? products : searchProducts(products, term))
     .flatMap((p) => candidatesForProduct(p));
   if (browsing) rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
@@ -344,7 +451,7 @@ function renderResults() {
     box.innerHTML = `<p class="notif-list__empty">No products match "${esc(term)}".</p>`;
     return;
   }
-  box.innerHTML = (browsing ? `<p class="pos-hint pos-results__label">All products (A–Z) — tap Add, or scan / search above</p>` : "") + rows.slice(0, browsing ? 200 : 40).map((c) => `
+  box.innerHTML = (browsing ? `<p class="pos-hint pos-results__label">${indexed ? "Recently found items" : "All products (A–Z)"} — tap Add, or scan / search above</p>` : "") + rows.slice(0, browsing ? 200 : 40).map((c) => `
     <div class="pos-result ${c.inStock ? "" : "is-out"}">
       <div class="pos-result__info">
         <span class="pos-result__name">${esc(c.name)}</span>
@@ -543,6 +650,7 @@ async function completeSale() {
   const soldTo = saleCustomer;
 
   let soldUpdates = null; // what the sale changed, applied on screen afterwards
+  let savedSale = null;   // the sale record as saved, added to today's list without re-reading it
   try {
     await runTransaction(db, async (tx) => {
       const fresh = new Map();
@@ -572,7 +680,7 @@ async function completeSale() {
         tx.update(doc(db, "products", productId), update);
       }
 
-      tx.set(saleRef, {
+      const saleData = {
         receiptNo,
         items: buildSaleItems(lines),
         total,
@@ -584,9 +692,10 @@ async function completeSale() {
         cashierUid: currentUser.uid,
         cashierEmail,
         cashierRole: currentRole,
-        ...customerFields(saleCustomer),
-        createdAt: serverTimestamp()
-      });
+        ...customerFields(saleCustomer)
+      };
+      savedSale = saleData;
+      tx.set(saleRef, { ...saleData, createdAt: serverTimestamp() });
 
       plan.movements.forEach((m, i) => {
         tx.set(movementRefs[i], {
@@ -623,7 +732,7 @@ async function completeSale() {
   applyLocalUpdates(soldUpdates);
   busy = false;
   btn.textContent = "Complete sale";
-  loadHistory();
+  addSaleToHistory({ id: saleRef.id, ...savedSale, createdAt: Timestamp.now() });
   showReceipt({
     receiptNo, lines, total, units,
     paymentMethod: method, tendered: pay.tendered, change: pay.change,
@@ -822,6 +931,15 @@ function wireHistory() {
   $("pos-refund-confirm").addEventListener("click", confirmRefund);
 }
 
+// Adds a just-completed sale to today's list on screen. Re-reading the whole
+// day after every sale would cost more reads with each sale made.
+function addSaleToHistory(sale) {
+  if ($("pos-history-date").value !== dateInputValue(new Date())) return; // another day is shown
+  if (historySales.some((x) => x.id === sale.id)) return;
+  historySales.unshift(sale);
+  renderHistory();
+}
+
 async function loadHistory() {
   const body = $("pos-history-body");
   body.innerHTML = `<tr><td colspan="7" class="inventory-empty">Loading...</td></tr>`;
@@ -999,7 +1117,10 @@ async function confirmRefund() {
         });
       });
 
-      return { total: plan.total, skipped: stock.skipped, receiptNo: sale.receiptNo, updates: stock.updates };
+      return {
+        total: plan.total, skipped: stock.skipped, receiptNo: sale.receiptNo, updates: stock.updates,
+        refundedQtys: plan.refundedQtys, refundedTotal: plan.refundedTotal, refundStatus: plan.status
+      };
     });
   } catch (error) {
     console.error("Refund failed:", error);
@@ -1025,5 +1146,13 @@ async function confirmRefund() {
   applyLocalUpdates(outcome.updates);
   refreshCartFromProducts();
   renderAll();
-  loadHistory();
+  const refundedSale = historySales.find((x) => x.id === saleId);
+  if (refundedSale) {
+    refundedSale.refundedQtys = outcome.refundedQtys;
+    refundedSale.refundedTotal = outcome.refundedTotal;
+    refundedSale.refundStatus = outcome.refundStatus;
+    renderHistory();
+  } else {
+    loadHistory();
+  }
 }
