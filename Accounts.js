@@ -4,7 +4,7 @@ import {
   getAuth, createUserWithEmailAndPassword, updateProfile, signOut
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import {
-  collection, onSnapshot, doc, setDoc, getDoc, updateDoc, deleteDoc, deleteField, Timestamp, serverTimestamp
+  collection, onSnapshot, doc, setDoc, getDoc, getDocs, getCountFromServer, query, where, limit, updateDoc, deleteDoc, deleteField, Timestamp, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { confirmDialog } from "./ConfirmDialog.js";
 import { resetAttempts } from "./LoginAttempts.js";
@@ -37,6 +37,15 @@ let allAccounts = [];
 let currentAdminUid = null;
 let roleFilter = "all"; // "all" | "admin" | "employee" | "customer"
 
+// Customers are NOT downloaded in bulk (that costs one read per customer, on
+// every visit). They are found by searching, and only the matches are kept.
+let customerDocs = [];       // customers matched by the current search
+let customerQuery = "";      // what the admin typed in the search box
+let customerTotal = null;    // how many customers exist (one cheap count)
+let customerSearching = false;
+let customerTimer = null;
+let refreshMerge = () => {};
+
 document.addEventListener("sidebar:ready", (event) => {
   // Admin-only page. The nav link is already hidden for employees
   // (see Sidebar.js), but that alone doesn't stop someone from typing
@@ -55,10 +64,9 @@ function loadAccounts() {
 
   let adminDocs = [];
   let employeeDocs = [];
-  let customerDocs = [];
   let adminLoaded = false;
   let employeeLoaded = false;
-  let customerLoaded = false;
+  let customerLoaded = true; // customers are searched on demand, not listed
 
   function mergeAndRender() {
     if (!adminLoaded || !employeeLoaded || !customerLoaded) return; // wait for all three sources before first render
@@ -67,6 +75,7 @@ function loadAccounts() {
     );
     applyFilterAndRender();
   }
+  refreshMerge = mergeAndRender;
 
   onSnapshot(
     collection(db, "admins"),
@@ -112,30 +121,88 @@ function loadAccounts() {
     }
   );
 
-  // Customers — from the mobile app's "users" collection (schema
-  // confirmed from register_screen.dart: fullName, email,
-  // mobileNumber). No "username" concept for customers, so that
-  // column just shows their mobile number instead.
-  onSnapshot(
+  // Customers (the mobile app's "users" collection: fullName, email,
+  // mobileNumber) are not loaded here. Only a cheap count is fetched; the
+  // list itself comes from the search box.
+  getCountFromServer(collection(db, "users"))
+    .then((snap) => { customerTotal = snap.data().count; mergeAndRender(); })
+    .catch((error) => console.error("Couldn't count customers:", error));
+}
+
+function toCustomerAccount(d) {
+  const data = d.data();
+  return {
+    id: d.id,
+    role: "customer",
+    name: data.fullName,
+    email: data.email,
+    username: data.mobileNumber || "—",
+    phone: data.mobileNumber,
+    suspendedUntil: data.suspendedUntil
+  };
+}
+
+function customerNameVariants(text) {
+  const t = text.trim();
+  const title = t.toLowerCase().replace(/(^|[\s\-.'])([a-z])/g, (m, sep, ch) => sep + ch.toUpperCase());
+  const first = t.charAt(0).toUpperCase() + t.slice(1);
+  return [...new Set([t, title, first, t.toUpperCase(), t.toLowerCase()])];
+}
+
+async function customerPrefixQuery(field, prefix) {
+  const snap = await getDocs(query(
     collection(db, "users"),
-    (snap) => {
-      customerDocs = snap.docs.map((d) => ({
-        id: d.id,
-        role: "customer",
-        name: d.data().fullName,
-        email: d.data().email,
-        username: d.data().mobileNumber || "—",
-        phone: d.data().mobileNumber,
-        suspendedUntil: d.data().suspendedUntil
-      }));
-      customerLoaded = true;
-      mergeAndRender();
-    },
-    (error) => {
-      console.error("Couldn't load customer accounts:", error);
-      container.innerHTML = `<p class="forecast-loading">Couldn't load accounts right now.</p>`;
-    }
-  );
+    where(field, ">=", prefix),
+    where(field, "<=", prefix + "\uf8ff"),
+    limit(25)
+  ));
+  return snap.docs.map(toCustomerAccount);
+}
+
+// Searches by the START of a name or mobile number: a few reads, not the whole list.
+async function runCustomerSearch() {
+  const text = customerQuery.trim();
+  const digits = text.replace(/[\s\-()]/g, "");
+  const jobs = [];
+  if (/^\+?\d{3,}$/.test(digits)) {
+    jobs.push(customerPrefixQuery("mobileNumber", digits));
+    if (digits.startsWith("0")) jobs.push(customerPrefixQuery("mobileNumber", "+63" + digits.slice(1)));
+  } else if (text.length >= 2) {
+    customerNameVariants(text).forEach((v) => jobs.push(customerPrefixQuery("fullName", v)));
+  }
+  customerSearching = true;
+  try {
+    const seen = new Map();
+    (await Promise.all(jobs)).flat().forEach((c) => { if (!seen.has(c.id)) seen.set(c.id, c); });
+    customerDocs = [...seen.values()];
+  } catch (error) {
+    console.error("Couldn't search customers:", error);
+    customerDocs = [];
+  } finally {
+    customerSearching = false;
+  }
+  rerenderKeepingSearchFocus();
+}
+
+function rerenderKeepingSearchFocus() {
+  refreshMerge();
+  const box = document.getElementById("accounts-customer-search");
+  if (box && document.activeElement !== box && box.dataset.hadFocus === "1") {
+    box.focus();
+    box.setSelectionRange(box.value.length, box.value.length);
+  }
+}
+
+// After suspend / lift / terminate on a customer, refresh the shown matches.
+async function refreshCustomers(account, removed = false) {
+  if (account.role !== "customer") return;
+  if (removed) {
+    customerDocs = customerDocs.filter((c) => c.id !== account.id);
+    if (customerTotal != null) customerTotal = Math.max(0, customerTotal - 1);
+    refreshMerge();
+    return;
+  }
+  await runCustomerSearch();
 }
 
 function applyFilterAndRender() {
@@ -145,12 +212,13 @@ function applyFilterAndRender() {
   const summary = document.createElement("div");
   summary.className = "forecast-summary-grid";
   const suspendedCount = allAccounts.filter((a) => isCurrentlySuspended(a)).length;
+  const staffCount = allAccounts.filter((a) => a.role !== "customer").length;
   [
-    { value: allAccounts.length, label: "Total Accounts" },
+    { value: customerTotal == null ? "…" : staffCount + customerTotal, label: "Total Accounts" },
     { value: allAccounts.filter((a) => a.role === "admin").length, label: "Admins" },
     { value: allAccounts.filter((a) => a.role === "employee").length, label: "Employees" },
-    { value: allAccounts.filter((a) => a.role === "customer").length, label: "Customers" },
-    { value: suspendedCount, label: "Currently Suspended" }
+    { value: customerTotal == null ? "…" : customerTotal, label: "Customers" },
+    { value: suspendedCount, label: "Suspended (shown below)" }
   ].forEach((card) => {
     const el = document.createElement("div");
     el.className = "panel forecast-stat-card";
@@ -166,6 +234,7 @@ function applyFilterAndRender() {
   panel.innerHTML = `
     <div class="feedback-list__header">
       <h3 class="panel__title" style="margin:0;">All Registered Accounts</h3>
+      <input type="search" id="accounts-customer-search" class="feedback-sort-select" style="min-width:230px;" placeholder="Find a customer: name or mobile" autocomplete="off">
       <button type="button" class="btn-primary" id="add-admin-btn">+ Add New Admin</button>
       <select id="accounts-role-filter" class="feedback-sort-select">
         <option value="all">All roles</option>
@@ -201,13 +270,29 @@ function applyFilterAndRender() {
 
   panel.querySelector("#add-admin-btn").addEventListener("click", handleAddNewAdmin);
 
+  const searchBox = panel.querySelector("#accounts-customer-search");
+  searchBox.value = customerQuery;
+  searchBox.addEventListener("focus", () => { searchBox.dataset.hadFocus = "1"; });
+  searchBox.addEventListener("blur", () => { searchBox.dataset.hadFocus = "0"; });
+  searchBox.addEventListener("input", () => {
+    customerQuery = searchBox.value;
+    clearTimeout(customerTimer);
+    const text = customerQuery.trim();
+    if (!text) { customerDocs = []; searchBox.dataset.hadFocus = "1"; rerenderKeepingSearchFocus(); return; }
+    searchBox.dataset.hadFocus = "1";
+    customerTimer = setTimeout(runCustomerSearch, 350);
+  });
+
   const tbody = panel.querySelector("#accounts-tbody");
   const visibleAccounts = roleFilter === "all"
     ? allAccounts
     : allAccounts.filter((a) => a.role === roleFilter);
 
   if (visibleAccounts.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" class="inventory-empty">No accounts found.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" class="inventory-empty">${
+      roleFilter === "customer" && !customerQuery.trim()
+        ? "Type a name or mobile number above to find a customer."
+        : customerSearching ? "Searching…" : "No accounts found."}</td></tr>`;
     return;
   }
 
@@ -690,6 +775,7 @@ function handleSuspend(account) {
         suspensionReason: reason
       });
       await sendAccountActionEmail(account, "suspended", reason, untilDate);
+      await refreshCustomers(account);
       close();
     } catch (error) {
       console.error("Couldn't suspend account:", error);
@@ -713,6 +799,7 @@ async function handleLiftSuspension(account) {
     await updateDoc(doc(db, collectionForRole(account.role), account.id), {
       suspendedUntil: deleteField()
     });
+    await refreshCustomers(account);
   } catch (error) {
     console.error("Couldn't lift suspension:", error);
   }
@@ -768,6 +855,7 @@ function handleTerminate(account) {
       // we no longer have their email address to send anything to.
       await sendAccountActionEmail(account, "terminated", reason, null);
       await deleteDoc(doc(db, collectionForRole(account.role), account.id));
+      await refreshCustomers(account, true);
       close();
     } catch (error) {
       console.error("Couldn't terminate account:", error);
