@@ -568,7 +568,7 @@ async function loadNotifBadge(uid, preferences) {
   // Sidebar.js runs on every page already, so this was genuinely
   // duplicated work slowing down every single page load.
   onSnapshot(
-    query(collection(db, "products"), where("stockCount", "<=", 99)),
+    query(collection(db, "products"), where("stockCount", "<=", 99), limit(30)),
     (snap) => {
       const products = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       latestProducts = products;
