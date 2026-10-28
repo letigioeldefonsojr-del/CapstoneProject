@@ -185,12 +185,18 @@ async function runCustomerSearch() {
 }
 
 function rerenderKeepingSearchFocus() {
+  // The table (including the search box) is redrawn from scratch, so note
+  // whether the admin is typing in the box right now and put the cursor back.
+  const before = document.activeElement;
+  const wasTyping = before && before.id === "accounts-customer-search";
+  const caret = wasTyping ? before.selectionStart : null;
   refreshMerge();
+  if (!wasTyping) return;
   const box = document.getElementById("accounts-customer-search");
-  if (box && document.activeElement !== box && box.dataset.hadFocus === "1") {
-    box.focus();
-    box.setSelectionRange(box.value.length, box.value.length);
-  }
+  if (!box) return;
+  box.focus();
+  const pos = caret == null ? box.value.length : Math.min(caret, box.value.length);
+  box.setSelectionRange(pos, pos);
 }
 
 // After suspend / lift / terminate on a customer, refresh the shown matches.
@@ -272,14 +278,11 @@ function applyFilterAndRender() {
 
   const searchBox = panel.querySelector("#accounts-customer-search");
   searchBox.value = customerQuery;
-  searchBox.addEventListener("focus", () => { searchBox.dataset.hadFocus = "1"; });
-  searchBox.addEventListener("blur", () => { searchBox.dataset.hadFocus = "0"; });
   searchBox.addEventListener("input", () => {
     customerQuery = searchBox.value;
     clearTimeout(customerTimer);
     const text = customerQuery.trim();
-    if (!text) { customerDocs = []; searchBox.dataset.hadFocus = "1"; rerenderKeepingSearchFocus(); return; }
-    searchBox.dataset.hadFocus = "1";
+    if (!text) { customerDocs = []; rerenderKeepingSearchFocus(); return; }
     customerTimer = setTimeout(runCustomerSearch, 350);
   });
 
