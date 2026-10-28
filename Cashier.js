@@ -132,6 +132,11 @@ function isFresh(candidate) {
   return Date.now() - (seenAt.get(candidate.productId) || 0) < FRESH_MS;
 }
 
+// A barcode is one run of letters/digits/dashes containing a digit, 6+ long.
+function looksLikeCode(text) {
+  return /^[A-Za-z0-9\-]{6,}$/.test(text) && /\d/.test(text);
+}
+
 // Finds a scanned code: in this session's working set first, then in the database.
 async function lookupBarcode(code) {
   const local = findCandidateByBarcode(products, code);
@@ -250,13 +255,23 @@ function wireUi() {
     clearTimeout(searchTimer);
     renderResults();
     if (indexed) {
-      // Ask the database only after the typing pauses (a scanner types in an instant).
+      // Ask the database only after the typing pauses (a scanner types in an
+      // instant, and may or may not press Enter at the end).
       searchTimer = setTimeout(async () => {
         const term = input.value.trim();
         if (!term) return;
+        if (looksLikeCode(term)) {
+          const hit = await lookupBarcode(term);
+          if (hit && input.value.trim() === term) {
+            add(hit);
+            input.value = "";
+            renderResults();
+          }
+          return;
+        }
         await remoteSearch(term);
         if (input.value.trim() === term) renderResults();
-      }, 400);
+      }, 250);
     } else {
       searchTimer = setTimeout(renderResults, 120);
     }

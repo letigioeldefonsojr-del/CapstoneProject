@@ -526,7 +526,7 @@ function buildFeaturedStar(product) {
       paint();
     } catch (error) {
       console.error("Couldn't update featured:", error);
-      alert("Couldn't update the featured status. Please try again.");
+      showNotice("Couldn't update the featured status. Please try again.");
     } finally {
       star.disabled = false;
     }
@@ -1492,7 +1492,7 @@ function handleCsvFileSelected(event) {
     },
     error: (error) => {
       console.error("Couldn't parse CSV:", error);
-      window.alert("Couldn't read that CSV file. Please check the format and try again.");
+      showNotice("Couldn't read that CSV file. Please check the format and try again.");
     }
   });
 }
@@ -1900,7 +1900,7 @@ async function handleConfirmCsvImport() {
     closeCsvModal();
   } catch (error) {
     console.error("Couldn't import CSV:", error);
-    window.alert("Something went wrong during import. Some products may not have been added — check your inventory list.");
+    showNotice("Something went wrong during import. Some products may not have been added — check your inventory list.");
   } finally {
     confirmBtn.disabled = false;
     confirmBtn.textContent = "Confirm Import";
@@ -2516,7 +2516,7 @@ async function handleBulkDelete() {
     await reloadAfterWrite();
   } catch (error) {
     console.error("Couldn't delete selected products:", error);
-    window.alert("Something went wrong deleting some products. Check your inventory list — some may not have been removed.");
+    showNotice("Something went wrong deleting some products. Check your inventory list — some may not have been removed.");
   } finally {
     deleteBtn.disabled = false;
     deleteBtn.textContent = "Delete Selected";
@@ -2527,6 +2527,41 @@ async function handleBulkDelete() {
 // Removes EVERY product, not just the rows on screen (the table shows
 // them in batches, so "select all" only reaches what is loaded).
 let deleteAllRunning = false;
+
+// In-page message box (replaces the browser's pop-up alert).
+function showNotice(message, title = "") {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.style.cssText = "position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px;font-family:inherit;";
+    const box = document.createElement("div");
+    box.setAttribute("role", "dialog");
+    box.style.cssText = "background:#fff;border-radius:16px;padding:24px 28px;max-width:420px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.25);text-align:center;";
+    if (title) {
+      const heading = document.createElement("div");
+      heading.style.cssText = "font-weight:700;font-size:16px;margin-bottom:8px;";
+      heading.textContent = title;
+      box.appendChild(heading);
+    }
+    const text = document.createElement("div");
+    text.style.cssText = "font-size:14px;line-height:1.5;color:#444;margin-bottom:18px;white-space:pre-line;";
+    text.textContent = message;
+    const ok = document.createElement("button");
+    ok.type = "button";
+    ok.className = "btn-primary";
+    ok.style.cssText = "margin:0 auto;justify-content:center;min-width:96px;";
+    ok.textContent = "OK";
+    const close = () => { overlay.remove(); document.removeEventListener("keydown", onKey); resolve(); };
+    const onKey = (event) => { if (event.key === "Escape" || event.key === "Enter") close(); };
+    ok.addEventListener("click", close);
+    document.addEventListener("keydown", onKey);
+    box.append(text, ok);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    ok.focus();
+  });
+}
+
+
 
 function showDeleteProgress(text) {
   let box = document.getElementById("delete-progress");
@@ -2580,11 +2615,11 @@ async function handleIndexProducts() {
     }
     await setDoc(doc(db, "settings", "productIndex"), { ready: true, count: allProducts.length, updatedAt: serverTimestamp() });
     hideDeleteProgress();
-    window.alert("Done. The Cashier will now find products with quick lookups instead of downloading the whole catalogue.");
+    showNotice("Done. The Cashier will now find products with quick lookups instead of downloading the whole catalogue.");
   } catch (error) {
     console.error("Couldn't prepare products:", error);
     hideDeleteProgress();
-    window.alert("Something went wrong. Nothing is broken, you can run this again to finish the rest.");
+    showNotice("Something went wrong. Nothing is broken, you can run this again to finish the rest.");
   } finally {
     indexRunning = false;
     btn.disabled = false;
@@ -2603,7 +2638,7 @@ async function handleDeleteAllProducts() {
     // (and no waiting) before the confirmation appears.
     const ids = allProducts.map((p) => p.id);
     if (ids.length === 0) {
-      window.alert("There are no products to delete.");
+      showNotice("There are no products to delete.");
       return;
     }
 
@@ -2643,7 +2678,7 @@ async function handleDeleteAllProducts() {
     updateBulkDeleteBar();
   } catch (error) {
     console.error("Couldn't delete all products:", error);
-    window.alert("Something went wrong while deleting. Some products may still be left. Reload the page to see what remains, then try again.");
+    showNotice("Something went wrong while deleting. Some products may still be left. Reload the page to see what remains, then try again.");
     try { await reloadAfterWrite(); } catch (e) { /* ignore */ }
   } finally {
     hideDeleteProgress();
