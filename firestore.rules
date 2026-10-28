@@ -88,7 +88,7 @@ service cloud.firestore {
       allow update: if isAdmin() ||
         (isSignedIn() &&
          request.resource.data.diff(resource.data).affectedKeys()
-           .hasOnly(['stockCount', 'available', 'flavors']));
+           .hasOnly(['stockCount', 'available', 'flavors', 'barcode', 'barcodes']));
     }
     // Orders: customers can create/read/update their own; employees,
     // drivers AND admins can read all, but only admins can update/approve. Deletion is allowed for admins
