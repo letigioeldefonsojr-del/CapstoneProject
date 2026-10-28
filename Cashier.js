@@ -1,6 +1,6 @@
 import { db } from "./firebase-config.js";
 import {
-  collection, doc, getDoc, runTransaction, serverTimestamp, getDocs, query, where, orderBy, limit, Timestamp
+  collection, doc, getDoc, runTransaction, serverTimestamp, getDocs, query, where, orderBy, limit, Timestamp, updateDoc, arrayUnion
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getProducts, primeProductsCache } from "./ProductCache.js?v=3";
 import { queryToken } from "./ProductIndex.js";
@@ -37,6 +37,7 @@ let lastLoadedAt = 0;      // last time anything was refreshed
 let lastFullLoadAt = 0;    // last time the WHOLE catalog was downloaded
 let searchTimer = null;
 let saleCustomer = null;      // optional: who this sale is for (see CUSTOMER below)
+let pendingCode = null;       // a scanned barcode the system doesn't know yet (link mode)
 let customerList = null;      // registered customers, loaded the first time the box is used
 
 const $ = (id) => document.getElementById(id);
@@ -262,10 +263,13 @@ function wireUi() {
         if (!term) return;
         if (looksLikeCode(term)) {
           const hit = await lookupBarcode(term);
-          if (hit && input.value.trim() === term) {
+          if (input.value.trim() !== term) return;
+          if (hit) {
             add(hit);
             input.value = "";
             renderResults();
+          } else if (/^\d{6,}$/.test(term)) {
+            enterLinkMode(term);
           }
           return;
         }
@@ -288,6 +292,8 @@ function wireUi() {
       const hit = await lookupBarcode(value);
       if (hit) {
         add(hit);
+      } else if (looksLikeCode(value)) {
+        enterLinkMode(value);
       } else {
         await remoteSearch(value);
         const first = searchProducts(products, value)
@@ -301,7 +307,21 @@ function wireUi() {
     }
   });
 
-  $("pos-results").addEventListener("click", (event) => {
+  $("pos-results").addEventListener("click", async (event) => {
+    if (event.target.closest("[data-link-cancel]")) {
+      pendingCode = null;
+      hideMessage();
+      renderResults();
+      input.focus({ preventScroll: true });
+      return;
+    }
+    const linkBtn = event.target.closest("[data-link-key]");
+    if (linkBtn) {
+      const candidate = allCandidates().find((c) => c.key === linkBtn.dataset.linkKey);
+      if (candidate) await linkBarcodeTo(candidate);
+      input.focus({ preventScroll: true });
+      return;
+    }
     const btn = event.target.closest("[data-add-key]");
     if (!btn) return;
     const candidate = allCandidates().find((c) => c.key === btn.dataset.addKey);
@@ -403,6 +423,61 @@ function allCandidates() {
   return products.flatMap((p) => candidatesForProduct(p));
 }
 
+// ----------------------------- SCAN AND LINK --------------------------
+// Many imported barcodes are damaged (the spreadsheet turned them into
+// numbers like 4.80019E+12). When a real barcode isn't found, the cashier
+// searches the product by name and taps Link: the real code is saved to
+// that product (or variant) and works on every scan from then on.
+function enterLinkMode(code) {
+  pendingCode = code;
+  $("pos-input").value = "";
+  hideMessage();
+  renderResults();
+}
+
+async function linkBarcodeTo(candidate) {
+  const code = pendingCode;
+  if (!code || busy) return;
+  busy = true;
+  try {
+    const ref = doc(db, "products", candidate.productId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) { showMessage("That product no longer exists.", true); return; }
+    const data = snap.data();
+    const changes = { barcodes: arrayUnion(code) };
+    const local = { };
+    if (candidate.variantName) {
+      const flavors = (Array.isArray(data.flavors) ? data.flavors : []).map((v) =>
+        v && typeof v === "object" && (v.name || v.flavor || v.label || "Variant") === candidate.variantName
+          ? { ...v, barcode: code }
+          : v);
+      changes.flavors = flavors;
+      local.flavors = flavors;
+    } else {
+      changes.barcode = code;
+      local.barcode = code;
+    }
+    await updateDoc(ref, changes);
+    const index = products.findIndex((p) => p.id === candidate.productId);
+    if (index >= 0) {
+      const existing = products[index];
+      products[index] = { ...existing, ...local, barcodes: [...new Set([...(existing.barcodes || []), code])] };
+      seenAt.set(candidate.productId, Date.now());
+    }
+    pendingCode = null;
+    const fresh = allCandidates().find((c) => c.key === candidate.key) || candidate;
+    add(fresh);
+    showMessage(`Saved. Barcode ${code} now belongs to "${candidate.name}".`, false);
+    $("pos-input").value = "";
+    renderResults();
+  } catch (error) {
+    console.error("Couldn't link the barcode:", error);
+    showMessage("Couldn't save the barcode. Check the connection and try again.", true);
+  } finally {
+    busy = false;
+  }
+}
+
 function add(candidate) {
   applyCartResult(addToCart(cart, candidate, 1));
 }
@@ -455,9 +530,16 @@ function renderResults() {
   // Nothing typed: show the whole catalogue (A–Z) so the cashier can tap items
   // instead of leaving this panel empty.
   const browsing = !term;
+  const linking = pendingCode != null;
+  const linkBanner = linking ? `
+    <div class="pos-hint pos-link-banner">
+      <strong>Barcode ${esc(pendingCode)} isn't in the system yet.</strong>
+      Type the product name below, then tap <b>Link</b> on the right one.
+      <button type="button" class="btn-outline" data-link-cancel>Cancel</button>
+    </div>` : "";
   // No catalogue list: nothing is shown until the cashier scans or types.
   if (browsing) {
-    box.innerHTML = `<p class="notif-list__empty">Scan a barcode or type a product name to find items.</p>`;
+    box.innerHTML = linkBanner || `<p class="notif-list__empty">Scan a barcode or type a product name to find items.</p>`;
     return;
   }
   const rows = (browsing ? products : searchProducts(products, term))
@@ -465,10 +547,10 @@ function renderResults() {
   if (browsing) rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
   if (rows.length === 0) {
     if (browsing) { box.innerHTML = `<p class="notif-list__empty">No products yet.</p>`; return; }
-    box.innerHTML = `<p class="notif-list__empty">No products match "${esc(term)}".</p>`;
+    box.innerHTML = linkBanner + `<p class="notif-list__empty">No products match "${esc(term)}".</p>`;
     return;
   }
-  box.innerHTML = (browsing ? `<p class="pos-hint pos-results__label">${indexed ? "Recently found items" : "All products (A–Z)"} — tap Add, or scan / search above</p>` : "") + rows.slice(0, browsing ? 200 : 40).map((c) => `
+  box.innerHTML = linkBanner + (browsing ? `<p class="pos-hint pos-results__label">${indexed ? "Recently found items" : "All products (A–Z)"} — tap Add, or scan / search above</p>` : "") + rows.slice(0, browsing ? 200 : 40).map((c) => `
     <div class="pos-result ${c.inStock ? "" : "is-out"}">
       <div class="pos-result__info">
         <span class="pos-result__name">${esc(c.name)}</span>
@@ -478,7 +560,9 @@ function renderResults() {
           · ${c.inStock ? `${c.stock} in stock` : "Out of stock"}
         </span>
       </div>
-      <button type="button" class="btn-outline" data-add-key="${esc(c.key)}" ${c.inStock && c.retailUnit != null ? "" : "disabled"}>Add</button>
+      ${linking
+        ? `<button type="button" class="btn-outline" data-link-key="${esc(c.key)}">Link</button>`
+        : `<button type="button" class="btn-outline" data-add-key="${esc(c.key)}" ${c.inStock && c.retailUnit != null ? "" : "disabled"}>Add</button>`}
     </div>
   `).join("");
 }
