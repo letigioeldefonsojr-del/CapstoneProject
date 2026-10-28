@@ -38,7 +38,6 @@ let lastFullLoadAt = 0;    // last time the WHOLE catalog was downloaded
 let searchTimer = null;
 let saleCustomer = null;      // optional: who this sale is for (see CUSTOMER below)
 let pendingCode = null;       // a scanned barcode the system doesn't know yet (link mode)
-let customerList = null;      // registered customers, loaded the first time the box is used
 
 const $ = (id) => document.getElementById(id);
 
@@ -879,40 +878,74 @@ function setSaleCustomer(customer) {
   }
 }
 
-async function loadCustomerList() {
-  if (customerList) return customerList;
-  try {
-    const snap = await getDocs(collection(db, "users"));
-    customerList = snap.docs.map((d) => {
-      const data = d.data();
-      return {
-        uid: d.id,
-        name: String(data.fullName || data.name || "").trim(),
-        mobile: String(data.mobileNumber || data.phone || "").trim()
-      };
-    }).filter((c) => c.name);
-  } catch (error) {
-    console.error("Couldn't load customers:", error);
-    customerList = [];
+// Finds registered customers by asking the database for names or mobile
+// numbers that START with what was typed (a few reads per search), instead
+// of downloading every customer.
+const customerSearchCache = new Map(); // typed text -> { at, list }
+const CUSTOMER_LIMIT = 8;
+
+function nameVariants(text) {
+  const t = text.trim();
+  const title = t.toLowerCase().replace(/(^|[\s\-.'])([a-z])/g, (m, sep, ch) => sep + ch.toUpperCase());
+  const first = t.charAt(0).toUpperCase() + t.slice(1);
+  return [...new Set([t, title, first, t.toUpperCase(), t.toLowerCase()])];
+}
+
+async function prefixQuery(field, prefix) {
+  const snap = await getDocs(query(
+    collection(db, "users"),
+    where(field, ">=", prefix),
+    where(field, "<=", prefix + "\uf8ff"),
+    limit(CUSTOMER_LIMIT)
+  ));
+  return snap.docs.map((d) => {
+    const data = d.data();
+    return {
+      uid: d.id,
+      name: String(data.fullName || data.name || "").trim(),
+      mobile: String(data.mobileNumber || data.phone || "").trim()
+    };
+  });
+}
+
+async function searchCustomers(text) {
+  const key = text.toLowerCase();
+  const cached = customerSearchCache.get(key);
+  if (cached && Date.now() - cached.at < 60000) return cached.list;
+
+  const jobs = [];
+  const digits = text.replace(/[\s\-()]/g, "");
+  if (/^\+?\d{3,}$/.test(digits)) {
+    jobs.push(prefixQuery("mobileNumber", digits));
+    if (digits.startsWith("0")) jobs.push(prefixQuery("mobileNumber", "+63" + digits.slice(1)));
+  } else if (text.length >= 2) {
+    nameVariants(text).forEach((v) => jobs.push(prefixQuery("fullName", v)));
   }
-  return customerList;
+  let list = [];
+  try {
+    const settled = await Promise.all(jobs);
+    const seen = new Map();
+    settled.flat().forEach((c) => { if (c.name && !seen.has(c.uid)) seen.set(c.uid, c); });
+    list = [...seen.values()];
+  } catch (error) {
+    console.error("Couldn't search customers:", error);
+    return [];
+  }
+  customerSearchCache.set(key, { at: Date.now(), list });
+  return list;
 }
 
 function wireCustomerPicker() {
   const input = $("pos-customer-input");
   const results = $("pos-customer-results");
   if (!input) return;
+  let customerTimer = null;
 
   async function showMatches() {
     const text = input.value.trim();
     if (!text) { results.hidden = true; return; }
-    const needle = text.toLowerCase();
-    const digits = text.replace(/\D/g, "");
-    const list = await loadCustomerList();
-    if (input.value.trim() !== text) return; // typed more while loading
-    const matches = list.filter((c) =>
-      c.name.toLowerCase().includes(needle) || (digits.length >= 3 && c.mobile.replace(/\D/g, "").includes(digits))
-    ).slice(0, 6);
+    const matches = (await searchCustomers(text)).slice(0, 6);
+    if (input.value.trim() !== text) return; // typed more while searching
 
     results.innerHTML = "";
     matches.forEach((c) => {
@@ -934,8 +967,11 @@ function wireCustomerPicker() {
     results.hidden = results.children.length === 0;
   }
 
-  input.addEventListener("input", showMatches);
-  input.addEventListener("focus", () => { loadCustomerList(); });
+  // Wait for a pause in typing so each keystroke doesn't run a search.
+  input.addEventListener("input", () => {
+    clearTimeout(customerTimer);
+    customerTimer = setTimeout(showMatches, 300);
+  });
   $("pos-customer-clear").addEventListener("click", () => setSaleCustomer(null));
 }
 
