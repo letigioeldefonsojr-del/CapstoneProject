@@ -286,6 +286,81 @@ Deno.serve(async (req) => {
         if (flat.error) return json({ error: flat.error.message }, 400);
         return json({ ok: true, total: count ?? 0, products: flat.data ?? [] });
       }
+      // ---- Sales records (staff) ----
+      // Save a finished sale + its stock log + the daily tally. Safe to repeat for the same id.
+      case "record_sale": {
+        const sale = { ...(body.sale ?? {}), cashierUid: uid };
+        if (!body.id || !Array.isArray(sale.items) || sale.items.length === 0 || sale.items.length > 100) {
+          return json({ error: "bad_request" }, 400);
+        }
+        if (!["cash", "gcash"].includes(sale.paymentMethod) || !(Number(sale.total) >= 0)) {
+          return json({ error: "bad_request" }, 400);
+        }
+        const { data, error } = await admin.rpc("record_sale", {
+          sale_id: String(body.id), sale, movements: body.movements ?? [], d: body.day ?? null, u: body.units ?? {}
+        });
+        if (error) return json({ error: error.message }, 409);
+        return json({ ok: true, result: data });
+      }
+      case "get_sale": {
+        const { data, error } = await admin.from("pos_sales").select("*").eq("id", String(body.id)).maybeSingle();
+        if (error) return json({ error: error.message }, 400);
+        return json({ ok: true, sale: data });
+      }
+      // Sales in a time range, newest first, in pages. body: { from, to, offset, limit }
+      case "list_sales": {
+        const lim = Math.min(Math.max(Number(body.limit) || 1000, 1), 1000);
+        const offset = Math.max(0, Number(body.offset) || 0);
+        let q = admin.from("pos_sales").select("*");
+        if (body.from) q = q.gte("created_at", body.from);
+        if (body.to) q = q.lt("created_at", body.to);
+        const { data, error } = await q.order("created_at", { ascending: false }).range(offset, offset + lim - 1);
+        if (error) return json({ error: error.message }, 400);
+        return json({ ok: true, sales: data ?? [], done: (data ?? []).length < lim });
+      }
+      // Save a refund/void. body: { saleId, expected, update, refund, refundId, movements }
+      case "record_refund": {
+        const refund = { ...(body.refund ?? {}), cashierUid: uid };
+        const { data, error } = await admin.rpc("record_refund", {
+          sale_id: String(body.saleId), expected: body.expected ?? null, upd: body.update ?? {},
+          refund, refund_id: String(body.refundId), movements: body.movements ?? []
+        });
+        if (error) return json({ error: error.message }, 409);
+        return json({ ok: true, result: data });
+      }
+      // One stock log line (manual edit, count, scanner sale). body: { movement, day, units }
+      case "log_movement": {
+        const m = body.movement ?? {};
+        if (!["sale", "return", "count", "manual_edit"].includes(m.type)) return json({ error: "bad_request" }, 400);
+        const { error } = await admin.from("stock_movements").insert({
+          id: crypto.randomUUID(), product_id: m.productId ?? null, product_name: m.productName ?? null,
+          variant_name: m.variantName || null, type: m.type,
+          previous_stock: m.previousStock ?? null, new_stock: m.newStock ?? null,
+          unit_price: typeof m.unitPrice === "number" ? m.unitPrice : null,
+          performed_by_email: m.performedByEmail ?? null, performed_by_role: role
+        });
+        if (error) return json({ error: error.message }, 400);
+        if (m.type === "sale" && body.day && body.units) await admin.rpc("bump_daily", { d: body.day, u: body.units });
+        return json({ ok: true });
+      }
+      // Stock log. body: { type?, from?, to?, offset, limit }  (newest first)
+      case "list_movements": {
+        const lim = Math.min(Math.max(Number(body.limit) || 1000, 1), 1000);
+        const offset = Math.max(0, Number(body.offset) || 0);
+        let q = admin.from("stock_movements").select("*");
+        if (body.type) q = q.eq("type", String(body.type));
+        if (body.from) q = q.gte("created_at", body.from);
+        if (body.to) q = q.lt("created_at", body.to);
+        const { data, error } = await q.order("created_at", { ascending: false }).range(offset, offset + lim - 1);
+        if (error) return json({ error: error.message }, 400);
+        return json({ ok: true, movements: data ?? [], done: (data ?? []).length < lim });
+      }
+      // Daily tallies from a day on. body.fromDay = "2026-09-01"
+      case "list_daily": {
+        const { data, error } = await admin.from("sales_daily").select("*").gte("day", String(body.fromDay ?? "0000")).order("day");
+        if (error) return json({ error: error.message }, 400);
+        return json({ ok: true, days: data ?? [] });
+      }
       // Create or edit products. body.items = [{ id, fields, create? }] (up to 500).
       // Admins can change anything; employees only stock and barcode fields.
       case "patch_products": {

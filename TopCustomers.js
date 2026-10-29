@@ -2,6 +2,8 @@ import { db } from "./firebase-config.js";
 import {
   collection, query, where, getDocs, Timestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
+import * as SB from "./SupabaseStore.js?v=20261029b";
 
 // ====================================================================
 // TOP CUSTOMERS (admin only, shown on the Sales page)
@@ -63,10 +65,17 @@ async function load() {
     const orderQ = since
       ? query(collection(db, "orders"), where("status", "==", "delivered"), where("createdAt", ">=", since), where("createdAt", "<", until))
       : query(collection(db, "orders"), where("status", "==", "delivered"));
-    const posQ = since
-      ? query(collection(db, "posSales"), where("createdAt", ">=", since), where("createdAt", "<", until))
-      : collection(db, "posSales");
-    const [orders, pos] = await Promise.all([getDocs(orderQ), getDocs(posQ)]);
+    let posDocs;
+    if (SUPABASE_ENABLED) {
+      const list = await SB.listSales(since ? since.toDate() : null, until ? until.toDate() : null);
+      posDocs = list.map((d) => ({ data: () => d }));
+    } else {
+      const posQ = since
+        ? query(collection(db, "posSales"), where("createdAt", ">=", since), where("createdAt", "<", until))
+        : collection(db, "posSales");
+      posDocs = (await getDocs(posQ)).docs;
+    }
+    const [orders, pos] = await Promise.all([getDocs(orderQ), Promise.resolve(posDocs)]);
 
     const people = new Map();
     // The name shown is the one on the customer's most recent purchase.

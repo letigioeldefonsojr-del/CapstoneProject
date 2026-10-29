@@ -8,10 +8,10 @@ import { confirmDialog } from "./ConfirmDialog.js";
 import { promptPasswordConfirm } from "./PasswordConfirm.js";
 import { fuzzyMatch } from "./FuzzySearch.js";
 import { buildSearchFields, needsIndexUpdate } from "./ProductIndex.js";
-import { recordSaleTally } from "./SalesDaily.js";
+import { recordSaleTally } from "./SalesDaily.js?v=20261029b";
 import { sendPromotionPushes } from "./PromotionPush.js";
 import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
-import * as SB from "./SupabaseStore.js";
+import * as SB from "./SupabaseStore.js?v=20261029b";
 
 // ====================================================================
 // CHUNK 0 — CONFIG
@@ -2395,6 +2395,14 @@ function logManualStockChanges(oldProduct, newProductData, productName, productI
 function logStockMovement({ productId, productName, variantName, type, previousStock, newStock, unitPrice }) {
   // Fire-and-forget on purpose — a failed log write shouldn't block
   // or roll back the actual stock change, which already succeeded.
+  if (SUPABASE_ENABLED) {
+    SB.logMovement({
+      productId, productName, variantName: variantName || null, type, previousStock, newStock,
+      unitPrice: typeof unitPrice === "number" ? unitPrice : null,
+      performedByEmail: currentUser?.email || "unknown"
+    }).catch((error) => console.error("Couldn't write stock movement log entry:", error));
+    return;
+  }
   addDoc(collection(db, STOCK_MOVEMENTS_COLLECTION), {
     productId,
     productName,
@@ -2443,6 +2451,11 @@ async function openStockLogModal() {
     b.classList.toggle("is-active", b.dataset.filter === "all"));
 
   try {
+    if (SUPABASE_ENABLED) {
+      stockLogEntries = await SB.listMovements({ limit: 100 });
+      renderStockLog();
+      return;
+    }
     const logQuery = query(
       collection(db, STOCK_MOVEMENTS_COLLECTION),
       orderBy("createdAt", "desc"),

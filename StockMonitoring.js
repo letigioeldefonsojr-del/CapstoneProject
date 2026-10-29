@@ -3,11 +3,11 @@ import {
   collection, getDocs, query, where, Timestamp, writeBatch, doc, deleteField, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getProducts, invalidateProductsCache } from "./ProductCache.js?v=3";
-import { SALES_DAILY_COLLECTION, dayKey, dayKeyToMillis } from "./SalesDaily.js";
+import { SALES_DAILY_COLLECTION, dayKey, dayKeyToMillis } from "./SalesDaily.js?v=20261029b";
 import { kMeansCluster, normalizeFeatures } from "./KMeans.js";
 import { sendPromotionPushes } from "./PromotionPush.js";
 import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
-import * as SB from "./SupabaseStore.js";
+import * as SB from "./SupabaseStore.js?v=20261029b";
 
 // ====================================================================
 // STOCK MONITORING — demand trend & restock recommendations
@@ -223,7 +223,45 @@ function windowCutoffTimestamp() {
 //   2. The individual sale lines in stockMovements, but ONLY for days
 //      before the tally existed. This part shrinks to nothing as the
 //      60-day window moves past the day the tally started.
+async function fetchSaleMovementsSupabase() {
+  const cutoffDate = new Date(Date.now() - VELOCITY_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const events = [];
+  let earliestTallyDay = null;
+
+  try {
+    const days = await SB.listDaily(dayKey(cutoffDate));
+    days.forEach((data) => {
+      if (!data.date || typeof data.units !== "object") return;
+      if (earliestTallyDay === null || data.date < earliestTallyDay) earliestTallyDay = data.date;
+      const timestampMillis = dayKeyToMillis(data.date, 12);
+      Object.entries(data.units).forEach(([productId, unitsSold]) => {
+        if (productId && typeof unitsSold === "number" && unitsSold > 0) {
+          events.push({ productId, unitsSold, timestampMillis });
+        }
+      });
+    });
+  } catch (error) {
+    console.error("Couldn't read the daily sales tally:", error);
+    earliestTallyDay = null;
+    events.length = 0;
+  }
+
+  // Sale lines only for days before the tally started (nothing, once it has run for the whole window).
+  const lines = await SB.listMovements({
+    type: "sale",
+    from: cutoffDate,
+    to: earliestTallyDay ? new Date(dayKeyToMillis(earliestTallyDay)) : undefined
+  });
+  lines.forEach((m) => {
+    const unitsSold = (m.previousStock ?? 0) - (m.newStock ?? 0);
+    const timestampMillis = m.createdAt.toMillis();
+    if (m.productId && unitsSold > 0 && timestampMillis) events.push({ productId: m.productId, unitsSold, timestampMillis });
+  });
+  return events;
+}
+
 async function fetchSaleMovements() {
+  if (SUPABASE_ENABLED) return fetchSaleMovementsSupabase();
   const cutoffDate = new Date(Date.now() - VELOCITY_WINDOW_DAYS * 24 * 60 * 60 * 1000);
   const events = [];
   let earliestTallyDay = null;

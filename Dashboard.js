@@ -5,7 +5,7 @@ import {
 import { isProductInAlertState, getWorstAlertDetail } from "./StockAlerts.js";
 import { getClearedSet, loadReadStatus } from "./ReadStatus.js";
 import { setPreferences } from "./NotificationPreferences.js";
-import { getLatestProducts, getLatestProductTotal, getLatestNotifications } from "./Sidebar.js?v=20261029a";
+import { getLatestProducts, getLatestProductTotal, getLatestNotifications } from "./Sidebar.js?v=20261029b";
 import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
 import { sendPromotionPush } from "./PromotionPush.js";
 import { confirmDialog } from "./ConfirmDialog.js";

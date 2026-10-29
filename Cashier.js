@@ -4,9 +4,9 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getProducts, primeProductsCache } from "./ProductCache.js?v=3";
 import { queryToken } from "./ProductIndex.js";
-import { recordSaleTally } from "./SalesDaily.js";
+import { recordSaleTally, dayKey } from "./SalesDaily.js?v=20261029b";
 import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
-import * as SB from "./SupabaseStore.js";
+import * as SB from "./SupabaseStore.js?v=20261029b";
 import {
   candidatesForProduct, findCandidateByBarcode, searchProducts,
   addToCart, setLineQty, setLineMode, removeLine,
@@ -794,7 +794,7 @@ class SaleError extends Error {}
 let lastSaleAttempt = null; // { id, sig }
 
 // Sale against the Supabase product database: check prices, deduct stock in
-// one all-or-nothing step, then save the sale record and stock log in Firebase.
+// one all-or-nothing step, then save the sale record and stock log in Supabase too.
 async function commitSaleSupabase(ctx) {
   const { lines, productIds, saleRef, movementRefs, receiptNo, total, units, pay, cashierEmail } = ctx;
 
@@ -866,24 +866,25 @@ async function commitSaleSupabase(ctx) {
   };
 
   try {
-    const batch = writeBatch(db);
-    batch.set(saleRef, { ...saleData, createdAt: serverTimestamp() });
-    plan.movements.forEach((m, i) => {
-      batch.set(movementRefs[i], {
-        productId: m.productId,
-        productName: m.productName,
-        variantName: m.variantName,
-        type: "sale",
-        previousStock: m.previousStock,
-        newStock: m.newStock,
-        unitPrice: m.unitPrice,
-        posSaleId: saleRef.id,
-        performedByEmail: cashierEmail,
-        performedByRole: currentRole,
-        createdAt: serverTimestamp()
-      });
-    });
-    await batch.commit();
+    // Save the sale record, the stock log and today's tally in Supabase. Repeating
+    // it with the same sale id changes nothing, so a dropped connection can be retried.
+    const payload = { id: saleRef.id, sale: saleData, movements: plan.movements, day: dayKey() };
+    let saved = false, lastError = null;
+    for (let attempt = 0; attempt < 3 && !saved; attempt++) {
+      try { await SB.recordSale(payload); saved = true; }
+      catch (error) {
+        lastError = error;
+        const code = error instanceof SB.StoreError ? error.code : "";
+        if (!(code === "network" || /^http_5/.test(code))) break;
+        await new Promise((resolve) => setTimeout(resolve, 700));
+      }
+    }
+    if (!saved) {
+      // The answer may have been lost after the sale was really saved: check before undoing anything.
+      let exists = false;
+      try { exists = Boolean(await SB.getSale(saleRef.id)); } catch { /* can't tell */ }
+      if (!exists) throw lastError;
+    }
   } catch (error) {
     // The sale record didn't save, so put the stock back and start fresh next time.
     lastSaleAttempt = null;
@@ -1264,6 +1265,11 @@ async function loadHistory() {
     const [y, m, d] = $("pos-history-date").value.split("-").map(Number);
     const start = new Date(y, m - 1, d, 0, 0, 0, 0);
     const end = new Date(y, m - 1, d + 1, 0, 0, 0, 0);
+    if (SUPABASE_ENABLED) {
+      historySales = await SB.listSales(start, end);
+      renderHistory();
+      return;
+    }
     const snap = await getDocs(query(
       collection(db, "posSales"),
       where("createdAt", ">=", Timestamp.fromDate(start)),
@@ -1355,8 +1361,113 @@ function setRefundStatus(text, kind) {
   el.hidden = false;
 }
 
+// Refund / void against the Supabase sales records.
+async function confirmRefundSupabase() {
+  const reason = $("pos-refund-reason").value.trim();
+  if (!reason) return;
+  const restock = $("pos-refund-restock").checked;
+  const requested = [...refundQtys];
+  const saleId = refundSale.id;
+  const cashierEmail = currentUser?.email || "unknown";
+
+  busy = true;
+  const btn = $("pos-refund-confirm");
+  btn.disabled = true;
+  btn.textContent = "Saving...";
+  const reset = () => { busy = false; btn.textContent = "Confirm refund"; updateRefundSummary(); };
+
+  let outcome;
+  try {
+    const sale = await SB.getSale(saleId);
+    if (!sale) throw new RefundError("That sale no longer exists.");
+    const plan = planRefund(sale, requested);
+    if (plan.error) throw new RefundError(plan.error);
+
+    let stock = { updates: new Map(), movements: [], skipped: [] };
+    if (restock) {
+      const list = await SB.getProductsByIds([...new Set(plan.lines.map((l) => l.productId))]);
+      stock = planRestock(new Map(list.map((p) => [p.id, p])), plan.lines);
+    }
+    const wasUntouched = saleRefundStatus(sale) === "none";
+    const refundId = SB.newProductId();
+
+    await SB.recordRefund({
+      saleId,
+      expected: sale.refundedQtys ?? null,
+      update: { refundedQtys: plan.refundedQtys, refundedTotal: plan.refundedTotal, refundStatus: plan.status },
+      refundId,
+      refund: {
+        saleId,
+        receiptNo: sale.receiptNo || null,
+        kind: wasUntouched && plan.status === "full" ? "void" : "refund",
+        items: plan.lines,
+        total: plan.total,
+        reason,
+        restocked: restock,
+        notRestocked: stock.skipped,
+        paymentMethod: sale.paymentMethod || null,
+        cashierEmail,
+        cashierRole: currentRole
+      },
+      movements: stock.movements,
+    });
+    outcome = {
+      total: plan.total, skipped: stock.skipped, receiptNo: sale.receiptNo, updates: stock.updates, lines: plan.lines,
+      refundedQtys: plan.refundedQtys, refundedTotal: plan.refundedTotal, refundStatus: plan.status
+    };
+  } catch (error) {
+    console.error("Refund failed:", error);
+    reset();
+    if (error instanceof RefundError) {
+      setRefundStatus(error.message, "error");
+      loadHistory();
+    } else if (error instanceof SB.StoreError && error.code === "sale_changed") {
+      setRefundStatus("This sale was changed on another device. Please try again.", "error");
+      loadHistory();
+    } else {
+      setRefundStatus("Couldn't save the refund. Nothing was changed — check the connection and try again.", "error");
+    }
+    return;
+  }
+
+  // The refund is saved. Now return the stock.
+  let stockWarning = "";
+  if (restock) {
+    const label = (l) => (l.variantName ? `${l.productName} — ${l.variantName}` : l.productName);
+    const toReturn = outcome.lines.filter((l) => !outcome.skipped.includes(label(l)));
+    if (toReturn.length) {
+      try { await SB.restock(toReturn); }
+      catch (error) {
+        console.error("Couldn't return the stock:", error);
+        stockWarning = " The stock could NOT be added back automatically — please add it back in Inventory.";
+      }
+    }
+  }
+
+  busy = false;
+  btn.textContent = "Confirm refund";
+  closeRefund();
+  const method = historySales.find((x) => x.id === saleId)?.paymentMethod === "gcash" ? "GCash" : "cash";
+  let msg = `Refunded ${formatMoney(outcome.total)} (${method}) for ${outcome.receiptNo || "the sale"}.`;
+  if (outcome.skipped.length) msg += ` Not returned to stock (item no longer exists): ${outcome.skipped.join(", ")}.`;
+  showMessage(msg + stockWarning, !!stockWarning);
+  applyLocalUpdates(outcome.updates);
+  refreshCartFromProducts();
+  renderAll();
+  const refundedSale = historySales.find((x) => x.id === saleId);
+  if (refundedSale) {
+    refundedSale.refundedQtys = outcome.refundedQtys;
+    refundedSale.refundedTotal = outcome.refundedTotal;
+    refundedSale.refundStatus = outcome.refundStatus;
+    renderHistory();
+  } else {
+    loadHistory();
+  }
+}
+
 async function confirmRefund() {
   if (busy || !refundSale) return;
+  if (SUPABASE_ENABLED) return confirmRefundSupabase();
   const reason = $("pos-refund-reason").value.trim();
   if (!reason) return;
   const restock = $("pos-refund-restock").checked;

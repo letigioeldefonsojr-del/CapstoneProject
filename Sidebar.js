@@ -3,7 +3,7 @@ import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/
 import { doc, getDoc, collection, query, where, orderBy, limit, onSnapshot, enableNetwork, disableNetwork } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getWorstAlertDetail } from "./StockAlerts.js";
 import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
-import { stockSummary } from "./SupabaseStore.js";
+import { stockSummary } from "./SupabaseStore.js?v=20261029b";
 import { getPreferences } from "./NotificationPreferences.js";
 import { getReadSet, getClearedSet, loadReadStatus } from "./ReadStatus.js";
 import { promptDeleteAccount } from "./DeleteAccount.js";

@@ -163,6 +163,106 @@ export async function stockSummary() {
   return { total: data.total, products: data.products.map(rowToProduct) };
 }
 
+// ----------------------------- SALES RECORDS ---------------------------
+// Rows come back in the same shape the pages already use from Firebase
+// (createdAt behaves like a Firebase timestamp: toMillis(), toDate()).
+function stamp(iso) {
+  const ms = Date.parse(iso);
+  return { seconds: Math.floor(ms / 1000), nanoseconds: 0, toMillis: () => ms, toDate: () => new Date(ms) };
+}
+const num = (v) => (v === null || v === undefined ? null : Number(v));
+
+export function saleFromRow(r) {
+  return { ...(r.data || {}), id: r.id, createdAt: stamp(r.created_at) };
+}
+export function movementFromRow(r) {
+  return {
+    id: r.id, productId: r.product_id, productName: r.product_name, variantName: r.variant_name || null,
+    type: r.type, previousStock: r.previous_stock, newStock: r.new_stock, unitPrice: num(r.unit_price),
+    posSaleId: r.pos_sale_id || null, posRefundId: r.pos_refund_id || null,
+    performedByEmail: r.performed_by_email, performedByRole: r.performed_by_role,
+    createdAt: stamp(r.created_at)
+  };
+}
+
+// Units sold per product from stock log lines ({productId, previousStock, newStock}).
+export function unitsFromMovements(movements) {
+  const units = {};
+  (movements || []).forEach((m) => {
+    const sold = (m.previousStock ?? 0) - (m.newStock ?? 0);
+    if (m.productId && sold > 0) units[m.productId] = (units[m.productId] || 0) + sold;
+  });
+  return units;
+}
+
+// Saves a sale with its stock log lines and today's tally. Repeating the same id changes nothing.
+export async function recordSale({ id, sale, movements, day }) {
+  const lines = movements.map((m) => ({
+    productId: m.productId, productName: m.productName, variantName: m.variantName ?? null,
+    previousStock: m.previousStock, newStock: m.newStock, unitPrice: m.unitPrice ?? null
+  }));
+  await call("record_sale", { id, sale, movements: lines, day, units: unitsFromMovements(movements) });
+}
+
+export async function getSale(id) {
+  const data = await call("get_sale", { id });
+  return data.sale ? saleFromRow(data.sale) : null;
+}
+
+// Every sale between two dates, newest first.
+export async function listSales(from, to) {
+  const all = [];
+  for (let offset = 0; offset < 200000; offset += 1000) {
+    const data = await call("list_sales", {
+      from: from ? from.toISOString() : null, to: to ? to.toISOString() : null, offset, limit: 1000
+    });
+    all.push(...data.sales.map(saleFromRow));
+    if (data.done) break;
+  }
+  return all;
+}
+
+// refund: { total, reason, ... } as stored with the refund. Returns when saved.
+export async function recordRefund({ saleId, expected, update, refund, refundId, movements }) {
+  const lines = (movements || []).map((m) => ({
+    productId: m.productId, productName: m.productName, variantName: m.variantName ?? null,
+    previousStock: m.previousStock, newStock: m.newStock, unitPrice: m.unitPrice ?? null
+  }));
+  await call("record_refund", { saleId, expected: expected ?? null, update, refund, refundId, movements: lines });
+}
+
+// One stock log line from the Inventory page (manual edit, count, scanner sale).
+export async function logMovement(m) {
+  const body = { movement: m };
+  if (m.type === "sale") {
+    body.units = unitsFromMovements([m]);
+    const d = new Date();
+    body.day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+  await call("log_movement", body);
+}
+
+// Stock log lines, newest first. opts: { type, from, to, limit }
+export async function listMovements(opts = {}) {
+  const out = [];
+  const cap = opts.limit || 200000;
+  for (let offset = 0; offset < cap; offset += 1000) {
+    const data = await call("list_movements", {
+      type: opts.type || null, from: opts.from ? opts.from.toISOString() : null,
+      to: opts.to ? opts.to.toISOString() : null, offset, limit: Math.min(1000, cap - offset)
+    });
+    out.push(...data.movements.map(movementFromRow));
+    if (data.done) break;
+  }
+  return out;
+}
+
+// Daily tallies from a day on: [{ date, units }]
+export async function listDaily(fromDay) {
+  const data = await call("list_daily", { fromDay });
+  return data.days.map((d) => ({ date: d.day, units: d.units || {} }));
+}
+
 // A new product id (same style as before: 20 random letters and digits).
 export function newProductId() {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";

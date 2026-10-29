@@ -13,6 +13,7 @@
 // the sale itself, so a problem here can never stop a checkout.
 // ====================================================================
 import { db } from "./firebase-config.js";
+import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
 import { doc, setDoc, increment } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 
 export const SALES_DAILY_COLLECTION = "salesDaily";
@@ -33,6 +34,8 @@ export function dayKeyToMillis(key, hour = 0) {
 // Adds the units sold in one sale to today's tally. `movements` are entries
 // with { productId, previousStock, newStock } (units sold = previous - new).
 export function recordSaleTally(movements, when = new Date()) {
+  // With Supabase the sale record and the stock log save the tally themselves.
+  if (SUPABASE_ENABLED) return Promise.resolve();
   const units = {};
   (movements || []).forEach((m) => {
     const sold = (m.previousStock ?? 0) - (m.newStock ?? 0);

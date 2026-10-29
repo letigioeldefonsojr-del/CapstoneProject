@@ -2,6 +2,8 @@ import { db } from "./firebase-config.js";
 import {
   collection, query, where, getDocs, doc, getDoc, Timestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
+import * as SB from "./SupabaseStore.js?v=20261029b";
 
 const ORDERS_COLLECTION = "orders";
 const STOCK_MOVEMENTS_COLLECTION = "stockMovements";
@@ -174,15 +176,20 @@ async function fetchOnlineSales(start, end) {
 }
 
 async function fetchInPersonSales(start, end) {
-  const q = query(
-    collection(db, STOCK_MOVEMENTS_COLLECTION),
-    where("type", "==", "sale"),
-    where("createdAt", ">=", Timestamp.fromDate(start)),
-    where("createdAt", "<", Timestamp.fromDate(end))
-  );
-  const snap = await getDocs(q);
+  let docs;
+  if (SUPABASE_ENABLED) {
+    docs = (await SB.listMovements({ type: "sale", from: start, to: end })).map((d) => ({ id: d.id, data: () => d }));
+  } else {
+    const q = query(
+      collection(db, STOCK_MOVEMENTS_COLLECTION),
+      where("type", "==", "sale"),
+      where("createdAt", ">=", Timestamp.fromDate(start)),
+      where("createdAt", "<", Timestamp.fromDate(end))
+    );
+    docs = (await getDocs(q)).docs;
+  }
 
-  return snap.docs.map((docSnap) => {
+  return docs.map((docSnap) => {
     const data = docSnap.data();
     const unitsSold = (data.previousStock ?? 0) - (data.newStock ?? 0);
     return {
@@ -201,13 +208,18 @@ async function fetchInPersonSales(start, end) {
 }
 
 async function fetchPosSales(start, end) {
-  const q = query(
-    collection(db, POS_SALES_COLLECTION),
-    where("createdAt", ">=", Timestamp.fromDate(start)),
-    where("createdAt", "<", Timestamp.fromDate(end))
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((docSnap) => {
+  let docs;
+  if (SUPABASE_ENABLED) {
+    docs = (await SB.listSales(start, end)).map((d) => ({ id: d.id, data: () => d }));
+  } else {
+    const q = query(
+      collection(db, POS_SALES_COLLECTION),
+      where("createdAt", ">=", Timestamp.fromDate(start)),
+      where("createdAt", "<", Timestamp.fromDate(end))
+    );
+    docs = (await getDocs(q)).docs;
+  }
+  return docs.map((docSnap) => {
     const data = docSnap.data();
     return {
       source: "pos",
@@ -230,6 +242,21 @@ async function fetchPosSales(start, end) {
 async function fetchCurrentPrices(productIds) {
   const prices = new Map();
   if (productIds.length === 0) return prices;
+
+  if (SUPABASE_ENABLED) {
+    try {
+      for (let i = 0; i < productIds.length; i += 200) {
+        const list = await SB.getProductsByIds(productIds.slice(i, i + 200));
+        list.forEach((p) => {
+          const parsed = parseFloat(String(p.price ?? "").replace(/[^\d.]/g, ""));
+          if (!isNaN(parsed)) prices.set(p.id, parsed);
+        });
+      }
+    } catch (error) {
+      console.error("Couldn't fetch current prices:", error);
+    }
+    return prices;
+  }
 
   await Promise.all(productIds.map(async (productId) => {
     try {
