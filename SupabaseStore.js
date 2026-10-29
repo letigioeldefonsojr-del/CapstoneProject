@@ -157,6 +157,12 @@ export async function scanStock(id, barcode, mode, value) {
   return data.result;
 }
 
+// Total product count + products that may need a stock alert (lowest first).
+export async function stockSummary() {
+  const data = await call("stock_summary");
+  return { total: data.total, products: data.products.map(rowToProduct) };
+}
+
 // A new product id (same style as before: 20 random letters and digits).
 export function newProductId() {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";

@@ -6,6 +6,8 @@ import { getProducts, invalidateProductsCache } from "./ProductCache.js?v=3";
 import { SALES_DAILY_COLLECTION, dayKey, dayKeyToMillis } from "./SalesDaily.js";
 import { kMeansCluster, normalizeFeatures } from "./KMeans.js";
 import { sendPromotionPushes } from "./PromotionPush.js";
+import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
+import * as SB from "./SupabaseStore.js";
 
 // ====================================================================
 // STOCK MONITORING — demand trend & restock recommendations
@@ -131,14 +133,18 @@ async function syncSalesTiersToProducts(productsWithData, productsWithoutData) {
 
     if (updates.length === 0) return;
 
-    for (let i = 0; i < updates.length; i += PRODUCT_WRITE_BATCH_LIMIT) {
-      const batch = writeBatch(db);
-      updates.slice(i, i + PRODUCT_WRITE_BATCH_LIMIT).forEach(({ id, data }) => {
-        batch.update(doc(db, "products", id), data);
-      });
-      await batch.commit();
+    if (SUPABASE_ENABLED) {
+      await SB.patchProducts(updates.map(({ id, data }) => ({ id, fields: data })));
+    } else {
+      for (let i = 0; i < updates.length; i += PRODUCT_WRITE_BATCH_LIMIT) {
+        const batch = writeBatch(db);
+        updates.slice(i, i + PRODUCT_WRITE_BATCH_LIMIT).forEach(({ id, data }) => {
+          batch.update(doc(db, "products", id), data);
+        });
+        await batch.commit();
+      }
+      invalidateProductsCache();
     }
-    invalidateProductsCache();
 
     // Promotion push — only after the flags were saved. One push each for a
     // few products, a single summary when many flip at once (e.g. the very
@@ -159,7 +165,7 @@ async function loadForecast() {
 
   try {
     const [products, saleMovements, deliveredOrderItems] = await Promise.all([
-      getProducts(),
+      SUPABASE_ENABLED ? SB.listAllProducts() : getProducts(),
       fetchSaleMovements(),
       fetchDeliveredOrderItems()
     ]);

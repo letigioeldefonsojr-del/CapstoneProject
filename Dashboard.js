@@ -5,7 +5,8 @@ import {
 import { isProductInAlertState, getWorstAlertDetail } from "./StockAlerts.js";
 import { getClearedSet, loadReadStatus } from "./ReadStatus.js";
 import { setPreferences } from "./NotificationPreferences.js";
-import { getLatestProducts, getLatestNotifications } from "./Sidebar.js";
+import { getLatestProducts, getLatestProductTotal, getLatestNotifications } from "./Sidebar.js?v=20261029a";
+import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
 import { sendPromotionPush } from "./PromotionPush.js";
 import { confirmDialog } from "./ConfirmDialog.js";
 
@@ -75,6 +76,14 @@ function loadProductStats() {
   // lightweight aggregation — it downloads a single number, not every
   // product document, so this stays scalable regardless of catalog
   // size.
+  if (SUPABASE_ENABLED) {
+    // Total comes with the sidebar's Supabase refresh (no Firebase reads).
+    const showTotal = (n) => {
+      if (typeof n === "number") document.getElementById("stat-products-value").textContent = n;
+    };
+    showTotal(getLatestProductTotal());
+    document.addEventListener("products:live", (event) => showTotal(event.detail.total));
+  } else {
   getCountFromServer(collection(db, "products"))
     .then((snap) => {
       document.getElementById("stat-products-value").textContent = snap.data().count;
@@ -83,6 +92,7 @@ function loadProductStats() {
       console.error("Couldn't load total product count:", error);
       document.getElementById("stat-products-value").textContent = "—";
     });
+  }
 
   function renderFromProducts(products) {
     const lowStockCount = products.filter((product) => isProductInAlertState(product)).length;

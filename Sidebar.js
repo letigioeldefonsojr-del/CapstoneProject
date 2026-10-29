@@ -2,6 +2,8 @@ import { auth, db } from "./firebase-config.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import { doc, getDoc, collection, query, where, orderBy, limit, onSnapshot, enableNetwork, disableNetwork } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getWorstAlertDetail } from "./StockAlerts.js";
+import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
+import { stockSummary } from "./SupabaseStore.js";
 import { getPreferences } from "./NotificationPreferences.js";
 import { getReadSet, getClearedSet, loadReadStatus } from "./ReadStatus.js";
 import { promptDeleteAccount } from "./DeleteAccount.js";
@@ -19,6 +21,7 @@ const LOGIN_PAGE_URL = "/";
 // "products:live"/"notifications:live" events, so they don't need to
 // open their own duplicate Firestore listeners on the same data.
 let latestProducts = null;
+let latestProductTotal = null;
 let latestNotifications = null;
 
 
@@ -567,16 +570,39 @@ async function loadNotifBadge(uid, preferences) {
   // opening their OWN separate live listener on the same collection —
   // Sidebar.js runs on every page already, so this was genuinely
   // duplicated work slowing down every single page load.
+  const publishProducts = (products, total) => {
+    latestProducts = products;
+    if (typeof total === "number") latestProductTotal = total;
+    recomputeUnreadCounts();
+    document.dispatchEvent(new CustomEvent("products:live", { detail: { products, total: latestProductTotal } }));
+  };
+
+  if (SUPABASE_ENABLED) {
+    // Products live in Supabase now: no Firebase reads at all. Refreshes
+    // when the page opens, every 2 minutes while visible, and when the
+    // tab is shown again.
+    let busy = false;
+    const refreshLowStock = async () => {
+      if (busy || document.hidden) return;
+      busy = true;
+      try {
+        const { total, products } = await stockSummary();
+        publishProducts(products.filter((p) => getWorstAlertDetail(p) !== null), total);
+      } catch (error) {
+        console.error("Couldn't load products for notification badge:", error);
+      } finally { busy = false; }
+    };
+    refreshLowStock();
+    setInterval(refreshLowStock, 120000);
+    document.addEventListener("visibilitychange", refreshLowStock);
+    document.addEventListener("products:changed", refreshLowStock);
+  } else {
   onSnapshot(
     query(collection(db, "products"), where("stockCount", "<=", 99), limit(30)),
-    (snap) => {
-      const products = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      latestProducts = products;
-      recomputeUnreadCounts();
-      document.dispatchEvent(new CustomEvent("products:live", { detail: { products } }));
-    },
+    (snap) => publishProducts(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
     (error) => console.error("Couldn't load products for notification badge:", error)
   );
+  }
 
   // Same idea — shared with Dashboard.js/Notifications.js via
   // "notifications:live" instead of each maintaining its own
@@ -596,6 +622,7 @@ async function loadNotifBadge(uid, preferences) {
 // snapshot already arrived can grab the current data immediately,
 // instead of only being able to react to the NEXT change (closes a
 // small timing gap the events alone wouldn't cover).
+export function getLatestProductTotal() { return latestProductTotal; }
 export function getLatestProducts() {
   return latestProducts;
 }
