@@ -6,7 +6,7 @@ import { getProducts, primeProductsCache } from "./ProductCache.js?v=3";
 import { queryToken } from "./ProductIndex.js";
 import { recordSaleTally, dayKey } from "./SalesDaily.js?v=20261029b";
 import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
-import * as SB from "./SupabaseStore.js?v=20261029b";
+import * as SB from "./SupabaseStore.js?v=20261029c";
 import {
   candidatesForProduct, findCandidateByBarcode, searchProducts,
   addToCart, setLineQty, setLineMode, removeLine,

@@ -263,6 +263,12 @@ export async function listDaily(fromDay) {
   return data.days.map((d) => ({ date: d.day, units: d.units || {} }));
 }
 
+// Staff notifications, newest first, shaped like the old Firebase ones ({id, message, orderId, createdAt}).
+export async function listNotifications(limit = 100) {
+  const data = await call("list_notifications", { limit });
+  return data.notifications.map((n) => ({ ...(n.data || {}), id: n.id, message: n.message, createdAt: stamp(n.created_at) }));
+}
+
 // A new product id (same style as before: 20 random letters and digits).
 export function newProductId() {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";

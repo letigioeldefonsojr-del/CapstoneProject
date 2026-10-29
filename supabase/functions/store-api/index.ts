@@ -207,6 +207,23 @@ Deno.serve(async (req) => {
           }
           return json({ ok: true, updated: data });
         }
+        // Tell the staff something happened (a customer placed or cancelled an order).
+        // body: { message, orderId? , data? }
+        case "app_notify_staff": {
+          const message = String(body.message ?? "").trim();
+          if (message.length < 1 || message.length >= 500) return json({ error: "bad_message" }, 400);
+          const extra = body.data && typeof body.data === "object" ? body.data : {};
+          if (body.orderId) (extra as any).orderId = String(body.orderId).slice(0, 100);
+          if (JSON.stringify(extra).length > 2000) return json({ error: "too_big" }, 400);
+          // at most 40 per person per hour
+          const since = new Date(Date.now() - 3600_000).toISOString();
+          const { count } = await admin.from("staff_notifications").select("id", { count: "exact", head: true })
+            .eq("sender", uid).gte("created_at", since);
+          if ((count ?? 0) >= 40) return json({ error: "too_many" }, 429);
+          const { error } = await admin.from("staff_notifications").insert({ sender: uid, message, data: extra });
+          if (error) return json({ error: error.message }, 400);
+          return json({ ok: true });
+        }
         default:
           return json({ error: "unknown_action" }, 400);
       }
@@ -360,6 +377,14 @@ Deno.serve(async (req) => {
         const { data, error } = await admin.from("sales_daily").select("*").gte("day", String(body.fromDay ?? "0000")).order("day");
         if (error) return json({ error: error.message }, 400);
         return json({ ok: true, days: data ?? [] });
+      }
+      // Newest staff notifications. body.limit (default 100)
+      case "list_notifications": {
+        const lim = Math.min(Math.max(Number(body.limit) || 100, 1), 200);
+        const { data, error } = await admin.from("staff_notifications").select("id,created_at,message,data")
+          .order("created_at", { ascending: false }).limit(lim);
+        if (error) return json({ error: error.message }, 400);
+        return json({ ok: true, notifications: data ?? [] });
       }
       // Create or edit products. body.items = [{ id, fields, create? }] (up to 500).
       // Admins can change anything; employees only stock and barcode fields.

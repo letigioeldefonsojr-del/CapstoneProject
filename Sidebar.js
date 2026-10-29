@@ -3,7 +3,7 @@ import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/
 import { doc, getDoc, collection, query, where, orderBy, limit, onSnapshot, enableNetwork, disableNetwork } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getWorstAlertDetail } from "./StockAlerts.js";
 import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
-import { stockSummary } from "./SupabaseStore.js?v=20261029b";
+import { stockSummary, listNotifications } from "./SupabaseStore.js?v=20261029c";
 import { getPreferences } from "./NotificationPreferences.js";
 import { getReadSet, getClearedSet, loadReadStatus } from "./ReadStatus.js";
 import { promptDeleteAccount } from "./DeleteAccount.js";
@@ -590,10 +590,11 @@ async function loadNotifBadge(uid, preferences) {
         publishProducts(products.filter((p) => getWorstAlertDetail(p) !== null), total);
       } catch (error) {
         console.error("Couldn't load products for notification badge:", error);
+        if (error.code === "not_staff") clearInterval(lowStockTimer);
       } finally { busy = false; }
     };
     refreshLowStock();
-    setInterval(refreshLowStock, 120000);
+    const lowStockTimer = setInterval(refreshLowStock, 120000);
     document.addEventListener("visibilitychange", refreshLowStock);
     document.addEventListener("products:changed", refreshLowStock);
   } else {
@@ -607,15 +608,36 @@ async function loadNotifBadge(uid, preferences) {
   // Same idea — shared with Dashboard.js/Notifications.js via
   // "notifications:live" instead of each maintaining its own
   // duplicate listener on this same collection.
+  const publishNotifications = (list) => {
+    latestNotifications = list;
+    recomputeUnreadCounts();
+    document.dispatchEvent(new CustomEvent("notifications:live", { detail: { notifications: latestNotifications } }));
+  };
+
+  if (SUPABASE_ENABLED) {
+    // Staff notifications live in Supabase now: no Firebase reads. Checked when the
+    // page opens, every minute while visible, and when the tab is shown again.
+    let notifBusy = false;
+    const refreshNotifications = async () => {
+      if (notifBusy || document.hidden) return;
+      notifBusy = true;
+      try {
+        publishNotifications(await listNotifications(100));
+      } catch (error) {
+        console.error("Couldn't load notifications for badge:", error);
+        if (error.code === "not_staff") clearInterval(notifTimer);
+      } finally { notifBusy = false; }
+    };
+    refreshNotifications();
+    const notifTimer = setInterval(refreshNotifications, 60000);
+    document.addEventListener("visibilitychange", refreshNotifications);
+  } else {
   onSnapshot(
     query(collection(db, "employeeNotifications"), orderBy("createdAt", "desc"), limit(100)),
-    (snap) => {
-      latestNotifications = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      recomputeUnreadCounts();
-      document.dispatchEvent(new CustomEvent("notifications:live", { detail: { notifications: latestNotifications } }));
-    },
+    (snap) => publishNotifications(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
     (error) => console.error("Couldn't load notifications for badge:", error)
   );
+  }
 }
 
 // Exposed so a page whose own script runs AFTER Sidebar.js's first

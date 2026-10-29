@@ -7,7 +7,7 @@ import { SALES_DAILY_COLLECTION, dayKey, dayKeyToMillis } from "./SalesDaily.js?
 import { kMeansCluster, normalizeFeatures } from "./KMeans.js";
 import { sendPromotionPushes } from "./PromotionPush.js";
 import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
-import * as SB from "./SupabaseStore.js?v=20261029b";
+import * as SB from "./SupabaseStore.js?v=20261029c";
 
 // ====================================================================
 // STOCK MONITORING — demand trend & restock recommendations

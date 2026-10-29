@@ -3,7 +3,7 @@ import {
   collection, query, where, getDocs, Timestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
-import * as SB from "./SupabaseStore.js?v=20261029b";
+import * as SB from "./SupabaseStore.js?v=20261029c";
 
 // ====================================================================
 // TOP CUSTOMERS (admin only, shown on the Sales page)

@@ -11,7 +11,7 @@ import { buildSearchFields, needsIndexUpdate } from "./ProductIndex.js";
 import { recordSaleTally } from "./SalesDaily.js?v=20261029b";
 import { sendPromotionPushes } from "./PromotionPush.js";
 import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
-import * as SB from "./SupabaseStore.js?v=20261029b";
+import * as SB from "./SupabaseStore.js?v=20261029c";
 
 // ====================================================================
 // CHUNK 0 — CONFIG
