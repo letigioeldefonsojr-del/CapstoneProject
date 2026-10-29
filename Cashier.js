@@ -1,10 +1,12 @@
 import { db } from "./firebase-config.js";
 import {
-  collection, doc, getDoc, runTransaction, serverTimestamp, getDocs, query, where, orderBy, limit, Timestamp, updateDoc, arrayUnion
+  collection, doc, getDoc, runTransaction, serverTimestamp, getDocs, query, where, orderBy, limit, Timestamp, updateDoc, arrayUnion, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getProducts, primeProductsCache } from "./ProductCache.js?v=3";
 import { queryToken } from "./ProductIndex.js";
 import { recordSaleTally } from "./SalesDaily.js";
+import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
+import * as SB from "./SupabaseStore.js";
 import {
   candidatesForProduct, findCandidateByBarcode, searchProducts,
   addToCart, setLineQty, setLineMode, removeLine,
@@ -101,6 +103,7 @@ const FRESH_MS = 10 * 60000; // a looked-up product is re-fetched after 10 minut
 const SEARCH_LIMIT = 60;
 
 async function initCatalog() {
+  if (SUPABASE_ENABLED) { indexed = true; products = []; return; } // products are looked up in Supabase on demand
   try {
     const flag = await getDoc(doc(db, "settings", "productIndex"));
     indexed = flag.exists() && flag.data().ready === true;
@@ -142,6 +145,12 @@ async function lookupBarcode(code) {
   const local = findCandidateByBarcode(products, code);
   if (!indexed) return local;
   if (local && isFresh(local)) return local;
+  if (SUPABASE_ENABLED) {
+    // Errors are NOT swallowed here: "database unreachable" must not look like "unknown barcode".
+    const found = await SB.lookupBarcode(code);
+    mergeIntoWorkingSet(found);
+    return findCandidateByBarcode(found, code) || local;
+  }
   const col = collection(db, "products");
   const attempts = [
     where("barcodes", "array-contains", code), // all codes incl. variants
@@ -166,6 +175,19 @@ const searchedTokens = new Map(); // token -> when it was last searched
 async function remoteSearch(term) {
   if (!indexed) return;
   if (/^\d{6,}$/.test(term)) return; // looks like a barcode, handled by lookupBarcode
+  if (SUPABASE_ENABLED) {
+    const key = term.toLowerCase();
+    if (term.length < 2 || Date.now() - (searchedTokens.get(key) || 0) < 60000) return;
+    searchedTokens.set(key, Date.now());
+    try {
+      mergeIntoWorkingSet(await SB.searchProducts(term, SEARCH_LIMIT));
+    } catch (error) {
+      console.error("Search failed:", error);
+      searchedTokens.delete(key);
+      showMessage(error.message || "Couldn't search the products.", true);
+    }
+    return;
+  }
   const token = queryToken(term);
   if (!token) return;
   if (Date.now() - (searchedTokens.get(token) || 0) < 60000) return; // searched a moment ago
@@ -216,6 +238,21 @@ function applyLocalUpdates(updates) {
 // price or stock change on those still shows up.
 async function refreshCartProducts() {
   const ids = [...new Set(cart.map((l) => l.productId))];
+  if (SUPABASE_ENABLED) {
+    try {
+      const freshList = await SB.getProductsByIds(ids);
+      const freshIds = new Set(freshList.map((p) => p.id));
+      mergeIntoWorkingSet(freshList);
+      ids.filter((id) => !freshIds.has(id)).forEach((id) => {
+        const index = products.findIndex((p) => p.id === id);
+        if (index >= 0) products.splice(index, 1);
+      });
+    } catch (error) {
+      console.error("Couldn't refresh the cart products:", error);
+    }
+    lastLoadedAt = Date.now();
+    return;
+  }
   for (const id of ids) {
     try {
       const snap = await getDoc(doc(db, "products", id));
@@ -261,7 +298,14 @@ function wireUi() {
         const term = input.value.trim();
         if (!term) return;
         if (looksLikeCode(term)) {
-          const hit = await lookupBarcode(term);
+          let hit = null;
+          try {
+            hit = await lookupBarcode(term);
+          } catch (error) {
+            console.error("Barcode lookup failed:", error);
+            if (input.value.trim() === term) showMessage(error.message || "Couldn't look up the barcode.", true);
+            return;
+          }
           if (input.value.trim() !== term) return;
           if (hit) {
             add(hit);
@@ -288,7 +332,14 @@ function wireUi() {
     clearTimeout(searchTimer);
     input.value = ""; // cleared at once so the next scan can start while this one is looked up
     try {
-      const hit = await lookupBarcode(value);
+      let hit = null;
+      try {
+        hit = await lookupBarcode(value);
+      } catch (error) {
+        console.error("Barcode lookup failed:", error);
+        showMessage(error.message || "Couldn't look up the barcode.", true);
+        return;
+      }
       if (hit) {
         add(hit);
       } else if (looksLikeCode(value)) {
@@ -439,24 +490,35 @@ async function linkBarcodeTo(candidate) {
   if (!code || busy) return;
   busy = true;
   try {
-    const ref = doc(db, "products", candidate.productId);
-    const snap = await getDoc(ref);
-    if (!snap.exists()) { showMessage("That product no longer exists.", true); return; }
-    const data = snap.data();
-    const changes = { barcodes: arrayUnion(code) };
     const local = { };
-    if (candidate.variantName) {
-      const flavors = (Array.isArray(data.flavors) ? data.flavors : []).map((v) =>
-        v && typeof v === "object" && (v.name || v.flavor || v.label || "Variant") === candidate.variantName
-          ? { ...v, barcode: code }
-          : v);
-      changes.flavors = flavors;
-      local.flavors = flavors;
+    if (SUPABASE_ENABLED) {
+      await SB.linkBarcode(candidate.productId, code, candidate.variantName);
+      const current = products.find((p) => p.id === candidate.productId);
+      if (candidate.variantName) {
+        local.flavors = (current?.flavors || []).map((v) =>
+          v && typeof v === "object" && (v.name || v.flavor || v.label || "Variant") === candidate.variantName ? { ...v, barcode: code } : v);
+      } else {
+        local.barcode = code;
+      }
     } else {
-      changes.barcode = code;
-      local.barcode = code;
+      const ref = doc(db, "products", candidate.productId);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) { showMessage("That product no longer exists.", true); return; }
+      const data = snap.data();
+      const changes = { barcodes: arrayUnion(code) };
+      if (candidate.variantName) {
+        const flavors = (Array.isArray(data.flavors) ? data.flavors : []).map((v) =>
+          v && typeof v === "object" && (v.name || v.flavor || v.label || "Variant") === candidate.variantName
+            ? { ...v, barcode: code }
+            : v);
+        changes.flavors = flavors;
+        local.flavors = flavors;
+      } else {
+        changes.barcode = code;
+        local.barcode = code;
+      }
+      await updateDoc(ref, changes);
     }
-    await updateDoc(ref, changes);
     const index = products.findIndex((p) => p.id === candidate.productId);
     if (index >= 0) {
       const existing = products[index];
@@ -727,6 +789,110 @@ function renderPayment() {
 // ----------------------------- COMPLETING A SALE ----------------------
 class SaleError extends Error {}
 
+// If a sale's stock deduction goes out but the answer is lost, the next try
+// must reuse the same sale id so the database ignores the repeat.
+let lastSaleAttempt = null; // { id, sig }
+
+// Sale against the Supabase product database: check prices, deduct stock in
+// one all-or-nothing step, then save the sale record and stock log in Firebase.
+async function commitSaleSupabase(ctx) {
+  const { lines, productIds, saleRef, movementRefs, receiptNo, total, units, pay, cashierEmail } = ctx;
+
+  const freshList = await SB.getProductsByIds(productIds);
+  const fresh = new Map(freshList.map((p) => [p.id, p]));
+
+  // Prices must still be what the cashier saw.
+  for (const line of lines) {
+    const data = fresh.get(line.productId);
+    if (!data) throw new SaleError(`"${line.name}" no longer exists.`);
+    const cand = candidatesForProduct(data).find((c) => c.key === line.key);
+    if (!cand) throw new SaleError(`"${line.name}" is no longer available.`);
+    const expected = lineUnitPrice(line);
+    const actual = line.mode === "wholesale" ? cand.wholesaleUnit : cand.retailUnit;
+    if (actual === null || actual === undefined || Math.abs(actual - expected) > 0.001) {
+      throw new SaleError(`The price of "${line.name}" changed. Totals were updated — please check and complete again.`);
+    }
+  }
+
+  const plan = planStockUpdates(fresh, lines);
+  if (plan.error) throw new SaleError(plan.error);
+
+  // Deduct stock. A dropped connection is retried with the SAME sale id, so it can never deduct twice.
+  let updated = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      updated = await SB.applySale(lines, saleRef.id);
+      break;
+    } catch (error) {
+      const code = error instanceof SB.StoreError ? error.code : "";
+      if (/^(insufficient_stock|product_missing|variant_missing|bad_quantity)/.test(code)) {
+        lastSaleAttempt = null;
+        throw new SaleError(/^insufficient_stock/.test(code)
+          ? "Not enough stock for one of the items. Stock was refreshed — please check the cart."
+          : "An item in the cart is no longer available.");
+      }
+      const retryable = code === "network" || /^http_5/.test(code);
+      if (!retryable || attempt === 2) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 700));
+    }
+  }
+
+  // Use the real stock numbers the database ended with for the stock log.
+  plan.movements.forEach((m, i) => {
+    const row = updated?.[i];
+    if (!row) return;
+    let now = null;
+    if (m.variantName === null) now = row.stock_count;
+    else {
+      const v = (row.flavors || []).find((f) => (f.name || f.flavor || f.label) === m.variantName);
+      now = v ? v.stock : null;
+    }
+    if (typeof now === "number") { m.newStock = now; m.previousStock = now + lines[i].qty; }
+  });
+
+  const saleData = {
+    receiptNo,
+    items: buildSaleItems(lines),
+    total,
+    units,
+    paymentMethod: method,
+    amountTendered: pay.tendered,
+    change: pay.change,
+    gcashRef: method === "gcash" ? ($("pos-gcash-ref").value.trim() || null) : null,
+    cashierUid: currentUser.uid,
+    cashierEmail,
+    cashierRole: currentRole,
+    ...customerFields(saleCustomer)
+  };
+
+  try {
+    const batch = writeBatch(db);
+    batch.set(saleRef, { ...saleData, createdAt: serverTimestamp() });
+    plan.movements.forEach((m, i) => {
+      batch.set(movementRefs[i], {
+        productId: m.productId,
+        productName: m.productName,
+        variantName: m.variantName,
+        type: "sale",
+        previousStock: m.previousStock,
+        newStock: m.newStock,
+        unitPrice: m.unitPrice,
+        posSaleId: saleRef.id,
+        performedByEmail: cashierEmail,
+        performedByRole: currentRole,
+        createdAt: serverTimestamp()
+      });
+    });
+    await batch.commit();
+  } catch (error) {
+    // The sale record didn't save, so put the stock back and start fresh next time.
+    lastSaleAttempt = null;
+    try { await SB.restock(lines); } catch (restockError) { console.error("Couldn't put the stock back:", restockError); }
+    throw error;
+  }
+  return { updates: plan.updates, movements: plan.movements, saleData };
+}
+
 async function completeSale() {
   if (busy || cart.length === 0) return;
   const pay = paymentState();
@@ -743,7 +909,11 @@ async function completeSale() {
   const total = cartTotal(lines);
   const units = cartUnits(lines);
   const receiptNo = makeReceiptNo();
-  const saleRef = doc(collection(db, "posSales"));
+  const sig = JSON.stringify(lines.map((l) => [l.key, l.qty, l.mode]));
+  const saleRef = lastSaleAttempt && lastSaleAttempt.sig === sig
+    ? doc(db, "posSales", lastSaleAttempt.id)
+    : doc(collection(db, "posSales"));
+  lastSaleAttempt = { id: saleRef.id, sig };
   const movementRefs = lines.map(() => doc(collection(db, "stockMovements")));
   const productIds = [...new Set(lines.map((l) => l.productId))];
   const cashierEmail = currentUser?.email || "unknown";
@@ -753,7 +923,12 @@ async function completeSale() {
   let soldMovements = null; // per-product stock changes, used for the daily sales tally
   let savedSale = null;   // the sale record as saved, added to today's list without re-reading it
   try {
-    await runTransaction(db, async (tx) => {
+    if (SUPABASE_ENABLED) {
+      const result = await commitSaleSupabase({ lines, productIds, saleRef, movementRefs, receiptNo, total, units, pay, cashierEmail });
+      soldUpdates = result.updates;
+      soldMovements = result.movements;
+      savedSale = result.saleData;
+    } else await runTransaction(db, async (tx) => {
       const fresh = new Map();
       for (const productId of productIds) {
         const snap = await tx.get(doc(db, "products", productId));
@@ -818,6 +993,7 @@ async function completeSale() {
   } catch (error) {
     console.error("Sale failed:", error);
     if (error instanceof SaleError) {
+      lastSaleAttempt = null;
       await refreshCartProducts();
       refreshCartFromProducts();
       renderAll();
@@ -831,6 +1007,7 @@ async function completeSale() {
     return;
   }
 
+  lastSaleAttempt = null;
   applyLocalUpdates(soldUpdates);
   recordSaleTally(soldMovements); // after the sale is saved; never blocks it
   busy = false;
@@ -1195,6 +1372,31 @@ async function confirmRefund() {
   btn.textContent = "Saving...";
   let outcome = null;
 
+  // With Supabase the product stock is read ahead of the Firebase transaction.
+  let prefetch = null;
+  if (SUPABASE_ENABLED && restock) {
+    try {
+      const first = await getDoc(saleRef);
+      if (first.exists()) {
+        const plan0 = planRefund({ id: saleId, ...first.data() }, requested);
+        if (!plan0.error) {
+          const list = await SB.getProductsByIds([...new Set(plan0.lines.map((l) => l.productId))]);
+          prefetch = {
+            linesKey: JSON.stringify(plan0.lines),
+            stock: planRestock(new Map(list.map((p) => [p.id, p])), plan0.lines)
+          };
+        }
+      }
+    } catch (error) {
+      console.error("Couldn't read the products for the refund:", error);
+      busy = false;
+      btn.textContent = "Confirm refund";
+      setRefundStatus("Couldn't reach the product database. Nothing was changed — check the connection and try again.", "error");
+      updateRefundSummary();
+      return;
+    }
+  }
+
   try {
     outcome = await runTransaction(db, async (tx) => {
       const saleSnap = await tx.get(saleRef);
@@ -1204,15 +1406,26 @@ async function confirmRefund() {
       const plan = planRefund(sale, requested);
       if (plan.error) throw new RefundError(plan.error);
 
-      const fresh = new Map();
-      if (restock) {
-        for (const productId of [...new Set(plan.lines.map((l) => l.productId))]) {
-          const snap = await tx.get(doc(db, "products", productId));
-          if (snap.exists()) fresh.set(productId, snap.data());
+      let stock;
+      if (SUPABASE_ENABLED) {
+        if (restock) {
+          if (!prefetch || prefetch.linesKey !== JSON.stringify(plan.lines)) {
+            throw new RefundError("This sale changed while refunding. Please try again.");
+          }
+          stock = prefetch.stock;
+        } else {
+          stock = { updates: new Map(), movements: [], skipped: [] };
         }
+      } else {
+        const fresh = new Map();
+        if (restock) {
+          for (const productId of [...new Set(plan.lines.map((l) => l.productId))]) {
+            const snap = await tx.get(doc(db, "products", productId));
+            if (snap.exists()) fresh.set(productId, snap.data());
+          }
+        }
+        stock = restock ? planRestock(fresh, plan.lines) : { updates: new Map(), movements: [], skipped: [] };
       }
-
-      const stock = restock ? planRestock(fresh, plan.lines) : { updates: new Map(), movements: [], skipped: [] };
       const wasUntouched = saleRefundStatus(sale) === "none";
 
       tx.update(saleRef, {
@@ -1237,8 +1450,10 @@ async function confirmRefund() {
         createdAt: serverTimestamp()
       });
 
-      for (const [productId, update] of stock.updates) {
-        tx.update(doc(db, "products", productId), update);
+      if (!SUPABASE_ENABLED) {
+        for (const [productId, update] of stock.updates) {
+          tx.update(doc(db, "products", productId), update);
+        }
       }
       stock.movements.forEach((m) => {
         tx.set(doc(collection(db, "stockMovements")), {
@@ -1258,7 +1473,7 @@ async function confirmRefund() {
       });
 
       return {
-        total: plan.total, skipped: stock.skipped, receiptNo: sale.receiptNo, updates: stock.updates,
+        total: plan.total, skipped: stock.skipped, receiptNo: sale.receiptNo, updates: stock.updates, lines: plan.lines,
         refundedQtys: plan.refundedQtys, refundedTotal: plan.refundedTotal, refundStatus: plan.status
       };
     });
@@ -1276,13 +1491,27 @@ async function confirmRefund() {
     return;
   }
 
+  // The refund is saved. Now return the stock in the Supabase product database.
+  let stockWarning = "";
+  if (SUPABASE_ENABLED && restock) {
+    const label = (l) => (l.variantName ? `${l.productName} — ${l.variantName}` : l.productName);
+    const toReturn = outcome.lines.filter((l) => !outcome.skipped.includes(label(l)));
+    if (toReturn.length) {
+      try { await SB.restock(toReturn); }
+      catch (error) {
+        console.error("Couldn't return the stock:", error);
+        stockWarning = " The stock could NOT be added back automatically — please add it back in Inventory.";
+      }
+    }
+  }
+
   busy = false;
   btn.textContent = "Confirm refund";
   closeRefund();
   const method = historySales.find((x) => x.id === saleId)?.paymentMethod === "gcash" ? "GCash" : "cash";
   let msg = `Refunded ${formatMoney(outcome.total)} (${method}) for ${outcome.receiptNo || "the sale"}.`;
   if (outcome.skipped.length) msg += ` Not returned to stock (item no longer exists): ${outcome.skipped.join(", ")}.`;
-  showMessage(msg, false);
+  showMessage(msg + stockWarning, !!stockWarning);
   applyLocalUpdates(outcome.updates);
   refreshCartFromProducts();
   renderAll();
