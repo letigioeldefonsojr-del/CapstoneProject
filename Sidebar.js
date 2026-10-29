@@ -616,7 +616,7 @@ async function loadNotifBadge(uid, preferences) {
 
   if (SUPABASE_ENABLED) {
     // Staff notifications live in Supabase now: no Firebase reads. Checked when the
-    // page opens, every minute while visible, and when the tab is shown again.
+    // page opens, every 20 seconds while visible, and when the tab is shown again.
     let notifBusy = false;
     const refreshNotifications = async () => {
       if (notifBusy || document.hidden) return;
@@ -629,7 +629,7 @@ async function loadNotifBadge(uid, preferences) {
       } finally { notifBusy = false; }
     };
     refreshNotifications();
-    const notifTimer = setInterval(refreshNotifications, 60000);
+    const notifTimer = setInterval(refreshNotifications, 20000);
     document.addEventListener("visibilitychange", refreshNotifications);
   } else {
   onSnapshot(
