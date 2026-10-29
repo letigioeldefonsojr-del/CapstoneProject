@@ -10,6 +10,8 @@ import { fuzzyMatch } from "./FuzzySearch.js";
 import { buildSearchFields, needsIndexUpdate } from "./ProductIndex.js";
 import { recordSaleTally } from "./SalesDaily.js";
 import { sendPromotionPushes } from "./PromotionPush.js";
+import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
+import * as SB from "./SupabaseStore.js";
 
 // ====================================================================
 // CHUNK 0 — CONFIG
@@ -156,6 +158,8 @@ document.addEventListener("sidebar:ready", (event) => {
   isAdmin = event.detail.role === "admin";
   currentUserRole = event.detail.role;
   currentUser = event.detail.user;
+  // "Prepare Cashier Search" only existed for the old Firebase product search.
+  if (SUPABASE_ENABLED) document.getElementById("index-products-btn")?.remove();
   loadInventory();
   wireControls();
   wireStockLog();
@@ -206,7 +210,72 @@ function startLiveProducts(onFirst, onFirstError) {
   );
 }
 
+// ---- Supabase product list ------------------------------------------------
+// The whole list is held in memory (as before), so search, filters and sorting
+// work the same. It is re-fetched when the tab comes back after a while, so
+// stock changes made at the Cashier show up.
+let lastListAt = 0;
+let listRefreshing = false;
+
+function selectAfterReload() {
+  const liveIds = new Set(allProducts.map((p) => p.id));
+  let changed = false;
+  selectedProductIds.forEach((id) => { if (!liveIds.has(id)) { selectedProductIds.delete(id); changed = true; } });
+  return changed;
+}
+
+async function refreshListFromSupabase(silent) {
+  if (listRefreshing) return;
+  listRefreshing = true;
+  try {
+    allProducts = await SB.listAllProducts();
+    lastListAt = Date.now();
+    const selectionChanged = selectAfterReload();
+    populateCategoryFilter(allProducts);
+    if (!silent) applyUrlFilter();
+    applyFiltersAndRender();
+    if (selectionChanged) updateBulkDeleteBar();
+  } finally {
+    listRefreshing = false;
+  }
+}
+
+function startAutoRefresh() {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    if (Date.now() - lastListAt < 60000) return;
+    if (document.querySelector(".modal-overlay:not([hidden])")) return;
+    refreshListFromSupabase(true).catch((error) => console.error("Couldn't refresh products:", error));
+  });
+}
+
+// Folds products the database just saved into the list on screen.
+function applySavedProducts(saved) {
+  const byId = new Map(allProducts.map((p, i) => [p.id, i]));
+  saved.forEach((product) => {
+    if (byId.has(product.id)) allProducts[byId.get(product.id)] = product;
+    else { allProducts.push(product); byId.set(product.id, allProducts.length - 1); }
+  });
+}
+
+function removeLocalProducts(ids) {
+  const gone = new Set(ids);
+  allProducts = allProducts.filter((p) => !gone.has(p.id));
+  gone.forEach((id) => selectedProductIds.delete(id));
+}
+
 async function loadInventory() {
+  if (SUPABASE_ENABLED) {
+    try {
+      await refreshListFromSupabase(false);
+      startAutoRefresh();
+    } catch (error) {
+      console.error("Couldn't load products:", error);
+      document.getElementById("inventory-tbody").innerHTML =
+        `<tr><td colspan="5" class="inventory-empty">${error.message || "Couldn't load products right now."}</td></tr>`;
+    }
+    return;
+  }
   // One read path only: the live listener. Its first result fills the
   // page, so products are downloaded once (not once for the page plus
   // once more for the listener).
@@ -232,6 +301,12 @@ async function loadInventory() {
 }
 
 async function reloadAfterWrite() {
+  if (SUPABASE_ENABLED) {
+    // The saved products were already folded into the list; just redraw.
+    populateCategoryFilter(allProducts);
+    applyFiltersAndRender();
+    return;
+  }
   if (productsUnsub) {
     // The live listener already delivers the change; just redraw now.
     applyFiltersAndRender();
@@ -517,10 +592,14 @@ function buildFeaturedStar(product) {
     const next = product.featured !== true;
     star.disabled = true;
     try {
-      await updateDoc(doc(db, PRODUCTS_COLLECTION, product.id), {
-        featured: next,
-        featuredAt: next ? serverTimestamp() : null
-      });
+      if (SUPABASE_ENABLED) {
+        await SB.patchProducts([{ id: product.id, fields: { featured: next, featuredAt: next ? serverTimestamp() : null } }]);
+      } else {
+        await updateDoc(doc(db, PRODUCTS_COLLECTION, product.id), {
+          featured: next,
+          featuredAt: next ? serverTimestamp() : null
+        });
+      }
       product.featured = next;
       invalidateProductsCache();
       paint();
@@ -1193,12 +1272,14 @@ async function handleProductFormSubmit(event) {
   try {
     if (isEditing) {
       Object.assign(productData, buildSearchFields({ ...editOriginalProduct, ...productData }));
-      await updateDoc(doc(db, PRODUCTS_COLLECTION, editingProductId), productData);
+      if (SUPABASE_ENABLED) applySavedProducts(await SB.patchProducts([{ id: editingProductId, fields: productData }]));
+      else await updateDoc(doc(db, PRODUCTS_COLLECTION, editingProductId), productData);
       logManualStockChanges(editOriginalProduct, productData, name, editingProductId);
     } else {
       productData.createdAt = serverTimestamp();
       Object.assign(productData, buildSearchFields(productData));
-      await addDoc(collection(db, PRODUCTS_COLLECTION), productData);
+      if (SUPABASE_ENABLED) applySavedProducts(await SB.patchProducts([{ id: SB.newProductId(), create: true, fields: productData }]));
+      else await addDoc(collection(db, PRODUCTS_COLLECTION), productData);
     }
 
     await reloadAfterWrite();
@@ -1883,7 +1964,18 @@ async function handleConfirmCsvImport() {
 
   try {
     const BATCH_LIMIT = 450; // stay safely under Firestore's 500-op batch cap
-    for (let i = 0; i < validRows.length; i += BATCH_LIMIT) {
+    if (SUPABASE_ENABLED) {
+      for (let i = 0; i < validRows.length; i += 300) {
+        const items = validRows.slice(i, i + 300).map((row) => {
+          const productData = { ...row };
+          Object.assign(productData, buildSearchFields(productData));
+          productData.createdAt = serverTimestamp();
+          return { id: SB.newProductId(), create: true, fields: productData };
+        });
+        applySavedProducts(await SB.patchProducts(items));
+        confirmBtn.textContent = `Importing... ${Math.min(i + 300, validRows.length).toLocaleString()} of ${validRows.length.toLocaleString()}`;
+      }
+    } else for (let i = 0; i < validRows.length; i += BATCH_LIMIT) {
       const chunk = validRows.slice(i, i + BATCH_LIMIT);
       const batch = writeBatch(db);
       chunk.forEach((row) => {
@@ -2140,6 +2232,7 @@ async function handleScannerAction() {
 // The actual write — re-verifies everything fresh inside the
 // transaction rather than trusting cached data or a cached array index.
 async function performScanAction(productId, barcode, mode, value) {
+  if (SUPABASE_ENABLED) return SB.scanStock(productId, barcode, mode, value);
   const productRef = doc(db, PRODUCTS_COLLECTION, productId);
 
   return runTransaction(db, async (transaction) => {
@@ -2507,6 +2600,11 @@ async function handleBulkDelete() {
     const BATCH_LIMIT = 450;
     for (let i = 0; i < ids.length; i += BATCH_LIMIT) {
       const chunk = ids.slice(i, i + BATCH_LIMIT);
+      if (SUPABASE_ENABLED) {
+        await SB.deleteProducts(chunk);
+        removeLocalProducts(chunk);
+        continue;
+      }
       const batch = writeBatch(db);
       chunk.forEach((id) => batch.delete(doc(db, PRODUCTS_COLLECTION, id)));
       await batch.commit();
@@ -2664,9 +2762,14 @@ async function handleDeleteAllProducts() {
     const worker = async () => {
       while (next < chunks.length) {
         const chunk = chunks[next++];
-        const batch = writeBatch(db);
-        chunk.forEach((id) => batch.delete(doc(db, PRODUCTS_COLLECTION, id)));
-        await batch.commit();
+        if (SUPABASE_ENABLED) {
+          await SB.deleteProducts(chunk);
+          removeLocalProducts(chunk);
+        } else {
+          const batch = writeBatch(db);
+          chunk.forEach((id) => batch.delete(doc(db, PRODUCTS_COLLECTION, id)));
+          await batch.commit();
+        }
         done += chunk.length;
         showDeleteProgress({ label: `${done.toLocaleString()} of ${ids.length.toLocaleString()} deleted`, pct: Math.round((done / ids.length) * 100) });
       }
@@ -3432,7 +3535,9 @@ async function runDiscountAction(action) {
   activeBtn.textContent = isApply ? "Applying..." : "Removing...";
 
   try {
-    for (let i = 0; i < updates.length; i += DISCOUNT_BATCH_LIMIT) {
+    if (SUPABASE_ENABLED) {
+      applySavedProducts(await SB.patchProducts(updates.map(({ id, update }) => ({ id, fields: update }))));
+    } else for (let i = 0; i < updates.length; i += DISCOUNT_BATCH_LIMIT) {
       const batch = writeBatch(db);
       updates.slice(i, i + DISCOUNT_BATCH_LIMIT).forEach(({ id, update }) => {
         batch.update(doc(db, PRODUCTS_COLLECTION, id), update);

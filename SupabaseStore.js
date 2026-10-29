@@ -63,7 +63,8 @@ export function rowToProduct(row) {
     available: row.available,
     barcode: row.barcode || null,
     barcodes: row.barcodes || [],
-    flavors
+    flavors,
+    createdAt: row.created_at ? { seconds: Math.floor(Date.parse(row.created_at) / 1000), nanoseconds: 0 } : undefined
   };
 }
 
@@ -100,4 +101,65 @@ export async function restock(lines) {
 
 export async function linkBarcode(productId, barcode, variantName) {
   await call("link_barcode", { id: productId, barcode, variant: variantName || null });
+}
+
+// ----------------------------- INVENTORY -------------------------------
+// Edits are written with the app's usual field names. Firebase's special
+// values (timestamps, "delete this field", "server time") are turned into
+// plain data the function understands.
+function toWire(value) {
+  if (value === null || value === undefined) return value;
+  if (Array.isArray(value)) return value.map(toWire);
+  if (typeof value === "object") {
+    const method = value._methodName;
+    if (method === "deleteField") return "__delete__";
+    if (method === "serverTimestamp") return "__now__";
+    if (typeof value.toMillis === "function" && typeof value.seconds === "number") {
+      return { seconds: value.seconds, nanoseconds: value.nanoseconds || 0 };
+    }
+    const out = {};
+    for (const [k, v] of Object.entries(value)) out[k] = toWire(v);
+    return out;
+  }
+  return value;
+}
+
+// Every product, fetched in pages. (Supabase does not bill per row read.)
+export async function listAllProducts() {
+  const all = [];
+  for (let offset = 0; offset < 100000; offset += 1000) {
+    const data = await call("list_products", { offset, limit: 1000 });
+    all.push(...data.products.map(rowToProduct));
+    if (data.done) break;
+  }
+  return all;
+}
+
+// items: [{ id, fields, create? }]. Returns the saved products.
+export async function patchProducts(items) {
+  const saved = [];
+  for (let i = 0; i < items.length; i += 400) {
+    const chunk = items.slice(i, i + 400).map((it) => ({ id: it.id, create: !!it.create, fields: toWire(it.fields) }));
+    const data = await call("patch_products", { items: chunk });
+    saved.push(...data.products.map(rowToProduct));
+  }
+  return saved;
+}
+
+export async function deleteProducts(ids) {
+  for (let i = 0; i < ids.length; i += 500) {
+    await call("delete_products", { ids: ids.slice(i, i + 500) });
+  }
+}
+
+export async function scanStock(id, barcode, mode, value) {
+  const data = await call("scan_stock", { id, barcode, mode, value });
+  return data.result;
+}
+
+// A new product id (same style as before: 20 random letters and digits).
+export function newProductId() {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(20));
+  return Array.from(bytes, (b) => chars[b % chars.length]).join("");
 }
