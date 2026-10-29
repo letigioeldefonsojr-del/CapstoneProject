@@ -97,42 +97,82 @@ document.addEventListener("sidebar:ready", (event) => {
 // "Show older orders" switches to the full, unfiltered query on
 // demand, so anyone tracking down an old order can still find it —
 // it's just not downloaded automatically on every single page visit.
-const RECENT_WINDOW_DAYS = 60;
+const RECENT_WINDOW_DAYS = 7;
+const DRIVER_RECENT_DAYS = 2;
+// Orders that still need someone to act, whatever their age: they are always
+// loaded, so a stuck order older than the window never disappears.
+const ACTIVE_STATUSES = ["pending", "approved", "ready_for_pickup", "on_the_way"];
 let showingFullHistory = false;
-let unsubscribeOrders = null;
+let orderUnsubs = [];
+const orderParts = new Map(); // listener name -> Map(orderId -> order)
+let mergeTimer = null;
 
-function loadOrders() {
-  if (unsubscribeOrders) unsubscribeOrders();
+function daysAgoTimestamp(days) {
+  return Timestamp.fromDate(new Date(Date.now() - days * 24 * 60 * 60 * 1000));
+}
 
-  const ordersQuery = showingFullHistory
-    ? collection(db, ORDERS_COLLECTION)
-    : query(
-        collection(db, ORDERS_COLLECTION),
-        where("createdAt", ">=", Timestamp.fromDate(new Date(Date.now() - RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000)))
-      );
-
-  // Real-time: fires immediately with current data, then again
-  // automatically whenever anything in this collection changes — a
-  // staff action here (Approve, Mark Delivered, etc.) OR a
-  // customer-side update from the mobile app (confirming they
-  // received their order, submitting a rating, cancelling). No manual
-  // reload needed on either side.
-  unsubscribeOrders = onSnapshot(
-    ordersQuery,
+// Each listener fills its own bucket; the page shows the union of the buckets.
+function watchOrders(name, q, isMain) {
+  orderParts.set(name, new Map());
+  const unsub = onSnapshot(
+    q,
     (snap) => {
-      allOrders = snap.docs
-        .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
-        .sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
-
-      updateCounts();
-      render();
+      const part = new Map();
+      snap.docs.forEach((docSnap) => part.set(docSnap.id, { id: docSnap.id, ...docSnap.data() }));
+      orderParts.set(name, part);
+      scheduleMerge();
     },
     (error) => {
-      console.error("Couldn't load orders:", error);
-      document.getElementById("orders-tbody").innerHTML =
-        `<tr><td colspan="7" class="inventory-empty">Couldn't load orders right now.</td></tr>`;
+      console.error(`Couldn't load orders (${name}):`, error);
+      if (isMain) {
+        document.getElementById("orders-tbody").innerHTML =
+          `<tr><td colspan="7" class="inventory-empty">Couldn't load orders right now.</td></tr>`;
+      }
     }
   );
+  orderUnsubs.push(unsub);
+}
+
+// Several listeners can answer within the same moment (first load): draw once.
+function scheduleMerge() {
+  if (mergeTimer) return;
+  mergeTimer = setTimeout(() => {
+    mergeTimer = null;
+    const byId = new Map();
+    orderParts.forEach((part) => part.forEach((order, id) => byId.set(id, order)));
+    allOrders = [...byId.values()].sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+    updateCounts();
+    render();
+  }, 60);
+}
+
+function loadOrders() {
+  orderUnsubs.forEach((u) => u());
+  orderUnsubs = [];
+  orderParts.clear();
+  const ordersRef = collection(db, ORDERS_COLLECTION);
+
+  // Real-time, like before: a staff action here or a customer-side change
+  // from the mobile app shows up without reloading. What changed is how much
+  // is downloaded: only recent orders plus the ones still in progress, and
+  // drivers get just their own deliveries.
+  if (currentIsDriver) {
+    watchOrders("active", query(ordersRef, where("status", "in", ["approved", "on_the_way"])), true);
+    const uid = auth.currentUser?.uid;
+    if (uid) {
+      // Needs a composite index (driverUid + createdAt). If it is missing the
+      // driver still sees their open deliveries; only their finished ones drop off.
+      watchOrders("mine", query(ordersRef, where("driverUid", "==", uid), where("createdAt", ">=", daysAgoTimestamp(DRIVER_RECENT_DAYS))), false);
+    }
+    return;
+  }
+
+  if (showingFullHistory) {
+    watchOrders("all", ordersRef, true);
+  } else {
+    watchOrders("recent", query(ordersRef, where("createdAt", ">=", daysAgoTimestamp(RECENT_WINDOW_DAYS))), true);
+    watchOrders("active", query(ordersRef, where("status", "in", ACTIVE_STATUSES)), false);
+  }
 }
 
 function toggleFullHistory() {
@@ -144,6 +184,7 @@ function toggleFullHistory() {
 function updateShowOlderButton() {
   const btn = document.getElementById("orders-show-older-btn");
   if (!btn) return;
+  btn.hidden = currentIsDriver; // drivers only ever see their own deliveries
   btn.textContent = showingFullHistory
     ? "Showing all orders — click to show recent only"
     : `Show older orders (beyond the last ${RECENT_WINDOW_DAYS} days)`;
@@ -396,7 +437,7 @@ function handleTargetOrderJump() {
 
   const targetRow = document.querySelector(`tr[data-order-id="${targetOrderId}"]`);
   if (!targetRow) {
-    if (!showingFullHistory) {
+    if (!showingFullHistory && !currentIsDriver) {
       // Not found yet, but might just be older than the recent
       // window — expand to full history and let the next render
       // retry, rather than assuming it's genuinely missing.
@@ -1198,7 +1239,11 @@ function startRiderLocationListener() {
     }, 15000);
   }
   const wanted = new Set(
-    allOrders.filter((o) => o.status === "on_the_way" && !isPickupOrder(o)).map((o) => o.id)
+    allOrders
+      .filter((o) => o.status === "on_the_way" && !isPickupOrder(o))
+      // A driver only needs their own pin, not every rider's.
+      .filter((o) => !currentIsDriver || o.driverUid === auth.currentUser?.uid)
+      .map((o) => o.id)
   );
   locationUnsubs.forEach((unsub, id) => {
     if (!wanted.has(id)) { unsub(); locationUnsubs.delete(id); riderLocations.delete(id); }
