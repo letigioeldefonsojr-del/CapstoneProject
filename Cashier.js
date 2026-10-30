@@ -82,6 +82,8 @@ function anyModalOpen() {
   return Boolean(document.querySelector(".modal-overlay:not([hidden])"));
 }
 
+let lastScanAt = 0; // when the last scan was entered (used to keep the cursor in the scan box)
+
 document.addEventListener("keydown", (event) => {
   if (event.ctrlKey || event.metaKey || event.altKey) return;
   if (isTypingTarget(event.target) || anyModalOpen()) return;
@@ -324,11 +326,16 @@ function wireUi() {
     }
   });
 
+  // Some scanners end every scan with Tab instead of Enter. Tab would jump to the next
+  // box (Customer), so a scan's Tab counts as Enter and the cursor stays here.
   input.addEventListener("keydown", async (event) => {
-    if (event.key !== "Enter") return;
+    if (event.key === "Tab" && !event.shiftKey) {
+      if (!input.value.trim() && Date.now() - lastScanAt > 600) return; // a real Tab by hand still moves on
+    } else if (event.key !== "Enter") return;
     event.preventDefault();
     const value = input.value.trim();
     if (!value) return;
+    lastScanAt = Date.now();
     clearTimeout(searchTimer);
     input.value = ""; // cleared at once so the next scan can start while this one is looked up
     try {
@@ -1244,6 +1251,10 @@ function wireHistory() {
   $("pos-refund-items").addEventListener("change", (event) => {
     const el = event.target.closest("[data-refund-index]");
     if (el) el.value = refundQtys[Number(el.dataset.refundIndex)];
+  });
+  // Right after a scan the cursor must stay in the scan box, never jump to the Customer box.
+  $("pos-customer-input").addEventListener("focus", () => {
+    if (Date.now() - lastScanAt < 800) $("pos-input").focus({ preventScroll: true });
   });
   const reasonSelect = $("pos-refund-reason-select");
   reasonSelect.replaceChildren(...[...REFUND_REASONS, "Others (please specify)"].map((r, i, all) => {
