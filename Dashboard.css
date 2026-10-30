@@ -3424,3 +3424,7 @@ body.has-share-bar { padding-bottom: 0; }
 /* While the rider's location bar is showing, lift the scroll-to-top button above it. */
 body.has-share-bar .scroll-to-top-btn { bottom: 84px; z-index: 85; }
 @media (max-width: 900px) { body.has-share-bar .scroll-to-top-btn { bottom: 88px; right: 16px; } }
+
+/* While the rider's location bar is showing, keep the back-to-top button above it. */
+body.has-share-bar .scroll-to-top-btn { bottom: 84px; z-index: 85; }
+@media (max-width: 900px) { body.has-share-bar .scroll-to-top-btn { bottom: 76px; right: 16px; } }
