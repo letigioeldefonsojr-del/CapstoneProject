@@ -73,6 +73,7 @@ async function lookupRole(uid: string, idToken: string): Promise<"admin" | "empl
   return "employee";
 }
 
+let bestSellersCache: { at: number; ids: string[] } | null = null;
 const ROLE_RECHECK_MS = 60 * 60 * 1000; // saved roles are re-checked against Firebase every hour
 
 async function staffRole(uid: string, idToken: string): Promise<"admin" | "employee" | null> {
@@ -226,6 +227,41 @@ Deno.serve(async (req) => {
           const { data, error } = await admin.from("products").select("*").in("id", ids);
           if (error) return json({ error: error.message }, 400);
           return json({ ok: true, products: (await withWholesale(data ?? [])).map(pub) });
+        }
+        // The best-selling product ids of the last 30 days, worked out from what customer orders
+        // took from stock (no Firebase reads). Orders whose stock was given back are not counted.
+        // Cached for 10 minutes. body: { limit? }  ->  { ok, ids: [productId...] }
+        case "app_best_sellers": {
+          const top = Math.min(Math.max(Number(body.limit) || 20, 1), 50);
+          if (bestSellersCache && Date.now() - bestSellersCache.at < 600_000) {
+            return json({ ok: true, ids: bestSellersCache.ids.slice(0, top), cached: true });
+          }
+          const since = new Date(Date.now() - 30 * 86400_000).toISOString();
+          const totals = new Map<string, number>();
+          const gone = new Set<string>();
+          for (let offset = 0; offset < 20000; offset += 1000) {
+            const { data: rows, error } = await admin.from("applied_sales").select("ref, r")
+              .or("ref.like.items:app:*,ref.like.restocked:app:*").gte("at", since)
+              .order("at", { ascending: false }).range(offset, offset + 999);
+            if (error) return json({ error: error.message }, 400);
+            for (const row of rows ?? []) {
+              if (String(row.ref).startsWith("restocked:")) { gone.add(String(row.ref).slice("restocked:".length)); continue; }
+              const key = String(row.ref).slice("items:".length);
+              for (const it of Array.isArray(row.r) ? row.r : []) {
+                if (it?.id) totals.set(`${key}|${it.id}`, (totals.get(`${key}|${it.id}`) ?? 0) + (Number(it.qty) || 0));
+              }
+            }
+            if ((rows ?? []).length < 1000) break;
+          }
+          const perProduct = new Map<string, number>();
+          totals.forEach((qty, k) => {
+            const [orderKey, id] = [k.slice(0, k.lastIndexOf("|")), k.slice(k.lastIndexOf("|") + 1)];
+            if (gone.has(orderKey)) return;
+            perProduct.set(id, (perProduct.get(id) ?? 0) + qty);
+          });
+          const ids = [...perProduct.entries()].sort((a, b) => b[1] - a[1]).slice(0, 50).map(([id]) => id);
+          bestSellersCache = { at: Date.now(), ids };
+          return json({ ok: true, ids: ids.slice(0, top) });
         }
         // Take stock for an order. body: { items:[{id,variant,qty}], ref }. Safe to repeat for the same ref.
         case "app_apply_sale": {

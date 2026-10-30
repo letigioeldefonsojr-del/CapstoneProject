@@ -1067,13 +1067,15 @@ function setSaleCustomer(customer) {
 // numbers that START with what was typed (a few reads per search), instead
 // of downloading every customer.
 const customerSearchCache = new Map(); // typed text -> { at, list }
-const CUSTOMER_LIMIT = 8;
+const CUSTOMER_LIMIT = 6;
 
 function nameVariants(text) {
   const t = text.trim();
   const title = t.toLowerCase().replace(/(^|[\s\-.'])([a-z])/g, (m, sep, ch) => sep + ch.toUpperCase());
   const first = t.charAt(0).toUpperCase() + t.slice(1);
-  return [...new Set([t, title, first, t.toUpperCase(), t.toLowerCase()])];
+  // Names are saved with capitals ("Juan Dela Cruz"), so these two cover almost every case.
+  // (Each extra spelling is another database query, billed even when it finds nothing.)
+  return [...new Set([title, first])].filter(Boolean);
 }
 
 async function prefixQuery(field, prefix) {
@@ -1103,7 +1105,7 @@ async function searchCustomers(text) {
   if (/^\+?\d{3,}$/.test(digits)) {
     jobs.push(prefixQuery("mobileNumber", digits));
     if (digits.startsWith("0")) jobs.push(prefixQuery("mobileNumber", "+63" + digits.slice(1)));
-  } else if (text.length >= 2) {
+  } else if (text.length >= 3) {
     nameVariants(text).forEach((v) => jobs.push(prefixQuery("fullName", v)));
   }
   let list = [];
@@ -1155,7 +1157,7 @@ function wireCustomerPicker() {
   // Wait for a pause in typing so each keystroke doesn't run a search.
   input.addEventListener("input", () => {
     clearTimeout(customerTimer);
-    customerTimer = setTimeout(showMatches, 300);
+    customerTimer = setTimeout(showMatches, 600);
   });
   $("pos-customer-clear").addEventListener("click", () => setSaleCustomer(null));
 }
