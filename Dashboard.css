@@ -3420,3 +3420,7 @@ body.has-share-bar { padding-bottom: 0; }
 @media (max-width: 900px) { body.has-share-bar { padding-bottom: 0; } }
 .reason-select { width: 100%; padding: 10px 12px; border: 1px solid var(--border, #ddd); border-radius: 10px; font: inherit; background: #fff; }
 .reason-other { margin-top: 10px; }
+
+/* While the rider's location bar is showing, lift the scroll-to-top button above it. */
+body.has-share-bar .scroll-to-top-btn { bottom: 84px; z-index: 85; }
+@media (max-width: 900px) { body.has-share-bar .scroll-to-top-btn { bottom: 88px; right: 16px; } }
