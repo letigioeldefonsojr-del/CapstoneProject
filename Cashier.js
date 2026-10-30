@@ -1100,6 +1100,19 @@ async function searchCustomers(text) {
   const cached = customerSearchCache.get(key);
   if (cached && Date.now() - cached.at < 60000) return cached.list;
 
+  // Typing "juan" after "jua": if the shorter search already returned every match (fewer
+  // than the limit), the longer one is just a subset, so filter it here for 0 reads.
+  const isNameSearch = !/^\+?\d{3,}$/.test(text.replace(/[\s\-()]/g, "")) && text.length >= 3;
+  if (isNameSearch) {
+    for (const [k, entry] of customerSearchCache) {
+      if (entry.complete && key.startsWith(k) && Date.now() - entry.at < 60000) {
+        const list = entry.list.filter((c) => c.name.toLowerCase().startsWith(key));
+        customerSearchCache.set(key, { at: entry.at, list, complete: true });
+        return list;
+      }
+    }
+  }
+
   const jobs = [];
   const digits = text.replace(/[\s\-()]/g, "");
   if (/^\+?\d{3,}$/.test(digits)) {
@@ -1109,8 +1122,10 @@ async function searchCustomers(text) {
     nameVariants(text).forEach((v) => jobs.push(prefixQuery("fullName", v)));
   }
   let list = [];
+  let complete = false;
   try {
     const settled = await Promise.all(jobs);
+    complete = isNameSearch && settled.every((a) => a.length < CUSTOMER_LIMIT);
     const seen = new Map();
     settled.flat().forEach((c) => { if (c.name && !seen.has(c.uid)) seen.set(c.uid, c); });
     list = [...seen.values()];
@@ -1118,7 +1133,7 @@ async function searchCustomers(text) {
     console.error("Couldn't search customers:", error);
     return [];
   }
-  customerSearchCache.set(key, { at: Date.now(), list });
+  customerSearchCache.set(key, { at: Date.now(), list, complete });
   return list;
 }
 
