@@ -971,7 +971,7 @@ const UNDELIVERABLE_REASONS = [
   "Unsafe or unreachable location",
   "Vehicle problem or bad weather"
 ];
-const OTHER_REASON = "Other (type your own)";
+const OTHER_REASON = "Others (please specify)";
 
 function setupReasonPicker(selectId, textId, reasons) {
   const select = document.getElementById(selectId);
