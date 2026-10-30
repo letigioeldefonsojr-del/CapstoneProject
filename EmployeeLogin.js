@@ -97,6 +97,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const toLoginLink  = document.getElementById("to-login");
   const statusBox = document.getElementById("form-status");
   const googleProvider = new GoogleAuthProvider();
+  // Always show Google's account chooser, so a different Gmail can be picked after logging out.
+  googleProvider.setCustomParameters({ prompt: "select_account" });
 
   let pendingSignup = null;
   let pendingOAuthSignup = null;
