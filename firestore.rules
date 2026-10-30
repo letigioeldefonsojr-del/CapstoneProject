@@ -37,7 +37,15 @@ service cloud.firestore {
     match /users/{userId} {
       allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin() || isEmployee());
       allow list: if isSignedIn() && (isAdmin() || isEmployee());
-      allow write: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      // The suspension fields are set by an admin only (Accounts page). A customer can
+      // never add, change or remove them on their own record.
+      allow create: if isSignedIn() && (isAdmin() ||
+        (request.auth.uid == userId &&
+         !request.resource.data.keys().hasAny(['suspendedUntil', 'suspensionReason'])));
+      allow update: if isSignedIn() && (isAdmin() ||
+        (request.auth.uid == userId &&
+         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['suspendedUntil', 'suspensionReason'])));
+      allow delete: if isSignedIn() && (request.auth.uid == userId || isAdmin());
       match /cart/{cartId} {
         allow read, write: if isSignedIn() && request.auth.uid == userId;
       }
@@ -64,11 +72,13 @@ service cloud.firestore {
       // Nor can anyone sign themselves up as a driver — only an admin sets it.
       allow create: if isSignedIn() && request.auth.uid == employeeId &&
         request.resource.data.approved == false &&
-        request.resource.data.get('isDriver', false) == false;
+        request.resource.data.get('isDriver', false) == false &&
+        !request.resource.data.keys().hasAny(['suspendedUntil', 'suspensionReason']);
       allow update: if isSignedIn() &&
         ((request.auth.uid == employeeId &&
           request.resource.data.get('approved', true) == resource.data.get('approved', true) &&
-          request.resource.data.get('isDriver', false) == resource.data.get('isDriver', false)) ||
+          request.resource.data.get('isDriver', false) == resource.data.get('isDriver', false) &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['suspendedUntil', 'suspensionReason'])) ||
          isAdmin());
       allow delete: if isSignedIn() && (request.auth.uid == employeeId || isAdmin());
     }
@@ -83,7 +93,9 @@ service cloud.firestore {
       // page does this while signed in as the admin). Self-creation is NOT
       // allowed — otherwise any signed-in user could make themselves admin.
       allow create: if isAdmin();
-      allow update: if isSignedIn() && (request.auth.uid == adminId || isAdmin());
+      allow update: if isSignedIn() && isAdmin() ||
+        (isSignedIn() && request.auth.uid == adminId &&
+         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['suspendedUntil', 'suspensionReason']));
       allow delete: if isSignedIn() && (request.auth.uid == adminId || isAdmin());
     }
     // Products: anyone signed in can read.
@@ -106,7 +118,9 @@ service cloud.firestore {
     match /orders/{orderId} {
       allow read: if isSignedIn() &&
         (isEmployee() || isAdmin() || isDriver() || resource.data.userId == request.auth.uid);
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      // A new order always starts as pending; only staff move it on from there.
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid &&
+        request.resource.data.status == 'pending';
       // Admins approve or reject pending orders and nothing else. Regular
       // employees are view-only. Drivers get the narrow delivery-step clause
       // below. Customers can still update their own orders (cancel, rate).
@@ -130,7 +144,14 @@ service cloud.firestore {
             request.resource.data.status == 'delivered' &&
             request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['status', 'isPaid', 'pickedUpAt'])))) ||
-         resource.data.userId == request.auth.uid ||
+         // The customer: rate their own order, dismiss the rating prompt, or cancel
+         // it while it is still pending - nothing else (not status, prices or payment).
+         (resource.data.userId == request.auth.uid &&
+          ((request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['rating', 'feedback', 'ratedAt', 'ratingPromptDismissed'])) ||
+           (resource.data.status == 'pending' &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'cancelReason']) &&
+            request.resource.data.status == 'cancelled'))) ||
          // Drivers: delivery steps only (on the way, delivered, undeliverable).
          (isDriver() &&
           request.resource.data.diff(resource.data).affectedKeys()
