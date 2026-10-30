@@ -45,28 +45,51 @@ async function firestoreDoc(path: string, idToken: string) {
   return null;
 }
 
-async function staffRole(uid: string, idToken: string): Promise<"admin" | "employee" | null> {
-  const { data } = await admin.from("staff").select("role").eq("firebase_uid", uid).maybeSingle();
-  if (data?.role) return data.role;
-  // First time we see this person: ask Firestore, then remember the answer.
-  if (await firestoreDoc(`admins/${uid}`, idToken)) {
-    await admin.from("staff").upsert({ firebase_uid: uid, role: "admin" });
-    return "admin";
+// Reads one Firestore document with the person's OWN token. status: 200 found, 404/403 not theirs,
+// 0 = couldn't reach Firestore.
+async function fsGet(path: string, idToken: string): Promise<{ status: number; json?: any }> {
+  try {
+    const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/${path}`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${idToken}` } });
+    return { status: res.status, json: res.status === 200 ? await res.json() : undefined };
+  } catch {
+    return { status: 0 };
   }
-  const emp = await firestoreDoc(`employees/${uid}`, idToken);
-  if (emp) {
-    const f = emp.fields ?? {};
-    const approved = f.approved?.booleanValue !== false;
-    const driver = f.isDriver?.booleanValue === true;
-    if (approved && !driver) {
-      await admin.from("staff").upsert({ firebase_uid: uid, role: "employee" });
-      return "employee";
-    }
-  }
-  return null;
 }
 
+// What Firebase says this person is right now: admin, employee, none, or unknown (couldn't ask).
+async function lookupRole(uid: string, idToken: string): Promise<"admin" | "employee" | "none" | "unknown"> {
+  const adm = await fsGet(`admins/${uid}`, idToken);
+  if (adm.status === 200) return "admin";
+  if (adm.status !== 404 && adm.status !== 403) return "unknown";
+  const emp = await fsGet(`employees/${uid}`, idToken);
+  if (emp.status === 404 || emp.status === 403) return "none";
+  if (emp.status !== 200) return "unknown";
+  const f = emp.json?.fields ?? {};
+  const approved = f.approved?.booleanValue !== false;
+  const driver = f.isDriver?.booleanValue === true;
+  const until = f.suspendedUntil?.timestampValue ? Date.parse(f.suspendedUntil.timestampValue) : 0;
+  if (!approved || driver || until > Date.now()) return "none";
+  return "employee";
+}
 
+const ROLE_RECHECK_MS = 60 * 60 * 1000; // saved roles are re-checked against Firebase every hour
+
+async function staffRole(uid: string, idToken: string): Promise<"admin" | "employee" | null> {
+  const { data: row } = await admin.from("staff").select("*").eq("firebase_uid", uid).maybeSingle();
+  const checked = row?.checked_at ? Date.parse(row.checked_at) : 0;
+  if (row?.role && Date.now() - checked < ROLE_RECHECK_MS) return row.role;
+
+  const verdict = await lookupRole(uid, idToken);
+  if (verdict === "unknown") return row?.role ?? null; // Firebase unreachable: keep what we knew
+  if (verdict === "none") {
+    if (row) await admin.from("staff").delete().eq("firebase_uid", uid); // removed, unapproved or suspended
+    return null;
+  }
+  const up = await admin.from("staff").upsert({ firebase_uid: uid, role: verdict, checked_at: new Date().toISOString() });
+  if (up.error) await admin.from("staff").upsert({ firebase_uid: uid, role: verdict }); // before the checked_at column exists
+  return verdict;
+}
 
 // ---- BEGIN PURE HELPERS (no network; tested on their own) ----
 const DEL = "__delete__";
@@ -305,6 +328,61 @@ Deno.serve(async (req) => {
           return json({ error: error.message }, 409);
         }
         return json({ ok: true, updated: data });
+      }
+      // Admin only, one-time: copy old Firebase sales history into Supabase. Safe to repeat:
+      // anything already there is skipped, nothing is overwritten or deleted.
+      // body: { sales:[{id,createdAt,sale}], refunds:[{id,saleId,createdAt,refund}],
+      //         movements:[{id,createdAt,...}], daily:[{day,units}] }  (max 400 each)
+      case "import_history": {
+        if (role !== "admin") return json({ error: "admin_only" }, 403);
+        const arr = (v: any) => (Array.isArray(v) ? v : []);
+        const sales = arr(body.sales), refunds = arr(body.refunds), movements = arr(body.movements), daily = arr(body.daily);
+        if ([sales, refunds, movements, daily].some((a) => a.length > 400)) return json({ error: "too_big" }, 400);
+        const iso = (v: any) => { const t = Date.parse(String(v)); return Number.isFinite(t) ? new Date(t).toISOString() : new Date().toISOString(); };
+        const txt = (v: any) => (v === undefined || v === null || v === "" ? null : String(v).slice(0, 300));
+        const numOrNull = (v: any) => (v === undefined || v === null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
+        const out: Record<string, number> = { sales: 0, refunds: 0, movements: 0, daily: 0 };
+
+        const saleRows = sales.filter((x: any) => x?.id && x?.sale && typeof x.sale === "object").map((x: any) => ({
+          id: String(x.id).slice(0, 100), created_at: iso(x.createdAt),
+          receipt_no: txt(x.sale.receiptNo), total: numOrNull(x.sale.total) ?? 0,
+          refunded_total: numOrNull(x.sale.refundedTotal) ?? 0, refund_status: txt(x.sale.refundStatus),
+          customer_id: txt(x.sale.customerId), customer_name: txt(x.sale.customerName),
+          payment_method: txt(x.sale.paymentMethod), cashier_email: txt(x.sale.cashierEmail), data: x.sale,
+        }));
+        if (saleRows.length) {
+          const r = await admin.from("pos_sales").upsert(saleRows, { onConflict: "id", ignoreDuplicates: true }).select("id");
+          if (r.error) return json({ error: r.error.message }, 400);
+          out.sales = r.data?.length ?? 0;
+        }
+        const refundRows = refunds.filter((x: any) => x?.id && x?.saleId && x?.refund && typeof x.refund === "object").map((x: any) => ({
+          id: String(x.id).slice(0, 100), sale_id: String(x.saleId).slice(0, 100), created_at: iso(x.createdAt), data: x.refund,
+        }));
+        if (refundRows.length) {
+          const r = await admin.from("pos_refunds").upsert(refundRows, { onConflict: "id", ignoreDuplicates: true }).select("id");
+          if (r.error) return json({ error: r.error.message }, 400);
+          out.refunds = r.data?.length ?? 0;
+        }
+        const moveRows = movements.filter((m: any) => m?.id && ["sale", "return", "count", "manual_edit"].includes(m.type)).map((m: any) => ({
+          id: String(m.id).slice(0, 100), created_at: iso(m.createdAt),
+          product_id: txt(m.productId), product_name: txt(m.productName), variant_name: txt(m.variantName), type: m.type,
+          previous_stock: numOrNull(m.previousStock), new_stock: numOrNull(m.newStock), unit_price: numOrNull(m.unitPrice),
+          pos_sale_id: txt(m.posSaleId), pos_refund_id: txt(m.posRefundId),
+          performed_by_email: txt(m.performedByEmail), performed_by_role: txt(m.performedByRole),
+        }));
+        if (moveRows.length) {
+          const r = await admin.from("stock_movements").upsert(moveRows, { onConflict: "id", ignoreDuplicates: true }).select("id");
+          if (r.error) return json({ error: r.error.message }, 400);
+          out.movements = r.data?.length ?? 0;
+        }
+        const dayRows = daily.filter((d: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(d?.day)) && d?.units && typeof d.units === "object")
+          .map((d: any) => ({ day: String(d.day), units: d.units }));
+        if (dayRows.length) {
+          const r = await admin.from("sales_daily").upsert(dayRows, { onConflict: "day", ignoreDuplicates: true }).select("day");
+          if (r.error) return json({ error: r.error.message }, 400);
+          out.daily = r.data?.length ?? 0;
+        }
+        return json({ ok: true, copied: out });
       }
       // Save a real barcode on a product (scan-and-link). body: {id, barcode, variant?}
       case "link_barcode": {

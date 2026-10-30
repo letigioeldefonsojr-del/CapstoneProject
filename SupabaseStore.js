@@ -109,6 +109,11 @@ export async function restockUndelivered(userId, ref) {
   return await call("restock_undelivered", { userId, ref });
 }
 
+// One-time copy of old Firebase history (admin only). Returns { copied: {sales, refunds, movements, daily} }.
+export async function importHistory(payload) {
+  return await call("import_history", payload);
+}
+
 export async function linkBarcode(productId, barcode, variantName) {
   await call("link_barcode", { id: productId, barcode, variant: variantName || null });
 }

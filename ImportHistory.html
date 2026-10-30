@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex">
+    <title>Import old history | Almares 328</title>
+    <style>
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: #f4f5f3; color: #1c1c1c; margin: 0; padding: 24px 16px; }
+        main { max-width: 640px; margin: 0 auto; background: #fff; border-radius: 16px; padding: 28px 24px; box-shadow: 0 4px 18px rgba(0,0,0,.08); }
+        h1 { margin: 0 0 6px; font-size: 22px; }
+        p { line-height: 1.5; }
+        button { background: #14532d; color: #fff; border: 0; border-radius: 10px; padding: 12px 20px; font-size: 15px; font-weight: 600; cursor: pointer; }
+        button[disabled] { opacity: .5; cursor: default; }
+        table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 14px; }
+        th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #eee; }
+        #status { margin-top: 14px; font-weight: 600; }
+        #status[data-kind="error"] { color: #b91c1c; }
+        #status[data-kind="ok"] { color: #15803d; }
+        a { color: #14532d; }
+    </style>
+</head>
+<body>
+<main>
+    <h1>Import old history</h1>
+    <p>Copies the old sales receipts, refunds, stock history and daily totals from Firebase into Supabase, so past reports are complete. Admin only.</p>
+    <p>It is safe to run more than once: anything already copied is skipped, and nothing is changed or deleted in Firebase. Keep this page open until it says it is finished.</p>
+    <button type="button" id="start-btn" disabled>Checking your sign-in...</button>
+    <p id="status" hidden></p>
+    <table id="result" hidden>
+        <thead><tr><th>What</th><th>Found in Firebase</th><th>Newly copied</th><th>Already there</th></tr></thead>
+        <tbody></tbody>
+    </table>
+    <p><a href="/Dashboard">Back to the dashboard</a></p>
+</main>
+<script type="module" src="ImportHistory.js?v=20261030a"></script>
+</body>
+</html>
