@@ -215,6 +215,15 @@ Deno.serve(async (req) => {
           }
           const clean = items.map((it) => ({ id: String(it.id), variant: it.variant ?? null, qty: Number(it.qty) }));
           const key = `app:${uid}:${ref}`;
+          // A real shopper places a handful of orders an hour. Cap NEW orders per person so a
+          // script can't drain the shelves with made-up references (repeats of a ref are free).
+          const { data: seen } = await admin.from("applied_sales").select("ref").eq("ref", `items:${key}`).maybeSingle();
+          if (!seen) {
+            const since = new Date(Date.now() - 3600_000).toISOString();
+            const { count } = await admin.from("applied_sales").select("ref", { count: "exact", head: true })
+              .like("ref", `items:app:${uid}:%`).gte("at", since);
+            if ((count ?? 0) >= 20) return json({ error: "too_many_orders" }, 429);
+          }
           const { data, error } = await admin.rpc("apply_sale", { items: clean, sale_ref: key });
           if (error) return json({ error: error.message }, 409);
           // remember what was taken, so only that exact amount can be given back

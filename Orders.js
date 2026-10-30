@@ -950,6 +950,53 @@ async function handleApprove(order) {
   await reloadAfterAction();
 }
 
+
+// ---- Ready-made reasons (with "Other" for anything else) ----
+const REJECT_REASONS = [
+  "Item is out of stock",
+  "Item is no longer available",
+  "Outside our delivery area",
+  "Incomplete or incorrect address",
+  "Unable to contact the customer",
+  "Duplicate order",
+  "Store is closed or cannot deliver today"
+];
+const UNDELIVERABLE_REASONS = [
+  "Customer not available",
+  "Customer not answering calls or messages",
+  "Wrong or incomplete address",
+  "Could not find the address",
+  "Customer refused the order",
+  "Customer asked to cancel",
+  "Unsafe or unreachable location",
+  "Vehicle problem or bad weather"
+];
+const OTHER_REASON = "Other (type your own)";
+
+function setupReasonPicker(selectId, textId, reasons) {
+  const select = document.getElementById(selectId);
+  const text = document.getElementById(textId);
+  select.replaceChildren(...[...reasons, OTHER_REASON].map((r) => {
+    const o = document.createElement("option");
+    o.value = r === OTHER_REASON ? "__other__" : r;
+    o.textContent = r;
+    return o;
+  }));
+  const sync = () => { text.hidden = select.value !== "__other__"; if (!text.hidden) text.focus(); };
+  select.addEventListener("change", sync);
+}
+function resetReasonPicker(selectId, textId) {
+  const select = document.getElementById(selectId);
+  select.selectedIndex = 0;
+  const text = document.getElementById(textId);
+  text.value = "";
+  text.hidden = select.value !== "__other__";
+}
+function readReason(selectId, textId) {
+  const select = document.getElementById(selectId);
+  return select.value === "__other__" ? document.getElementById(textId).value.trim() : select.value;
+}
+
 // Rejecting needs a reason (the customer is told why), so it has its own modal.
 let pendingRejectOrderId = null;
 
@@ -957,10 +1004,9 @@ function handleReject(order) {
   pendingRejectOrderId = order.id;
   document.getElementById("reject-order-label").textContent =
     `Order #${shortOrderId(order.id)} from ${order.customerName || "this customer"}. This can't be undone.`;
-  document.getElementById("reject-reason").value = "";
+  resetReasonPicker("reject-reason-select", "reject-reason");
   document.getElementById("reject-status").hidden = true;
   document.getElementById("reject-modal-overlay").hidden = false;
-  document.getElementById("reject-reason").focus();
 }
 
 function closeRejectModal() {
@@ -976,7 +1022,7 @@ function wireRejectModal() {
 
 async function handleConfirmReject() {
   const statusEl = document.getElementById("reject-status");
-  const reason = document.getElementById("reject-reason").value.trim();
+  const reason = readReason("reject-reason-select", "reject-reason");
   if (!reason) {
     statusEl.textContent = "Please enter a reason.";
     statusEl.dataset.kind = "error";
@@ -1603,7 +1649,7 @@ async function handleMarkPickedUp(order) {
 // ====================================================================
 function openUndeliverableModal(order) {
   pendingUndeliverableOrderId = order.id;
-  document.getElementById("undeliverable-reason").value = "";
+  resetReasonPicker("undeliverable-reason-select", "undeliverable-reason");
   document.getElementById("undeliverable-restock").checked = true;
   document.getElementById("undeliverable-status").hidden = true;
   document.getElementById("undeliverable-modal-overlay").hidden = false;
@@ -1615,13 +1661,15 @@ function closeUndeliverableModal() {
 }
 
 function wireUndeliverableModal() {
+  setupReasonPicker("undeliverable-reason-select", "undeliverable-reason", UNDELIVERABLE_REASONS);
+  setupReasonPicker("reject-reason-select", "reject-reason", REJECT_REASONS);
   document.getElementById("undeliverable-modal-close").addEventListener("click", closeUndeliverableModal);
   document.getElementById("undeliverable-cancel").addEventListener("click", closeUndeliverableModal);
   document.getElementById("undeliverable-confirm").addEventListener("click", handleConfirmUndeliverable);
 }
 
 async function handleConfirmUndeliverable() {
-  const reason = document.getElementById("undeliverable-reason").value.trim();
+  const reason = readReason("undeliverable-reason-select", "undeliverable-reason");
   const statusEl = document.getElementById("undeliverable-status");
 
   if (!reason) {
