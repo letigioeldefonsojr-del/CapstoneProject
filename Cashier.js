@@ -1245,6 +1245,18 @@ function wireHistory() {
     const el = event.target.closest("[data-refund-index]");
     if (el) el.value = refundQtys[Number(el.dataset.refundIndex)];
   });
+  const reasonSelect = $("pos-refund-reason-select");
+  reasonSelect.replaceChildren(...[...REFUND_REASONS, "Others (please specify)"].map((r, i, all) => {
+    const o = document.createElement("option");
+    o.value = i === all.length - 1 ? "__other__" : r;
+    o.textContent = r;
+    return o;
+  }));
+  reasonSelect.addEventListener("change", () => {
+    $("pos-refund-reason").hidden = reasonSelect.value !== "__other__";
+    if (!$("pos-refund-reason").hidden) $("pos-refund-reason").focus();
+    updateRefundSummary();
+  });
   $("pos-refund-reason").addEventListener("input", updateRefundSummary);
   $("pos-refund-confirm").addEventListener("click", confirmRefund);
 }
@@ -1313,11 +1325,29 @@ function renderHistory() {
   }).join("");
 }
 
+const REFUND_REASONS = [
+  "Wrong item rung up",
+  "Customer returned the item",
+  "Item damaged or defective",
+  "Item expired",
+  "Wrong price",
+  "Customer changed their mind",
+  "Duplicate or mistaken sale"
+];
+
+// The chosen reason: a ready-made one, or what was typed under "Others".
+function refundReasonText() {
+  const sel = $("pos-refund-reason-select");
+  return sel.value === "__other__" ? $("pos-refund-reason").value.trim() : sel.value;
+}
+
 function openRefund(sale) {
   refundSale = sale;
   refundQtys = sale.items.map(() => 0);
   $("pos-refund-title").textContent = `Refund / Void — ${sale.receiptNo || ""}`;
+  $("pos-refund-reason-select").selectedIndex = 0;
   $("pos-refund-reason").value = "";
+  $("pos-refund-reason").hidden = true;
   $("pos-refund-restock").checked = false;
   $("pos-refund-status").hidden = true;
   renderRefund();
@@ -1350,7 +1380,7 @@ function renderRefund() {
 function updateRefundSummary() {
   const total = refundSale.items.reduce((sum, item, i) => sum + round2((item.unitPrice || 0) * (refundQtys[i] || 0)), 0);
   $("pos-refund-total").textContent = formatMoney(round2(total));
-  const reasonOk = $("pos-refund-reason").value.trim().length > 0;
+  const reasonOk = refundReasonText().length > 0;
   $("pos-refund-confirm").disabled = busy || total <= 0 || !reasonOk || !navigator.onLine;
 }
 
@@ -1363,7 +1393,7 @@ function setRefundStatus(text, kind) {
 
 // Refund / void against the Supabase sales records.
 async function confirmRefundSupabase() {
-  const reason = $("pos-refund-reason").value.trim();
+  const reason = refundReasonText();
   if (!reason) return;
   const restock = $("pos-refund-restock").checked;
   const requested = [...refundQtys];
@@ -1468,7 +1498,7 @@ async function confirmRefundSupabase() {
 async function confirmRefund() {
   if (busy || !refundSale) return;
   if (SUPABASE_ENABLED) return confirmRefundSupabase();
-  const reason = $("pos-refund-reason").value.trim();
+  const reason = refundReasonText();
   if (!reason) return;
   const restock = $("pos-refund-restock").checked;
   const requested = [...refundQtys];
