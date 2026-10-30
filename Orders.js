@@ -113,6 +113,7 @@ const STUCK_ORDER_DAYS = 30;
 // loaded, so a stuck order older than the window never disappears.
 const ACTIVE_STATUSES = ["pending", "approved", "ready_for_pickup", "on_the_way"];
 let showingFullHistory = false;
+let hiddenUnfinishedCount = 0;
 let orderUnsubs = [];
 const orderParts = new Map(); // listener name -> Map(orderId -> order)
 let mergeTimer = null;
@@ -149,17 +150,23 @@ function scheduleMerge() {
   mergeTimer = setTimeout(() => {
     mergeTimer = null;
     const byId = new Map();
+    let hiddenUnfinished = 0;
     const now = Date.now();
     const recentCutoff = now - (currentIsDriver ? DRIVER_RECENT_DAYS : RECENT_WINDOW_DAYS) * 86400000;
-    const stuckCutoff = now - STUCK_ORDER_DAYS * 86400000;
     orderParts.forEach((part) => part.forEach((order, id) => {
       if (!showingFullHistory) {
         const ts = order.createdAt?.toMillis?.() || 0;
-        const keep = !ts || ts >= recentCutoff || (ACTIVE_STATUSES.includes(order.status) && ts >= stuckCutoff);
-        if (!keep) return;
+        const keep = !ts || ts >= recentCutoff;
+        if (!keep) {
+          // Older than the window: hidden, but counted if it was never finished, so the button can say so.
+          if (ACTIVE_STATUSES.includes(order.status)) hiddenUnfinished += 1;
+          return;
+        }
       }
       byId.set(id, order);
     }));
+    hiddenUnfinishedCount = hiddenUnfinished;
+    updateShowOlderButton();
     allOrders = [...byId.values()].sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
     updateCounts();
     render();
@@ -207,7 +214,7 @@ function updateShowOlderButton() {
   btn.hidden = currentIsDriver; // drivers only ever see their own deliveries
   btn.textContent = showingFullHistory
     ? "Showing all orders — click to show recent only"
-    : `Show older orders (beyond the last ${RECENT_WINDOW_DAYS} days)`;
+    : `Show older orders (beyond the last ${RECENT_WINDOW_DAYS} days)${hiddenUnfinishedCount ? ` \u2014 ${hiddenUnfinishedCount} older order${hiddenUnfinishedCount === 1 ? " is" : "s are"} still unfinished` : ""}`;
 }
 
 // No longer needed for its own sake — the onSnapshot listener above
