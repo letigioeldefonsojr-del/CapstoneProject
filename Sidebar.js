@@ -30,10 +30,10 @@ let latestNotifications = null;
 // goes right before the Orders link and is visible to every role.
 function injectCashierNav() {
   const nav = document.querySelector(".sidebar__nav");
-  if (!nav || nav.querySelector('a[href="Cashier.html"]')) return;
-  const ordersLink = nav.querySelector('a[href="Orders.html"]');
+  if (!nav || nav.querySelector('a[href="Cashier"]')) return;
+  const ordersLink = nav.querySelector('a[href="Orders"]');
   const link = document.createElement("a");
-  link.href = "Cashier.html";
+  link.href = "Cashier";
   link.className = "nav-item";
   link.innerHTML = `
     <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -189,7 +189,7 @@ async function resolveDriverFlag(uid) {
 // Only Orders (and Log out) stay in the sidebar for a driver.
 function applyDriverNav() {
   document.querySelectorAll(".sidebar__nav a.nav-item").forEach((link) => {
-    if (link.getAttribute("href") !== "Orders.html") link.hidden = true;
+    if (link.getAttribute("href") !== "Orders") link.hidden = true;
   });
 }
 
@@ -439,7 +439,7 @@ function highlightActiveNav() {
 // without editing each page's HTML.
 // ====================================================================
 function loadOrdersBadge() {
-  const link = document.querySelector('.sidebar__nav a[href="Orders.html"]');
+  const link = document.querySelector('.sidebar__nav a[href="Orders"]');
   if (!link) return;
 
   let badge = document.getElementById("orders-badge");

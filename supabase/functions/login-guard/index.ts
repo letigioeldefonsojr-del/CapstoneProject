@@ -530,7 +530,7 @@ Deno.serve(async (req) => {
             to_name: fStr(d, "firstName") || fStr(d, "name") || "there",
             username: fStr(d, "username"),
             role: fBool(d, "isDriver") === true ? "Driver" : "Employee",
-            login_url: `${SITE_ORIGIN}EmployeeLogin.html`,
+            login_url: `${SITE_ORIGIN}EmployeeLogin`,
           },
         }),
       });
