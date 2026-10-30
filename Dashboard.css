@@ -3428,3 +3428,11 @@ body.has-share-bar .scroll-to-top-btn { bottom: 84px; z-index: 85; }
 /* While the rider's location bar is showing, keep the back-to-top button above it. */
 body.has-share-bar .scroll-to-top-btn { bottom: 84px; z-index: 85; }
 @media (max-width: 900px) { body.has-share-bar .scroll-to-top-btn { bottom: 76px; right: 16px; } }
+
+/* Pager: "Rows per page 50 | 1-50 of 128 | < >" under long tables */
+.pager { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 14px; padding: 12px 8px 4px; font-size: 14px; color: var(--muted, #666); }
+.pager__select { padding: 6px 8px; border: 1px solid var(--border, #ddd); border-radius: 8px; font: inherit; background: #fff; color: inherit; }
+.pager__range { min-width: 90px; text-align: center; }
+.pager__btn { border: 0; background: transparent; font-size: 22px; line-height: 1; padding: 4px 10px; border-radius: 8px; cursor: pointer; color: inherit; }
+.pager__btn:hover:not([disabled]) { background: rgba(0,0,0,.06); }
+.pager__btn[disabled] { opacity: .3; cursor: default; }

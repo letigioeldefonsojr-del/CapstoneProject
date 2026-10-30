@@ -4,6 +4,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
 import * as SB from "./SupabaseStore.js?v=20261029c";
+import { renderPager, pageSlice, clampPage } from "./Pager.js?v=20261030a";
 
 const ORDERS_COLLECTION = "orders";
 const STOCK_MOVEMENTS_COLLECTION = "stockMovements";
@@ -274,7 +275,14 @@ async function fetchCurrentPrices(productIds) {
   return prices;
 }
 
+let salesPage = 1;
+let salesPerPage = 50;
+let salesRangeLabel = null;
+
 function render(container, combined, rangeLabel) {
+  // A new date range starts at page 1.
+  if (rangeLabel !== salesRangeLabel) { salesRangeLabel = rangeLabel; salesPage = 1; }
+  salesPage = clampPage(salesPage, combined.length, salesPerPage);
   const totalRevenue = combined.reduce((sum, s) => sum + (s.revenue ?? 0), 0);
   const onlineCount = combined.filter((s) => s.source === "online").length;
   const inPersonCount = combined.filter((s) => s.source === "in-person" || s.source === "pos").length;
@@ -303,9 +311,16 @@ function render(container, combined, rangeLabel) {
     <div class="panel">
       <h3 class="panel__title">Sales — ${escapeHtmlSales(rangeLabel)}</h3>
       ${hasEstimated ? `<p class="sales-estimate-note">Some in-person sales shown below are from before exact prices were tracked per sale — those are estimated using each product's current price, and marked "(estimated)".</p>` : ""}
-      ${combined.length === 0 ? `<p class="notif-list__empty">No sales recorded for this period.</p>` : buildSalesTable(combined)}
+      ${combined.length === 0 ? `<p class="notif-list__empty">No sales recorded for this period.</p>` : buildSalesTable(pageSlice(combined, salesPage, salesPerPage))}
+      <div id="sales-pager" class="pager"></div>
     </div>
   `;
+
+  renderPager(container.querySelector("#sales-pager"), {
+    total: combined.length, page: salesPage, perPage: salesPerPage,
+    onPage: (n) => { salesPage = n; render(container, combined, rangeLabel); },
+    onSize: (n) => { salesPerPage = n; salesPage = 1; render(container, combined, rangeLabel); }
+  });
 
   // Wire receipt buttons after the table is actually in the DOM —
   // only online orders get one, since in-person sales are single-item

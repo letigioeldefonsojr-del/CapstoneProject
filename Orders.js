@@ -3,6 +3,7 @@ import {
   collection, doc, getDoc, getDocs, setDoc, deleteDoc, updateDoc, onSnapshot, query, where, Timestamp, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { confirmDialog } from "./ConfirmDialog.js";
+import { renderPager, pageSlice, clampPage } from "./Pager.js?v=20261030a";
 import { restockOrder, restockUndelivered } from "./SupabaseStore.js?v=20261030i";
 
 // ====================================================================
@@ -64,6 +65,9 @@ let fulfillmentFilter = "all"; // "all" | "pickup" | "delivery"
 let groupBy = "none"; // "none" | "week" | "month" | "year"
 let expandedGroupLabel; // undefined = never set yet (auto-expand first group); null = user deliberately collapsed everything (stay collapsed); a string = that specific group is open
 let activeTab = "all";
+let ordersPage = 1;
+let ordersPerPage = 50;
+let ordersFilterSig = "";
 let cancelledSubStatus = "cancelled"; // when activeTab === "cancelled": "cancelled" or "rejected"
 let expandedOrderDetail = null;   // accordion: only one order's detail row open at a time
 let expandedOrderMainRow = null;
@@ -369,7 +373,18 @@ function render() {
   expandedOrderMainRow = null;
 
   const tbody = document.getElementById("orders-tbody");
-  const orders = ordersForActiveTab();
+  const allMatching = ordersForActiveTab();
+
+  // A different tab, search, sort, filter or grouping starts again at page 1.
+  const sig = [activeTab, searchQuery, sortOrder, fulfillmentFilter, groupBy, document.querySelector("#cancelled-subtabs .is-active")?.dataset?.substatus || ""].join("|");
+  if (sig !== ordersFilterSig) { ordersFilterSig = sig; ordersPage = 1; }
+  ordersPage = clampPage(ordersPage, allMatching.length, ordersPerPage);
+  const orders = pageSlice(allMatching, ordersPage, ordersPerPage);
+  renderPager(document.getElementById("orders-pager"), {
+    total: allMatching.length, page: ordersPage, perPage: ordersPerPage,
+    onPage: (n) => { ordersPage = n; render(); },
+    onSize: (n) => { ordersPerPage = n; ordersPage = 1; render(); }
+  });
 
   if (orders.length === 0) {
     const message = searchQuery.trim() ? "No orders match your search." : "No orders here.";
@@ -453,6 +468,12 @@ function handleTargetOrderJump() {
 
   const targetRow = document.querySelector(`tr[data-order-id="${targetOrderId}"]`);
   if (!targetRow) {
+    // It may simply be on another page of the list.
+    const idx = ordersForActiveTab().findIndex((o) => o.id === targetOrderId);
+    if (idx >= 0) {
+      const wanted = Math.floor(idx / ordersPerPage) + 1;
+      if (wanted !== ordersPage) { ordersPage = wanted; render(); return; }
+    }
     if (!showingFullHistory && !currentIsDriver) {
       // Not found yet, but might just be older than the recent
       // window — expand to full history and let the next render
