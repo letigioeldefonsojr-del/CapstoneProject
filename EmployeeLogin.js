@@ -585,7 +585,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     formSignup.reset();
     setEmployeeMode("login");
-    showPendingApprovalOverlay(username);
+    showPendingApprovalOverlay(username, email);
   }
 
   async function handleOtpResend() {
@@ -744,7 +744,7 @@ document.addEventListener("DOMContentLoaded", () => {
       await signOut(auth);
       sessionStorage.removeItem("almares_role");
       setEmployeeMode("login");
-      showPendingApprovalOverlay(username);
+      showPendingApprovalOverlay(username, email);
     } catch (error) {
       console.error("Couldn't complete Google signup:", error);
       showStatus("Something went wrong. Please try again.", "error");
@@ -850,7 +850,7 @@ function escapeHtmlSuspension(text) {
 // state, it needs an admin to actually clear it.
 // Shown once a new employee finishes registering: the account exists but an
 // admin has to approve it before anyone can log in.
-function showPendingApprovalOverlay(username = "") {
+function showPendingApprovalOverlay(username = "", email = "") {
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay lock-overlay";
   const card = document.createElement("div");
@@ -865,11 +865,15 @@ function showPendingApprovalOverlay(username = "") {
     <h3>Your account is pending</h3>
     <p class="lock-card__note">You can log in once your account is approved.</p>
     <p class="lock-card__note pending-card__username"></p>
+    <p class="lock-card__note pending-card__email"></p>
     <button type="button" class="btn-primary" id="pending-dismiss-btn">Okay</button>
   `;
   const usernameLine = card.querySelector(".pending-card__username");
   if (username) usernameLine.textContent = `Your username is "${username}".`;
   else usernameLine.remove();
+  const emailLine = card.querySelector(".pending-card__email");
+  if (email) emailLine.textContent = `We'll email you at ${email} once it's approved. Please check your inbox (and your spam folder).`;
+  else emailLine.remove();
   overlay.appendChild(card);
   document.body.appendChild(overlay);
 
