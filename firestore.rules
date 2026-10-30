@@ -112,7 +112,9 @@ service cloud.firestore {
       // below. Customers can still update their own orders (cancel, rate).
       allow update: if isSignedIn() &&
         ((isAdmin() &&
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'rejectReason']) &&
+          request.resource.data.get('rejectReason', '') is string &&
+          request.resource.data.get('rejectReason', '').size() <= 200 &&
           resource.data.status == 'pending' &&
           request.resource.data.status in ['approved', 'rejected']) ||
          // Store pickup (admin only): approved -> ready for pickup, then

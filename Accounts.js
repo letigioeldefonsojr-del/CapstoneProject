@@ -8,6 +8,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { confirmDialog } from "./ConfirmDialog.js";
 import { listLocks, unlockAccount } from "./LoginAttempts.js?v=20261030d";
+import { guardCall } from "./LoginGuard.js?v=20261030d";
 import { generateUniqueUsername, isUsernameTaken } from "./UsernameGenerator.js?v=20261030d";
 
 // ====================================================================
@@ -439,6 +440,10 @@ async function handleApprove(account, btn, asDriver = false) {
   btn.textContent = "Approving...";
   try {
     await updateDoc(doc(db, "employees", account.id), asDriver ? { approved: true, isDriver: true } : { approved: true });
+    // Tell the employee by email that they can log in now. A failure here
+    // (e.g. email not set up yet) never affects the approval itself.
+    guardCall("notify_approved", { id: account.id }, { signedIn: true })
+      .catch((error) => console.warn("Approval email not sent:", error.message));
     // The live listener re-renders the row — nothing else to do.
   } catch (error) {
     console.error("Couldn't approve account:", error);

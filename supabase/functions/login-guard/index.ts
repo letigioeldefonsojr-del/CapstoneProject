@@ -38,6 +38,7 @@ const admin = createClient(
 const EMAILJS_SERVICE_ID = Deno.env.get("EMAILJS_SERVICE_ID") ?? "service_mmg4ncm";
 const EMAILJS_TEMPLATE_ID = Deno.env.get("EMAILJS_TEMPLATE_ID") ?? "template_szd8ssu";
 const EMAILJS_PUBLIC_KEY = Deno.env.get("EMAILJS_PUBLIC_KEY") ?? "D66Nq0gpzysnBwvyP";
+const EMAILJS_APPROVED_TEMPLATE_ID = Deno.env.get("EMAILJS_APPROVED_TEMPLATE_ID") ?? "";
 const EMAILJS_PRIVATE_KEY = Deno.env.get("EMAILJS_PRIVATE_KEY") ?? "";
 
 const cors = {
@@ -499,6 +500,45 @@ Deno.serve(async (req) => {
       if (!validId(id)) return json({ error: "bad_id" }, 400);
       const { error } = await admin.rpc("guard_reset", { ks: [id] });
       if (error) return json({ error: error.message }, 500);
+      return json({ ok: true });
+    }
+
+    // After an admin approves an employee: email them that they can log in now.
+    // Only sent for an account that really is approved, and at most twice a day per account.
+    if (action === "notify_approved") {
+      const id = String(body.id ?? "").trim();
+      if (!id || id.length > 128 || id.includes("/")) return json({ error: "bad_request" }, 400);
+      if (!EMAILJS_PRIVATE_KEY || !EMAILJS_APPROVED_TEMPLATE_ID) return json({ error: "not_configured" }, 503);
+      const d = await fsGet(`employees/${id}`);
+      if (!d) return json({ error: "not_found" }, 404);
+      if (fBool(d, "approved") !== true) return json({ error: "not_approved" }, 409);
+      const email = fStr(d, "email").trim().toLowerCase();
+      if (!email) return json({ error: "no_email" }, 404);
+      const key = `approvedmail:${id}`;
+      const { data: gate } = await admin.rpc("guard_check", { k: key, stale_min: 1440 });
+      if (gate?.state === "wait") return json({ ok: true, already: true });
+      const res = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          service_id: EMAILJS_SERVICE_ID,
+          template_id: EMAILJS_APPROVED_TEMPLATE_ID,
+          user_id: EMAILJS_PUBLIC_KEY,
+          accessToken: EMAILJS_PRIVATE_KEY,
+          template_params: {
+            email,
+            to_name: fStr(d, "firstName") || fStr(d, "name") || "there",
+            username: fStr(d, "username"),
+            role: fBool(d, "isDriver") === true ? "Driver" : "Employee",
+            login_url: `${SITE_ORIGIN}EmployeeLogin.html`,
+          },
+        }),
+      });
+      if (!res.ok) {
+        console.error("emailjs approved", res.status, await res.text().catch(() => ""));
+        return json({ error: "send_failed" }, 502);
+      }
+      await admin.rpc("guard_fail", { k: key, free: 1, base: 86400, perm: 100000, stale_min: 1440 });
       return json({ ok: true });
     }
 

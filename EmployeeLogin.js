@@ -535,9 +535,9 @@ document.addEventListener("DOMContentLoaded", () => {
     pendingSignup = null;
     hideOtpStep();
 
-    showStatus(`Account created! Your username is "${username}". An admin needs to approve it before you can log in.`, "success");
     formSignup.reset();
     setEmployeeMode("login");
+    showPendingApprovalOverlay(username);
   }
 
   async function handleOtpResend() {
@@ -800,6 +800,35 @@ function escapeHtmlSuspension(text) {
 // this glass overlay instead of an inline form error, matching the
 // suspension overlay's treatment: this isn't a "try again shortly"
 // state, it needs an admin to actually clear it.
+// Shown once a new employee finishes registering: the account exists but an
+// admin has to approve it before anyone can log in.
+function showPendingApprovalOverlay(username) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay lock-overlay";
+  const card = document.createElement("div");
+  card.className = "lock-card pending-card";
+  card.innerHTML = `
+    <div class="lock-card__icon pending-card__icon">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.8"/>
+        <path d="M12 7.5V12l3 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <h3>Your account is pending</h3>
+    <p class="lock-card__note">You can log in once your account is approved.</p>
+    <p class="lock-card__note pending-card__username"></p>
+    <button type="button" class="btn-primary" id="pending-dismiss-btn">Okay</button>
+  `;
+  card.querySelector(".pending-card__username").textContent = `Your username is "${username}".`;
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+
+  overlay.querySelector("#pending-dismiss-btn").addEventListener("click", () => overlay.remove());
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) overlay.remove();
+  });
+}
+
 function showLockedOverlay() {
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay lock-overlay";

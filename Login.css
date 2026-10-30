@@ -1142,3 +1142,16 @@ input:focus-visible {
     width: 20px;
     height: 20px;
 }
+
+
+/* ===========================
+   PENDING APPROVAL (reuses the glass lock card)
+   =========================== */
+.pending-card__icon {
+    color: #ffd180;
+}
+
+.pending-card__username {
+    font-weight: 600;
+    margin-top: -6px;
+}

@@ -85,6 +85,7 @@ document.addEventListener("sidebar:ready", (event) => {
   wireSearch();
   wireSort();
   wireUndeliverableModal();
+  wireRejectModal();
   document.getElementById("orders-show-older-btn").addEventListener("click", toggleFullHistory);
   updateShowOlderButton();
   loadOrders();
@@ -821,6 +822,13 @@ function buildOrderDetailRow(order) {
 
   wrap.appendChild(list);
 
+  if (order.rejectReason) {
+    const rejectLine = document.createElement("p");
+    rejectLine.className = "order-detail__reason";
+    rejectLine.textContent = `Rejected: ${order.rejectReason}`;
+    wrap.appendChild(rejectLine);
+  }
+
   if (order.deliveryIssueReason) {
     const reasonLine = document.createElement("p");
     reasonLine.className = "order-detail__reason";
@@ -898,6 +906,11 @@ function buildActionsForOrder(order) {
   } else if (order.status === "on_the_way") {
     wrap.appendChild(buildActionButton("Mark Delivered", "btn-primary", () => handleMarkDelivered(order)));
     wrap.appendChild(buildActionButton("Undeliverable", "btn-danger-outline", () => openUndeliverableModal(order)));
+  } else if (order.status === "rejected" && order.rejectReason) {
+    const rejectNote = document.createElement("span");
+    rejectNote.className = "orders-table__cancel-reason";
+    rejectNote.textContent = order.rejectReason;
+    wrap.appendChild(rejectNote);
   } else if (order.status === "cancelled" && order.cancelReason) {
     // Cancelled orders have no actions left to take — this column
     // would otherwise sit empty, so the customer's own cancellation
@@ -937,30 +950,73 @@ async function handleApprove(order) {
   await reloadAfterAction();
 }
 
-async function handleReject(order) {
-  const confirmed = await confirmDialog(
-    `Reject order #${shortOrderId(order.id)} from ${order.customerName || "this customer"}? This can't be undone.`,
-    { title: "Reject order?", confirmLabel: "Reject", danger: true }
-  );
-  if (!confirmed) return;
+// Rejecting needs a reason (the customer is told why), so it has its own modal.
+let pendingRejectOrderId = null;
 
-  await updateDoc(doc(db, ORDERS_COLLECTION, order.id), { status: "rejected" });
-  sendOrderNotification(order, "Order Rejected", `Your order #${shortOrderId(order.id)} was rejected.`);
+function handleReject(order) {
+  pendingRejectOrderId = order.id;
+  document.getElementById("reject-order-label").textContent =
+    `Order #${shortOrderId(order.id)} from ${order.customerName || "this customer"}. This can't be undone.`;
+  document.getElementById("reject-reason").value = "";
+  document.getElementById("reject-status").hidden = true;
+  document.getElementById("reject-modal-overlay").hidden = false;
+  document.getElementById("reject-reason").focus();
+}
 
-  // The customer app took these items out of stock when the order was placed;
-  // a rejected order gives them back (once). A failure here never blocks the rejection.
+function closeRejectModal() {
+  document.getElementById("reject-modal-overlay").hidden = true;
+  pendingRejectOrderId = null;
+}
+
+function wireRejectModal() {
+  document.getElementById("reject-modal-close").addEventListener("click", closeRejectModal);
+  document.getElementById("reject-cancel").addEventListener("click", closeRejectModal);
+  document.getElementById("reject-confirm").addEventListener("click", handleConfirmReject);
+}
+
+async function handleConfirmReject() {
+  const statusEl = document.getElementById("reject-status");
+  const reason = document.getElementById("reject-reason").value.trim();
+  if (!reason) {
+    statusEl.textContent = "Please enter a reason.";
+    statusEl.dataset.kind = "error";
+    statusEl.hidden = false;
+    return;
+  }
+  const order = allOrders.find((o) => o.id === pendingRejectOrderId);
+  if (!order) { closeRejectModal(); return; }
+
+  const confirmBtn = document.getElementById("reject-confirm");
+  confirmBtn.disabled = true;
+  confirmBtn.textContent = "Rejecting...";
   let stockNote = "";
-  if (order.userId) {
-    try {
-      await restockOrder(order.userId, order.id);
-    } catch (error) {
-      if (error.code !== "nothing_to_restock") {
-        console.error("Couldn't return the stock for a rejected order:", error);
-        stockNote = "The order was rejected, but its items could not be returned to stock automatically. Please check the stock for this order.";
+  try {
+    await updateDoc(doc(db, ORDERS_COLLECTION, order.id), { status: "rejected", rejectReason: reason });
+    sendOrderNotification(order, "Order Rejected", `Your order #${shortOrderId(order.id)} was rejected. Reason: ${reason}`);
+
+    // The customer app took these items out of stock when the order was placed;
+    // a rejected order gives them back (once). A failure here never blocks the rejection.
+    if (order.userId) {
+      try {
+        await restockOrder(order.userId, order.id);
+      } catch (error) {
+        if (error.code !== "nothing_to_restock") {
+          console.error("Couldn't return the stock for a rejected order:", error);
+          stockNote = "The order was rejected, but its items could not be returned to stock automatically. Please check the stock for this order.";
+        }
       }
     }
+    closeRejectModal();
+    await reloadAfterAction();
+  } catch (error) {
+    console.error("Couldn't reject order:", error);
+    statusEl.textContent = "Something went wrong. Please try again.";
+    statusEl.dataset.kind = "error";
+    statusEl.hidden = false;
+  } finally {
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = "Reject order";
   }
-  await reloadAfterAction();
   if (stockNote) await confirmDialog(stockNote, { title: "Stock not returned", confirmLabel: "OK" });
 }
 
