@@ -27,11 +27,16 @@ const LOGIN_PAGE_URL = "EmployeeLogin.html";
 // If already signed in (and genuinely a valid, activated employee),
 // skip straight past the login form instead of making them log in
 // again.
+// True while a new employee is being registered on this page. The sign-up signs the
+// new login in for a moment, and this watcher must not send them to the Dashboard then.
+let signupInProgress = false;
+
 onAuthStateChanged(auth, async (user) => {
-  if (!user) return;
+  if (!user || signupInProgress) return;
   try {
     const snap = await getDoc(doc(db, EMPLOYEE_COLLECTION, user.uid));
-    if (snap.exists() && snap.data()[EMPLOYEE_ACTIVE_FIELD] === true) {
+    // An employee still waiting for approval is not let in (the Dashboard would send them back out).
+    if (!signupInProgress && snap.exists() && snap.data()[EMPLOYEE_ACTIVE_FIELD] === true && snap.data().approved !== false) {
       sessionStorage.setItem("almares_employee_doc_id", user.uid);
       window.location.replace(EMPLOYEE_REDIRECT_URL);
     }
@@ -515,6 +520,15 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function completeSignup() {
+    signupInProgress = true;
+    try {
+      await runCompleteSignup();
+    } finally {
+      signupInProgress = false;
+    }
+  }
+
+  async function runCompleteSignup() {
     const { name, username, email, phone, password } = pendingSignup;
 
     let credential;
