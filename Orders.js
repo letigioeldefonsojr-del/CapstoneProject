@@ -99,6 +99,10 @@ document.addEventListener("sidebar:ready", (event) => {
 // it's just not downloaded automatically on every single page visit.
 const RECENT_WINDOW_DAYS = 7;
 const DRIVER_RECENT_DAYS = 2;
+// An order still "in progress" after this long is almost certainly leftover
+// (test data, or one nobody closed). It is hidden by default and still
+// reachable with "Show older orders".
+const STUCK_ORDER_DAYS = 30;
 // Orders that still need someone to act, whatever their age: they are always
 // loaded, so a stuck order older than the window never disappears.
 const ACTIVE_STATUSES = ["pending", "approved", "ready_for_pickup", "on_the_way"];
@@ -139,7 +143,17 @@ function scheduleMerge() {
   mergeTimer = setTimeout(() => {
     mergeTimer = null;
     const byId = new Map();
-    orderParts.forEach((part) => part.forEach((order, id) => byId.set(id, order)));
+    const now = Date.now();
+    const recentCutoff = now - (currentIsDriver ? DRIVER_RECENT_DAYS : RECENT_WINDOW_DAYS) * 86400000;
+    const stuckCutoff = now - STUCK_ORDER_DAYS * 86400000;
+    orderParts.forEach((part) => part.forEach((order, id) => {
+      if (!showingFullHistory) {
+        const ts = order.createdAt?.toMillis?.() || 0;
+        const keep = !ts || ts >= recentCutoff || (ACTIVE_STATUSES.includes(order.status) && ts >= stuckCutoff);
+        if (!keep) return;
+      }
+      byId.set(id, order);
+    }));
     allOrders = [...byId.values()].sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
     updateCounts();
     render();
