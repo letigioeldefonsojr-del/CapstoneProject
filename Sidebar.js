@@ -140,6 +140,7 @@ async function initSidebar(user) {
   // Let the page's own script (Dashboard.js, Inventory.js, etc.) know
   // the sidebar is ready and what role is logged in, in case it needs
   // to adjust its own content (e.g. hiding an admin-only button).
+  watchAccountLive(user.uid, role);
   document.dispatchEvent(new CustomEvent("sidebar:ready", { detail: { role, user, preferences, isDriver } }));
 }
 
@@ -325,6 +326,35 @@ async function signOutPending() {
   await signOut(auth);
   sessionStorage.clear();
   window.location.href = "EmployeeLogin.html?pending=1";
+}
+
+// Watches the person's own account record while the page is open, so a suspension,
+// removal or un-approval by the admin takes effect at once instead of at the next reload.
+let accountWatchOn = false;
+function watchAccountLive(uid, role) {
+  if (accountWatchOn) return;
+  accountWatchOn = true;
+  const collectionName = role === "admin" ? ADMIN_COLLECTION : EMPLOYEE_COLLECTION;
+  let handled = false;
+  onSnapshot(
+    doc(db, collectionName, uid),
+    (snap) => {
+      if (handled) return;
+      const data = snap.exists() ? snap.data() : null;
+      if (!snap.exists() && snap.metadata.fromCache) return; // not a real answer yet
+      if (!data) {
+        handled = true;
+        signOut(auth).finally(() => { sessionStorage.clear(); window.location.href = LOGIN_PAGE_URL; });
+      } else if (isSuspended(data)) {
+        handled = true;
+        signOutSuspended(data, role);
+      } else if (role === "employee" && isPendingApproval(data)) {
+        handled = true;
+        signOutPending();
+      }
+    },
+    (error) => console.error("Couldn't watch the account status:", error) // fail open, like the page-load check
+  );
 }
 
 function isSuspended(data) {
