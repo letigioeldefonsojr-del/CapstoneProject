@@ -1,149 +1,67 @@
-import { db } from "./firebase-config.js";
-import {
-  doc, getDoc, setDoc, deleteDoc, serverTimestamp
-} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { guardCall } from "./LoginGuard.js?v=20261030c";
 
 // ====================================================================
 // LOGIN ATTEMPT TRACKING / ESCALATING LOCKOUT
 // ----------------------------------------------------------------
 // Tracked by whatever identifier the person actually typed (email for
-// Administrator, username for Employee) — checked BEFORE attempting
-// Firebase sign-in, so a locked-out attempt never even reaches
-// Firebase Auth.
+// Administrator, username for Employee) and checked BEFORE attempting
+// Firebase sign-in, so a locked-out attempt never even reaches Firebase
+// Auth.
 //
-// Schedule: 30s after the 1st failure, doubling each time after
-// (60s, 120s, 240s...). After more than 15 total failures, the
-// account is locked outright until an admin clears it.
+// Schedule: the first 6 failures show a plain error, then a 30s wait
+// after the next failure, doubling each time (60s, 120s, 240s...). After
+// more than 15 total failures the account is locked outright until an
+// administrator unlocks it. 15 minutes without a failure starts the
+// count again.
 //
-// IMPORTANT HONEST LIMIT: this is an app-level lock only. It stops
-// someone from signing in through THIS web app's UI. It does NOT
-// disable the actual Firebase Authentication account — that flag can
-// only be set by the Firebase Admin SDK, which runs server-side (a
-// Cloud Function), not from a static web app talking to Firestore/
-// Auth directly. A true "disable this account everywhere" feature
-// would need one built. This still fully stops brute-force attempts
-// against THIS app, which is the realistic threat model here.
+// The counters now live on the server (the login-guard function), not in
+// Firestore: the browser can't read, edit or delete them any more, so the
+// lockout can't be skipped by wiping a record. If the guard can't be
+// reached, checking fails open (the real password check still has to
+// pass) - a broken check shouldn't lock legitimate people out.
+//
+// Honest limit that remains: this stops attempts made through THIS web
+// app's login page. Someone calling Firebase Authentication directly is
+// held back only by Firebase's own built-in throttling.
 // ====================================================================
-const COLLECTION = "loginAttempts";
-const FREE_ATTEMPTS = 6; // first N failures show a plain error, no lockout at all
-const BASE_LOCKOUT_SECONDS = 30;
-const PERMANENT_LOCK_THRESHOLD = 15; // more than this many TOTAL failures = locked until admin clears it
-// If 15 minutes pass with no new failure, the count resets back to
-// zero — a genuinely mistyped password from a while ago shouldn't
-// permanently count against someone weeks later. This does NOT apply
-// to a permanent lock (see below) — that one stays until an admin
-// clears it specifically, otherwise it'd be meaningless (anyone could
-// just wait 15 minutes and keep trying forever).
-const ATTEMPT_RESET_WINDOW_MINUTES = 15;
-
-function isExpired(lastAttemptAt) {
-  const lastAttemptMillis = lastAttemptAt?.toMillis?.();
-  if (!lastAttemptMillis) return true; // no timestamp on record — treat as expired/fresh rather than guessing
-  return Date.now() - lastAttemptMillis > ATTEMPT_RESET_WINDOW_MINUTES * 60 * 1000;
-}
-
-function normalizeKey(identifier) {
-  return identifier.trim().toLowerCase();
-}
-
-function attemptDocRef(identifier) {
-  return doc(db, COLLECTION, normalizeKey(identifier));
-}
+const LOCKED_MESSAGE = "This account has been locked after too many failed attempts. Contact an administrator to unlock it.";
+const FREE_ATTEMPTS = 6;
 
 export async function checkLoginAllowed(identifier) {
   try {
-    const snap = await getDoc(attemptDocRef(identifier));
-    if (!snap.exists()) return { allowed: true };
-
-    const data = snap.data();
-
-    if (data.permanentlyLocked) {
+    const r = await guardCall("check", { id: identifier });
+    if (r.state === "locked") {
+      return { allowed: false, locked: true, message: LOCKED_MESSAGE };
+    }
+    if (r.state === "wait") {
       return {
         allowed: false,
-        locked: true,
-        message: "This account has been locked after too many failed attempts. Contact an administrator to unlock it."
+        secondsLeft: r.secondsLeft,
+        message: `Too many failed attempts. Try again in ${formatWait(r.secondsLeft)}.`
       };
     }
-
-    // 15+ minutes since the last failure — this record is stale,
-    // treat it as if it doesn't exist at all rather than honoring an
-    // old, expired lockout window.
-    if (isExpired(data.lastAttemptAt)) {
-      return { allowed: true };
-    }
-
-    const lockedUntilMillis = data.lockedUntil?.toMillis?.();
-    if (lockedUntilMillis && Date.now() < lockedUntilMillis) {
-      const secondsLeft = Math.ceil((lockedUntilMillis - Date.now()) / 1000);
-      return {
-        allowed: false,
-        secondsLeft,
-        message: `Too many failed attempts. Try again in ${formatWait(secondsLeft)}.`
-      };
-    }
-
     return { allowed: true };
   } catch (error) {
     console.error("Couldn't check login attempt status:", error);
-    // Fail open — a broken check here shouldn't lock legitimate users
-    // out entirely; the actual password check still has to pass.
     return { allowed: true };
   }
 }
 
 export async function recordFailedAttempt(identifier) {
-  const ref = attemptDocRef(identifier);
   try {
-    const snap = await getDoc(ref);
-    const existingData = snap.exists() ? snap.data() : null;
-
-    // A permanent lock is never reset by time passing — only an admin
-    // clearing it. Everything else (the free-attempt count, the
-    // escalating lockout) resets to zero once 15 minutes have passed
-    // since the last failure, treating this as a fresh start rather
-    // than continuing to add on to a stale count from a while ago.
-    const recordIsStale = existingData && !existingData.permanentlyLocked && isExpired(existingData.lastAttemptAt);
-    const previousCount = existingData && !recordIsStale ? (existingData.failedCount || 0) : 0;
-    const failedCount = previousCount + 1;
-    const permanentlyLocked = failedCount > PERMANENT_LOCK_THRESHOLD;
-
-    // Still within the free grace period — track the count, but no
-    // lockout yet at all.
-    if (failedCount <= FREE_ATTEMPTS && !permanentlyLocked) {
-      await setDoc(ref, {
-        identifier: normalizeKey(identifier),
-        failedCount,
-        lockedUntil: null,
-        permanentlyLocked: false,
-        lastAttemptAt: serverTimestamp()
-      });
-
-      const remaining = FREE_ATTEMPTS - failedCount;
+    const r = await guardCall("fail", { id: identifier });
+    if (r.locked) return { locked: true, message: LOCKED_MESSAGE };
+    if (r.secondsLeft) {
       return {
-        message: remaining > 0
-          ? `Incorrect email or password. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining before a wait is required.`
-          : "Incorrect email or password."
+        secondsLeft: r.secondsLeft,
+        message: `Incorrect email or password. Try again in ${formatWait(r.secondsLeft)}.`
       };
     }
-
-    // Past the grace period — escalating lockout starts counting from
-    // the first failure AFTER the free attempts, not from failure #1.
-    const lockoutSeconds = BASE_LOCKOUT_SECONDS * Math.pow(2, failedCount - FREE_ATTEMPTS - 1);
-
-    await setDoc(ref, {
-      identifier: normalizeKey(identifier),
-      failedCount,
-      lockedUntil: permanentlyLocked ? null : new Date(Date.now() + lockoutSeconds * 1000),
-      permanentlyLocked,
-      lastAttemptAt: serverTimestamp()
-    });
-
-    if (permanentlyLocked) {
-      return { locked: true, message: "This account has been locked after too many failed attempts. Contact an administrator to unlock it." };
-    }
+    const remaining = r.remaining ?? FREE_ATTEMPTS - (r.failedCount || 0);
     return {
-      secondsLeft: lockoutSeconds,
-      message: `Incorrect email or password. Try again in ${formatWait(lockoutSeconds)}.`
+      message: remaining > 0
+        ? `Incorrect email or password. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining before a wait is required.`
+        : "Incorrect email or password."
     };
   } catch (error) {
     console.error("Couldn't record failed login attempt:", error);
@@ -151,14 +69,27 @@ export async function recordFailedAttempt(identifier) {
   }
 }
 
-export async function resetAttempts(identifier) {
+// After a good login: clears the signed-in person's OWN records (the
+// server works out which they are from their login, not from what was typed).
+export async function resetAttempts() {
   try {
-    await deleteDoc(attemptDocRef(identifier));
+    await guardCall("reset", {}, { signedIn: true });
   } catch (error) {
-    // Non-fatal — a leftover record just means the next failed
-    // attempt (if any) starts counting from whatever was there.
+    // Non-fatal - a leftover record just means the next failed attempt
+    // (if any) starts counting from whatever was there.
     console.error("Couldn't reset login attempt record:", error);
   }
+}
+
+// Administrators only (Accounts page): which of these identifiers are locked right now.
+export async function listLocks(identifiers) {
+  const r = await guardCall("status", { ids: identifiers }, { signedIn: true });
+  return r.locked || [];
+}
+
+// Administrators only (Accounts page): clears a lock. Throws if it didn't work.
+export async function unlockAccount(identifier) {
+  await guardCall("unlock", { id: identifier }, { signedIn: true });
 }
 
 function formatWait(seconds) {

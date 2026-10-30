@@ -7,7 +7,7 @@ import {
   collection, onSnapshot, doc, setDoc, getDoc, getDocs, getCountFromServer, query, where, limit, updateDoc, deleteDoc, deleteField, Timestamp, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { confirmDialog } from "./ConfirmDialog.js";
-import { resetAttempts } from "./LoginAttempts.js";
+import { listLocks, unlockAccount } from "./LoginAttempts.js?v=20261030c";
 import { generateUniqueUsername, isUsernameTaken } from "./UsernameGenerator.js";
 
 // ====================================================================
@@ -397,26 +397,16 @@ async function checkAndApplyLockStatus(account, statusCell, actionsCell) {
   if (identifiers.length === 0) return;
 
   try {
-    const snaps = await Promise.all(
-      identifiers.map((id) => getDoc(doc(db, "loginAttempts", id.trim().toLowerCase())))
-    );
+    // The lockout records live on the server now (admins only may ask).
+    const locked = await listLocks(identifiers);
+    const lockedInfo = locked[0];
+    if (!lockedInfo) return; // not locked - nothing to add
 
-    const lockedSnap = snaps.find((snap) => {
-      if (!snap.exists()) return false;
-      const data = snap.data();
-      if (data.permanentlyLocked) return true;
-      const lockedUntilMillis = data.lockedUntil?.toMillis?.();
-      return lockedUntilMillis && lockedUntilMillis > Date.now();
-    });
-
-    if (!lockedSnap) return; // not locked — nothing to add
-
-    const data = lockedSnap.data();
     const badge = document.createElement("span");
     badge.className = "stock-badge stock-badge--critical";
-    badge.textContent = data.permanentlyLocked
+    badge.textContent = lockedInfo.permanent
       ? "Locked out"
-      : `Locked until ${new Date(data.lockedUntil.toMillis()).toLocaleTimeString()}`;
+      : `Locked until ${new Date(lockedInfo.lockedUntilMs).toLocaleTimeString()}`;
     statusCell.appendChild(badge);
 
     const unlockBtn = buildActionButton("Unlock", "btn-outline", async (event) => {
@@ -424,7 +414,8 @@ async function checkAndApplyLockStatus(account, statusCell, actionsCell) {
       btn.disabled = true;
       btn.textContent = "Unlocking...";
       try {
-        await resetAttempts(lockedSnap.ref.id);
+        // Clear every record this person could be locked under (email and username).
+        await Promise.all(identifiers.map((id) => unlockAccount(id)));
         badge.remove();
         unlockBtn.remove();
       } catch (error) {

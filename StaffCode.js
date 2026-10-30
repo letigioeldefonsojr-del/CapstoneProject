@@ -1,29 +1,28 @@
-import { db } from "./firebase-config.js";
-import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { guardCall } from "./LoginGuard.js?v=20261030c";
 
 // ====================================================================
 // STAFF CODE
 // ----------------------------------------------------------------
 // A single shared code (not per-person) that gates who can even
-// attempt registration — admin can rotate it if it ever leaks, by
-// updating the "code" field on staffCode/config in Firestore. There's
-// no in-app UI to edit this yet; it's set directly in the Firestore
-// console for now (Settings/Dashboard tooling could add that later
-// if it becomes a frequent need).
+// attempt registration. It is no longer stored where the browser can
+// read it: the login-guard function compares what was typed and only
+// answers yes or no. To rotate the code, run the "set code" SQL at the
+// bottom of supabase/09_login_guard.sql in the Supabase SQL editor.
+// Too many wrong guesses from one address are slowed down on the server.
 // ====================================================================
 export async function verifyStaffCode(enteredCode) {
   try {
-    const snap = await getDoc(doc(db, "staffCode", "config"));
-    if (!snap.exists() || !snap.data().code) {
-      // No code configured yet — fail closed rather than silently
+    const r = await guardCall("code_check", { code: enteredCode.trim() });
+    if (!r.configured) {
+      // No code configured yet - fail closed rather than silently
       // letting anyone through because nothing was set up.
       return { valid: false, message: "Staff code isn't configured yet. Contact an administrator." };
     }
-
-    const isValid = enteredCode.trim() === snap.data().code;
-    return isValid
-      ? { valid: true, message: "" }
-      : { valid: false, message: "Incorrect staff code." };
+    if (r.valid) return { valid: true, message: "" };
+    if (r.secondsLeft) {
+      return { valid: false, message: `Too many wrong codes. Try again in ${r.secondsLeft < 60 ? `${r.secondsLeft}s` : `${Math.round(r.secondsLeft / 60)} min`}.` };
+    }
+    return { valid: false, message: "Incorrect staff code." };
   } catch (error) {
     console.error("Couldn't verify staff code:", error);
     return { valid: false, message: "Couldn't verify the staff code right now. Please try again." };

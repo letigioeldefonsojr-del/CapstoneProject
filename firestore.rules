@@ -218,20 +218,18 @@ service cloud.firestore {
         request.resource.data.reason.size() > 0 &&
         request.resource.data.reason.size() <= 200;
     }
-    // Login attempt tracking (rate limiting / escalating lockout).
-    // Must be open — this is checked and updated BEFORE the person is
-    // authenticated at all, since it's what gates whether a sign-in
-    // attempt is even allowed to happen. Only holds attempt counters/
-    // timestamps keyed by email or username, nothing sensitive.
+    // Login attempt tracking (rate limiting / escalating lockout) now lives
+    // on the server (Supabase "login-guard" function). Nothing in the browser
+    // may read, write or delete these records any more - that is what stops
+    // someone wiping their own lockout or locking another person out.
     match /loginAttempts/{attemptId} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
-    // Staff code: a single shared code required to register as either
-    // role (admin can rotate it). Public read since it's checked
-    // during signup, before the person is authenticated.
+    // Staff code: the shared registration code now lives on the server too
+    // (stored as a hash, checked by the "login-guard" function, which only
+    // answers yes or no). Not readable or writable from the browser.
     match /staffCode/{docId} {
-      allow read: if true;
-      allow write: if isAdmin();
+      allow read, write: if false;
     }
     // OTP email verification during signup. Public — this entire flow
     // happens before the person has an account, so there's no

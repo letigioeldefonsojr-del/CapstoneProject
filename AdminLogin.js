@@ -1,7 +1,7 @@
 import { auth, db } from "./firebase-config.js";
 import { guardAutofill } from "./AutofillGuard.js";
 import { promptForgotPassword } from "./ForgotPassword.js";
-import { checkLoginAllowed, recordFailedAttempt, resetAttempts } from "./LoginAttempts.js";
+import { checkLoginAllowed, recordFailedAttempt, resetAttempts } from "./LoginAttempts.js?v=20261030c";
 import { sendOtpCode, verifyOtpCode } from "./OtpVerification.js";
 import {
   signInWithEmailAndPassword, signOut,
