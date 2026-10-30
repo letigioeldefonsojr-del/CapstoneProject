@@ -378,7 +378,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       if (data.approved === false) {
-        showStatus("Your account is waiting for admin approval. You'll be able to log in once an admin approves it.", "error");
+        showPendingApprovalOverlay();
         return;
       }
 
@@ -628,7 +628,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (data.approved === false) {
           await signOut(auth);
-          showStatus("Your account is waiting for admin approval. You'll be able to log in once an admin approves it.", "error");
+          showPendingApprovalOverlay();
           return;
         }
 
@@ -729,8 +729,8 @@ document.addEventListener("DOMContentLoaded", () => {
       pendingOAuthSignup = null;
       await signOut(auth);
       sessionStorage.removeItem("almares_role");
-      showStatus("Account created! An admin needs to approve it before you can log in.", "success");
       setEmployeeMode("login");
+      showPendingApprovalOverlay(username);
     } catch (error) {
       console.error("Couldn't complete Google signup:", error);
       showStatus("Something went wrong. Please try again.", "error");
@@ -789,7 +789,7 @@ document.addEventListener("DOMContentLoaded", () => {
     showSuspensionOverlay(suspendedUntil, urlParams.get("reason") || "");
   }
   if (urlParams.get("pending")) {
-    showStatus("Your account is waiting for admin approval. You'll be able to log in once an admin approves it.", "error");
+    showPendingApprovalOverlay();
   }
 });
 
@@ -836,7 +836,7 @@ function escapeHtmlSuspension(text) {
 // state, it needs an admin to actually clear it.
 // Shown once a new employee finishes registering: the account exists but an
 // admin has to approve it before anyone can log in.
-function showPendingApprovalOverlay(username) {
+function showPendingApprovalOverlay(username = "") {
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay lock-overlay";
   const card = document.createElement("div");
@@ -853,7 +853,9 @@ function showPendingApprovalOverlay(username) {
     <p class="lock-card__note pending-card__username"></p>
     <button type="button" class="btn-primary" id="pending-dismiss-btn">Okay</button>
   `;
-  card.querySelector(".pending-card__username").textContent = `Your username is "${username}".`;
+  const usernameLine = card.querySelector(".pending-card__username");
+  if (username) usernameLine.textContent = `Your username is "${username}".`;
+  else usernameLine.remove();
   overlay.appendChild(card);
   document.body.appendChild(overlay);
 
