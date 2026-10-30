@@ -46,11 +46,16 @@ service cloud.firestore {
         allow write: if (isSignedIn() && request.auth.uid == userId) || isEmployee();
       }
     }
-    // Employees: readable by anyone (needed for login-by-username and the
-    // registration uniqueness check, both of which happen pre-auth).
+    // Employees: no longer readable by the public. The login and sign-up
+    // pages ask the server (Supabase "login-guard" function) for what they
+    // need before sign-in. Signed in, a person may read their OWN record;
+    // staff (admins, approved employees, drivers) may read and list them all
+    // (the Accounts page and rider names need that).
     // Writes remain restricted to the account owner.
     match /employees/{employeeId} {
-      allow read: if true;
+      allow get: if isSignedIn() &&
+        (request.auth.uid == employeeId || isAdmin() || isEmployee() || isDriver());
+      allow list: if isSignedIn() && (isAdmin() || isEmployee() || isDriver());
       // Self-sign-up is allowed ONLY as "not yet approved". The owner can
       // never change their own approval status — only an admin can.
       // Nor can anyone sign themselves up as a driver — only an admin sets it.
@@ -64,12 +69,13 @@ service cloud.firestore {
          isAdmin());
       allow delete: if isSignedIn() && (request.auth.uid == employeeId || isAdmin());
     }
-    // Admins: self-registered account profile, same pattern as employees.
-    // Readable by anyone (mirrors employees — cheap, and lets the client
-    // resolve an admin's name/uid without extra auth if you ever need it).
-    // Creating is admin-only (see below); the owner can update their own.
+    // Admins: same as employees - not public any more. Signed in, you can read
+    // your own record; staff can read and list them. Creating is admin-only
+    // (see below); the owner can update their own.
     match /admins/{adminId} {
-      allow read: if true;
+      allow get: if isSignedIn() &&
+        (request.auth.uid == adminId || isAdmin() || isEmployee() || isDriver());
+      allow list: if isSignedIn() && (isAdmin() || isEmployee() || isDriver());
       // Only an existing admin can create an admin account (the Accounts
       // page does this while signed in as the admin). Self-creation is NOT
       // allowed — otherwise any signed-in user could make themselves admin.

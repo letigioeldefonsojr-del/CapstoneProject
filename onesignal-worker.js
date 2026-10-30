@@ -127,9 +127,9 @@ async function handlePromotion(request, env, body) {
 }
 
 // Checks the Firebase ID token, then that the account is staff.
-// Firestore REST is called WITHOUT the user's token on purpose: admins/
-// and employees/ are publicly readable by your rules, so no service
-// account is needed.
+// Firestore REST is called WITH the caller's own ID token: admins/ and
+// employees/ are no longer publicly readable, but a signed-in staff
+// member may read their OWN record, which is all this check needs.
 async function verifyStaff(request, env, { allowDriver = false } = {}) {
   const header = request.headers.get("Authorization") || "";
   const idToken = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
@@ -159,7 +159,8 @@ async function verifyStaff(request, env, { allowDriver = false } = {}) {
   for (const collectionName of ["admins", "employees"]) {
     try {
       const res = await fetch(
-        `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/${collectionName}/${encodeURIComponent(uid)}`
+        `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/${collectionName}/${encodeURIComponent(uid)}`,
+        { headers: { Authorization: `Bearer ${idToken}` } }
       );
       if (!res.ok) continue;
       if (collectionName === "employees") {

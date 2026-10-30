@@ -1,7 +1,4 @@
-import { db } from "./firebase-config.js";
-import {
-  collection, query, where, getDocs, limit
-} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { guardCall } from "./LoginGuard.js?v=20261030d";
 
 // ====================================================================
 // AUTO-GENERATED USERNAMES
@@ -25,27 +22,21 @@ export async function generateUniqueUsername(fullName, variantIndex = 0) {
   const base = bases[variantIndex % bases.length];
   const digitCount = 2 + (variantIndex % 3); // varies the number length a bit too (2, 3, or 4 digits)
 
-  let candidate;
-  let attempts = 0;
-
-  do {
-    candidate = `${base}${randomNumber(digitCount)}`;
-    attempts += 1;
-  } while (await usernameExists(candidate) && attempts < 25);
-
-  // Extremely unlikely fallback if 25 random tries all somehow
-  // collided — guarantees termination with something still unique.
-  if (await usernameExists(candidate)) {
-    let suffix = 1;
-    let fallback = `${base}${suffix}`;
-    while (await usernameExists(fallback)) {
-      suffix += 1;
-      fallback = `${base}${suffix}`;
-    }
-    return fallback;
+  // The server answers for a whole batch of candidates at once (the
+  // username records can't be read from the browser any more), so a few
+  // batches replace the old one-lookup-at-a-time loop.
+  for (let round = 0; round < 4; round += 1) {
+    const candidates = Array.from(new Set(Array.from({ length: 8 }, () => `${base}${randomNumber(digitCount + round)}`)));
+    const taken = new Set(await takenUsernames(candidates));
+    const free = candidates.find((name) => !taken.has(name));
+    if (free) return free;
   }
 
-  return candidate;
+  // Extremely unlikely fallback if every random try collided —
+  // guarantees termination with something still unique.
+  const fallbacks = Array.from({ length: 12 }, (_, i) => `${base}${i + 1}`);
+  const takenFallback = new Set(await takenUsernames(fallbacks));
+  return fallbacks.find((name) => !takenFallback.has(name)) || `${base}${randomNumber(6)}`;
 }
 
 // Exposed so the signup form can validate a MANUALLY EDITED username
@@ -87,10 +78,11 @@ function randomNumber(digitCount) {
   return Math.floor(min + Math.random() * (max - min + 1));
 }
 
+async function takenUsernames(names) {
+  const result = await guardCall("username_taken", { names });
+  return result.taken || [];
+}
+
 async function usernameExists(username) {
-  const [adminMatch, employeeMatch] = await Promise.all([
-    getDocs(query(collection(db, "admins"), where("username", "==", username), limit(1))),
-    getDocs(query(collection(db, "employees"), where("username", "==", username), limit(1)))
-  ]);
-  return !adminMatch.empty || !employeeMatch.empty;
+  return (await takenUsernames([username])).includes(username);
 }

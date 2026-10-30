@@ -7,8 +7,8 @@ import {
   collection, onSnapshot, doc, setDoc, getDoc, getDocs, getCountFromServer, query, where, limit, updateDoc, deleteDoc, deleteField, Timestamp, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { confirmDialog } from "./ConfirmDialog.js";
-import { listLocks, unlockAccount } from "./LoginAttempts.js?v=20261030c";
-import { generateUniqueUsername, isUsernameTaken } from "./UsernameGenerator.js";
+import { listLocks, unlockAccount } from "./LoginAttempts.js?v=20261030d";
+import { generateUniqueUsername, isUsernameTaken } from "./UsernameGenerator.js?v=20261030d";
 
 // ====================================================================
 // ACCOUNT CONTROL (admin-only)

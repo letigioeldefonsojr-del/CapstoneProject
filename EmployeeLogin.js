@@ -1,11 +1,12 @@
 import { auth, db } from "./firebase-config.js";
 import { guardAutofill } from "./AutofillGuard.js";
-import { promptForgotPassword } from "./ForgotPassword.js";
+import { promptForgotPassword } from "./ForgotPassword.js?v=20261030d";
 import { validatePasswordStrength } from "./PasswordStrength.js";
-import { checkLoginAllowed, recordFailedAttempt, resetAttempts } from "./LoginAttempts.js?v=20261030c";
-import { verifyStaffCode } from "./StaffCode.js?v=20261030c";
+import { checkLoginAllowed, recordFailedAttempt, resetAttempts } from "./LoginAttempts.js?v=20261030d";
+import { guardCall } from "./LoginGuard.js?v=20261030d";
+import { verifyStaffCode } from "./StaffCode.js?v=20261030d";
 import { sendOtpCode, verifyOtpCode } from "./OtpVerification.js";
-import { generateUniqueUsername, isUsernameTaken } from "./UsernameGenerator.js";
+import { generateUniqueUsername, isUsernameTaken } from "./UsernameGenerator.js?v=20261030d";
 import {
   signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, onAuthStateChanged, signOut,
   setPersistence, browserLocalPersistence, browserSessionPersistence,
@@ -303,24 +304,21 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  async function findEmployeeRecord(usernameValue) {
-    const employeesRef = collection(db, EMPLOYEE_COLLECTION);
-    const byUsername = query(employeesRef, where(EMPLOYEE_USERNAME_FIELD, "==", usernameValue), limit(1));
-    const snapshot = await getDocs(byUsername);
-    return snapshot.empty ? null : snapshot.docs[0];
-  }
-
-  async function findEmployeeRecordByEmail(emailValue) {
-    const employeesRef = collection(db, EMPLOYEE_COLLECTION);
-    const byEmail = query(employeesRef, where(EMPLOYEE_EMAIL_FIELD, "==", emailValue), limit(1));
-    const snapshot = await getDocs(byEmail);
-    return snapshot.empty ? null : snapshot.docs[0];
-  }
-
+  // The employee records can't be read from the browser before sign-in any
+  // more: the server looks the person up (by username or email) and returns
+  // only what this page needs, shaped like the document it used to read.
   async function findEmployeeRecordByIdentifier(identifier) {
-    return looksLikeEmail(identifier)
-      ? findEmployeeRecordByEmail(identifier)
-      : findEmployeeRecord(identifier);
+    const r = await guardCall("resolve_login", { kind: "employee", id: identifier });
+    if (!r.found) return null;
+    const data = {
+      [EMPLOYEE_ACTIVE_FIELD]: r.activated === true,
+      [EMPLOYEE_EMAIL_FIELD]: r.email || "",
+      isDriver: r.isDriver === true,
+      suspensionReason: r.suspensionReason || ""
+    };
+    if (r.approved === false) data.approved = false;
+    if (r.suspendedUntilMs) data.suspendedUntil = { toMillis: () => r.suspendedUntilMs };
+    return { id: r.id, data: () => data };
   }
 
   async function handleEmployeeLogin(event) {

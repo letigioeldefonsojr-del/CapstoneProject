@@ -1,7 +1,8 @@
 import { auth, db } from "./firebase-config.js";
 import { guardAutofill } from "./AutofillGuard.js";
-import { promptForgotPassword } from "./ForgotPassword.js";
-import { checkLoginAllowed, recordFailedAttempt, resetAttempts } from "./LoginAttempts.js?v=20261030c";
+import { promptForgotPassword } from "./ForgotPassword.js?v=20261030d";
+import { checkLoginAllowed, recordFailedAttempt, resetAttempts } from "./LoginAttempts.js?v=20261030d";
+import { guardCall } from "./LoginGuard.js?v=20261030d";
 import { sendOtpCode, verifyOtpCode } from "./OtpVerification.js";
 import {
   signInWithEmailAndPassword, signOut,
@@ -138,11 +139,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function resolveLoginEmail(identifier) {
     if (looksLikeEmail(identifier)) return identifier;
-    const ref = collection(db, ADMIN_COLLECTION);
-    const byUsername = query(ref, where("username", "==", identifier), limit(1));
-    const snapshot = await getDocs(byUsername);
-    if (snapshot.empty) return null;
-    return snapshot.docs[0].data().email || null;
+    // The admins records can't be read from the browser any more, so the
+    // server looks the username up and hands back just the email.
+    const result = await guardCall("resolve_login", { kind: "admin", id: identifier });
+    return result.found ? (result.email || null) : null;
   }
 
   function isWrongCredentialError(error) {
