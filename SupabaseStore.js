@@ -99,6 +99,12 @@ export async function restock(lines) {
   return data.updated;
 }
 
+// Admin rejected an online order: give back what the customer app took for it.
+// Safe to repeat - the server does it once per order. Resolves { ok, already? }.
+export async function restockOrder(userId, ref) {
+  return await call("restock_order", { userId, ref });
+}
+
 export async function linkBarcode(productId, barcode, variantName) {
   await call("link_barcode", { id: productId, barcode, variant: variantName || null });
 }

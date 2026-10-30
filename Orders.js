@@ -3,6 +3,7 @@ import {
   collection, doc, getDoc, getDocs, setDoc, deleteDoc, updateDoc, onSnapshot, query, where, Timestamp, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { confirmDialog } from "./ConfirmDialog.js";
+import { restockOrder } from "./SupabaseStore.js?v=20261030f";
 
 // ====================================================================
 // CHUNK 0 — CONFIG
@@ -945,7 +946,22 @@ async function handleReject(order) {
 
   await updateDoc(doc(db, ORDERS_COLLECTION, order.id), { status: "rejected" });
   sendOrderNotification(order, "Order Rejected", `Your order #${shortOrderId(order.id)} was rejected.`);
+
+  // The customer app took these items out of stock when the order was placed;
+  // a rejected order gives them back (once). A failure here never blocks the rejection.
+  let stockNote = "";
+  if (order.userId) {
+    try {
+      await restockOrder(order.userId, order.id);
+    } catch (error) {
+      if (error.code !== "nothing_to_restock") {
+        console.error("Couldn't return the stock for a rejected order:", error);
+        stockNote = "The order was rejected, but its items could not be returned to stock automatically. Please check the stock for this order.";
+      }
+    }
+  }
   await reloadAfterAction();
+  if (stockNote) await confirmDialog(stockNote, { title: "Stock not returned", confirmLabel: "OK" });
 }
 
 // Records WHICH driver account handled the delivery, so the admin can see

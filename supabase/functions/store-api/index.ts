@@ -249,6 +249,25 @@ Deno.serve(async (req) => {
         if (error) return json({ error: error.message }, 409);
         return json({ ok: true, updated: data });
       }
+      // Admin rejects a customer's online order: give back exactly what the app took for it (once).
+      // body: { userId, ref }  - the same ref the customer app used when it took the stock.
+      case "restock_order": {
+        if (role !== "admin") return json({ error: "admin_only" }, 403);
+        const userId = String(body.userId ?? "").trim();
+        const ref = String(body.ref ?? "").trim();
+        if (!userId || !ref || userId.length > 128 || ref.length > 100) return json({ error: "bad_request" }, 400);
+        const key = `app:${userId}:${ref}`;
+        const { data: rec } = await admin.from("applied_sales").select("r").eq("ref", `items:${key}`).maybeSingle();
+        if (!rec) return json({ error: "nothing_to_restock" }, 404);
+        const mark = await admin.from("applied_sales").insert({ ref: `restocked:${key}`, r: [] });
+        if (mark.error) return json({ ok: true, already: true }); // already given back (e.g. the customer cancelled first)
+        const { data, error } = await admin.rpc("restock", { items: rec.r });
+        if (error) {
+          await admin.from("applied_sales").delete().eq("ref", `restocked:${key}`);
+          return json({ error: error.message }, 409);
+        }
+        return json({ ok: true, updated: data });
+      }
       // Save a real barcode on a product (scan-and-link). body: {id, barcode, variant?}
       case "link_barcode": {
         const { data: p, error: e1 } = await admin.from("products").select("*").eq("id", body.id).single();
