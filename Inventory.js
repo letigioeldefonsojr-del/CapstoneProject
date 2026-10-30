@@ -375,6 +375,25 @@ function populateCategoryFilter(products) {
   if ([...select.options].some((o) => o.value === currentValue)) {
     select.value = currentValue;
   }
+  refreshOpenCategorySelect();
+}
+
+// If the Add/Edit Product window is already open when the product list finishes
+// (re)loading, its Category drop-down is rebuilt too, keeping what was chosen or typed.
+function refreshOpenCategorySelect() {
+  const overlay = document.getElementById("product-modal-overlay");
+  const select = document.getElementById("pf-category");
+  if (!overlay || overlay.hidden || !select) return;
+  const adding = select.value === NEW_CATEGORY_VALUE;
+  const chosen = adding ? "" : select.value;
+  const typed = document.getElementById("pf-category-new").value;
+  populateCategorySelect(chosen);
+  if (adding) {
+    select.value = NEW_CATEGORY_VALUE;
+    const newInput = document.getElementById("pf-category-new");
+    newInput.value = typed;
+    newInput.hidden = false;
+  }
 }
 
 function applyFiltersAndRender() {
