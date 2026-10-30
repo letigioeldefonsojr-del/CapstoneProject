@@ -297,6 +297,8 @@ document.addEventListener("DOMContentLoaded", () => {
         return "Too many attempts. Try again in a moment.";
       case "auth/email-already-in-use":
         return "An account already exists with that email.";
+      case "app/profile-save-failed":
+        return `Your account couldn't be saved${error.detail ? ` (${error.detail})` : ""}. Nothing was created. Please try again, and tell an administrator if it keeps happening.`;
       case "auth/weak-password":
         return "Password must be at least 8 characters and include a mix of uppercase, lowercase, numbers, and symbols.";
       default:
@@ -515,19 +517,51 @@ document.addEventListener("DOMContentLoaded", () => {
   async function completeSignup() {
     const { name, username, email, phone, password } = pendingSignup;
 
-    const credential = await createUserWithEmailAndPassword(auth, email, password);
-    await updateProfile(credential.user, { displayName: name });
+    let credential;
+    let createdNow = true;
+    try {
+      credential = await createUserWithEmailAndPassword(auth, email, password);
+    } catch (error) {
+      if (error.code !== "auth/email-already-in-use") throw error;
+      // A sign-up that stopped half way (the login was created but the profile
+      // was never saved) leaves the email "in use" with no account to show.
+      // If this is that case and the password matches, finish the sign-up now.
+      createdNow = false;
+      try {
+        credential = await signInWithEmailAndPassword(auth, email, password);
+      } catch {
+        throw error; // someone else's account: report "already exists"
+      }
+      const existing = await getDoc(doc(db, EMPLOYEE_COLLECTION, credential.user.uid));
+      if (existing.exists()) {
+        await signOut(auth);
+        throw error;
+      }
+    }
 
-    await setDoc(doc(db, EMPLOYEE_COLLECTION, credential.user.uid), {
-      [EMPLOYEE_NAME_FIELD]: name,
-      [EMPLOYEE_USERNAME_FIELD]: username,
-      [EMPLOYEE_EMAIL_FIELD]: email,
-      phone,
-      [EMPLOYEE_ACTIVE_FIELD]: true,
+    try {
+      await updateProfile(credential.user, { displayName: name });
+
+      await setDoc(doc(db, EMPLOYEE_COLLECTION, credential.user.uid), {
+        [EMPLOYEE_NAME_FIELD]: name,
+        [EMPLOYEE_USERNAME_FIELD]: username,
+        [EMPLOYEE_EMAIL_FIELD]: email,
+        phone,
+        [EMPLOYEE_ACTIVE_FIELD]: true,
         approved: false, // an admin must approve new employees (Accounts page)
-      role: "employee",
-      createdAt: serverTimestamp()
-    });
+        role: "employee",
+        createdAt: serverTimestamp()
+      });
+    } catch (error) {
+      console.error("Couldn't save the new employee profile:", error.code, error.message);
+      // Don't leave a login behind with no profile (it would block signing up again).
+      if (createdNow) { try { await credential.user.delete(); } catch { /* best effort */ } }
+      else { try { await signOut(auth); } catch { /* best effort */ } }
+      const saveError = new Error("profile_save_failed");
+      saveError.code = "app/profile-save-failed";
+      saveError.detail = error.code || "";
+      throw saveError;
+    }
 
     await signOut(auth);
     sessionStorage.removeItem("almares_role");
