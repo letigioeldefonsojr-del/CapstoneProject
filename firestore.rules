@@ -29,11 +29,14 @@ service cloud.firestore {
       return isSignedIn() &&
         exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
-    // Customers: owner can fully read/write their own profile.
-    // Unauthenticated read is allowed ONLY so login-by-mobile-number can resolve
-    // an email before sign-in occurs (a known tradeoff of this login design).
+    // Customers: owner can fully read/write their own profile. NOT public any
+    // more: the mobile app asks the server (Supabase "login-guard" function) for
+    // the email behind a mobile number before sign-in, instead of reading this
+    // collection. Staff (admins, approved employees) can read and search customers
+    // (Accounts and Cashier pages); a customer can read only their own record.
     match /users/{userId} {
-      allow read: if true;
+      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin() || isEmployee());
+      allow list: if isSignedIn() && (isAdmin() || isEmployee());
       allow write: if isSignedIn() && (request.auth.uid == userId || isAdmin());
       match /cart/{cartId} {
         allow read, write: if isSignedIn() && request.auth.uid == userId;
@@ -246,7 +249,7 @@ service cloud.firestore {
     // Password reset email rate limiting — same public pre-auth
     // pattern as loginAttempts/otpVerifications.
     match /resetEmailAttempts/{email} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
     // Live rider location while a delivery is on the way. Each doc is named
     // after the order. Only the rider handling that order may write it, and

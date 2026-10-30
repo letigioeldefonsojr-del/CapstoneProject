@@ -15,6 +15,10 @@
 //   username_taken { names }     anyone   -> which of these usernames already exist
 //   find_accounts { term }       anyone   -> matching admin/employee accounts, email masked
 //   send_reset { role, id }      anyone   -> sends that account's password-reset email (5 per hour)
+//   otp_send   { email, name }   anyone   -> makes + emails a one-time code (EmailJS, server side)
+//   otp_verify { email, code }   anyone   -> { valid, message }; single use, 5 tries
+//   customer_resolve { mobile }  anyone   -> the email behind a customer's mobile number (mobile app login)
+//   customer_taken { email?, mobile? } anyone -> whether a customer already uses that email / mobile number
 //   reset      {}                signed in -> clears the signed-in person's OWN records only
 //   status     { ids: [...] }    admin    -> which of these identifiers are locked
 //   unlock     { id }            admin    -> clears that identifier's record
@@ -30,6 +34,11 @@ const admin = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   { auth: { persistSession: false } },
 );
+
+const EMAILJS_SERVICE_ID = Deno.env.get("EMAILJS_SERVICE_ID") ?? "service_mmg4ncm";
+const EMAILJS_TEMPLATE_ID = Deno.env.get("EMAILJS_TEMPLATE_ID") ?? "template_szd8ssu";
+const EMAILJS_PUBLIC_KEY = Deno.env.get("EMAILJS_PUBLIC_KEY") ?? "D66Nq0gpzysnBwvyP";
+const EMAILJS_PRIVATE_KEY = Deno.env.get("EMAILJS_PRIVATE_KEY") ?? "";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -202,6 +211,14 @@ function matchesSearch(d: FsDoc, nameValue: string, term: string, phoneTerm: str
   return false;
 }
 
+// Every way a Philippine mobile number may be stored: +63917..., 63917..., 0917..., 917...
+function mobileVariants(raw: string): string[] {
+  const digits = String(raw ?? "").replace(/\D/g, "");
+  if (!digits) return [];
+  const core = digits.startsWith("63") ? digits.slice(2) : digits.startsWith("0") ? digits.slice(1) : digits;
+  return [...new Set([`+63${core}`, `63${core}`, `0${core}`, core, String(raw).trim()])];
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
@@ -338,6 +355,109 @@ Deno.serve(async (req) => {
       // 5 sends per hour: the 5th send starts a one-hour wait.
       await admin.rpc("guard_fail", { k: key, free: 4, base: 3600, perm: 100000, stale_min: 60 });
       return json({ ok: true, maskedEmail: maskEmail(email) });
+    }
+
+    // ---- One-time email codes (first login / staff sign-up) ----
+    // The server makes the code, keeps only its hash, sends the email through EmailJS and checks
+    // what the person types. The code itself is never readable from the browser.
+    if (action === "otp_send") {
+      const email = norm(body.email);
+      const name = String(body.name ?? "").slice(0, 100);
+      if (!email || email.length > 200 || !/^[^@\s]+@[^@\s]+$/.test(email)) return json({ error: "bad_email" }, 400);
+      if (!EMAILJS_PRIVATE_KEY) return json({ error: "not_configured" }, 503);
+      const wait = await throttle(`otpip:${callerIp(req)}`, 10, 60);
+      if (wait) return json({ error: "slow_down", secondsLeft: wait }, 429);
+      const key = `otp:${email}`;
+      const { data: gate } = await admin.rpc("guard_check", { k: key, stale_min: 60 });
+      if (gate?.state === "wait") return json({ error: "limit", secondsLeft: gate.secondsLeft ?? 3600 }, 429);
+
+      const buf = new Uint32Array(1);
+      crypto.getRandomValues(buf);
+      const code = String(100000 + (buf[0] % 900000));
+      const expires = new Date(Date.now() + 15 * 60 * 1000);
+      await admin.from("otp_codes").delete().lt("expires_at", new Date(Date.now() - 86400000).toISOString());
+      const { error: upErr } = await admin.from("otp_codes").upsert({
+        email, code_hash: await sha256Hex(`${email}:${code}`), expires_at: expires.toISOString(), attempts: 0,
+      });
+      if (upErr) return json({ error: "store_failed" }, 500);
+
+      const res = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          service_id: EMAILJS_SERVICE_ID,
+          template_id: EMAILJS_TEMPLATE_ID,
+          user_id: EMAILJS_PUBLIC_KEY,
+          accessToken: EMAILJS_PRIVATE_KEY,
+          template_params: {
+            email,
+            to_name: name,
+            passcode: code,
+            time: expires.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Manila" }),
+          },
+        }),
+      });
+      if (!res.ok) {
+        await admin.from("otp_codes").delete().eq("email", email);
+        console.error("emailjs", res.status, await res.text().catch(() => ""));
+        return json({ error: "send_failed" }, 502);
+      }
+      // 5 codes per address per hour: the 5th starts a one-hour wait.
+      await admin.rpc("guard_fail", { k: key, free: 4, base: 3600, perm: 100000, stale_min: 60 });
+      return json({ ok: true });
+    }
+
+    if (action === "otp_verify") {
+      const email = norm(body.email);
+      const entered = String(body.code ?? "").trim();
+      if (!email || email.length > 200) return json({ valid: false, message: "No verification code found for this email. Please request a new one." });
+      const wait = await throttle(`otpverip:${callerIp(req)}`, 30, 30);
+      if (wait) return json({ error: "slow_down", secondsLeft: wait }, 429);
+      const { data: row } = await admin.from("otp_codes").select("*").eq("email", email).maybeSingle();
+      if (!row) return json({ valid: false, message: "No verification code found for this email. Please request a new one." });
+      if (Date.parse(row.expires_at) < Date.now()) {
+        await admin.from("otp_codes").delete().eq("email", email);
+        return json({ valid: false, message: "This code has expired. Please request a new one." });
+      }
+      if (row.attempts >= 5) {
+        await admin.from("otp_codes").delete().eq("email", email);
+        return json({ valid: false, message: "Too many incorrect attempts. Please request a new code." });
+      }
+      if ((await sha256Hex(`${email}:${entered}`)) !== row.code_hash) {
+        await admin.from("otp_codes").update({ attempts: row.attempts + 1 }).eq("email", email);
+        return json({ valid: false, message: "Incorrect code. Please try again." });
+      }
+      await admin.from("otp_codes").delete().eq("email", email); // single use
+      return json({ valid: true, message: "" });
+    }
+
+    // ---- Customer (mobile app) lookups: the "users" records can't be read before sign-in ----
+    // Mobile numbers are stored like +639171234567; accept 0917..., 63917..., 917... and +63917... alike.
+    if (action === "customer_resolve") {
+      const raw = String(body.mobile ?? "").trim();
+      const digits = raw.replace(/\D/g, "");
+      if (digits.length < 7 || digits.length > 15) return json({ found: false });
+      const wait = await throttle(`custlookup:${callerIp(req)}`, 30, 30);
+      if (wait) return json({ error: "slow_down", secondsLeft: wait }, 429);
+      let d: any = null;
+      for (const v of mobileVariants(raw)) { d = await fsEqual("users", "mobileNumber", v); if (d) break; }
+      // Customers who signed up with a mobile number sign in with a hidden address in "authEmail"
+      // (e.g. 0912...@phone.almares328.app); their real "email" field may be empty.
+      return json({ found: !!d, email: d ? (fStr(d, "authEmail") || fStr(d, "email") || null) : null });
+    }
+
+    if (action === "customer_taken") {
+      const email = String(body.email ?? "").trim();
+      const mobile = String(body.mobile ?? "").trim();
+      if (email.length > 200 || mobile.length > 40) return json({ error: "bad_request" }, 400);
+      const wait = await throttle(`custtaken:${callerIp(req)}`, 60, 30);
+      if (wait) return json({ error: "slow_down", secondsLeft: wait }, 429);
+      const emailHit = email
+        ? (await fsEqual("users", "email", email)) ?? (email.toLowerCase() !== email ? await fsEqual("users", "email", email.toLowerCase()) : null)
+        : null;
+      let mobileHit: any = null;
+      for (const v of mobileVariants(mobile)) { mobileHit = await fsEqual("users", "mobileNumber", v); if (mobileHit) break; }
+      return json({ emailTaken: !!emailHit, mobileTaken: !!mobileHit });
     }
 
     // ---------- everything below needs a signed-in person ----------

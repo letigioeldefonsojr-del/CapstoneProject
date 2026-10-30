@@ -1,104 +1,36 @@
-import { db } from "./firebase-config.js";
-import {
-  doc, setDoc, getDoc, deleteDoc, serverTimestamp
-} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { guardCall } from "./LoginGuard.js";
 
 // ====================================================================
-// OTP EMAIL VERIFICATION
+// OTP EMAIL VERIFICATION (server side)
 // ----------------------------------------------------------------
-// Sent via EmailJS (client-side email sending — same approach your
-// mobile app already uses). Only the Public Key is used here; the
-// Private Key you shared is NOT used anywhere in this app — Private
-// Keys are meant for server-side use only and should never be
-// embedded in client JS, since anyone can view page source.
-//
-// TEMPLATE VARIABLE NAMES: confirmed directly from the EmailJS
-// template's actual settings — {{passcode}} and {{time}} in the
-// message body, and the "To Email" field is {{email}} (not
-// {{to_email}} — that mismatch was the cause of an earlier 422 error
-// from EmailJS, since it had no way to resolve a recipient).
-//
-// Codes expire after 10 minutes and are single-use (deleted from
-// Firestore once successfully verified).
+// The six-digit code is made, emailed (through EmailJS) and checked by the
+// "login-guard" function. Only a hash is stored, in Supabase, so nothing
+// here - or in the browser - can read a code. Codes last 15 minutes, work
+// once, and allow 5 wrong tries. Same two functions as before.
 // ====================================================================
-const EMAILJS_SERVICE_ID = "service_mmg4ncm";
-const EMAILJS_TEMPLATE_ID = "template_szd8ssu";
-const EMAILJS_PUBLIC_KEY = "D66Nq0gpzysnBwvyP";
-const OTP_TTL_MINUTES = 15; // matches "valid for 15 minutes" in your actual email template
-
-let emailjsInitialized = false;
-
-function ensureEmailJsInitialized() {
-  if (emailjsInitialized) return;
-  if (!window.emailjs) {
-    throw new Error("EmailJS SDK didn't load. Check the script tag in EmployeeLogin.html.");
-  }
-  window.emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
-  emailjsInitialized = true;
-}
-
-function generateSixDigitCode() {
-  return String(Math.floor(100000 + Math.random() * 900000));
-}
-
-function normalizeEmail(email) {
-  return email.trim().toLowerCase();
-}
-
 export async function sendOtpCode(email, name) {
-  ensureEmailJsInitialized();
-
-  const code = generateSixDigitCode();
-  const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
-  const ref = doc(db, "otpVerifications", normalizeEmail(email));
-
-  await setDoc(ref, {
-    code,
-    email: normalizeEmail(email),
-    expiresAt,
-    createdAt: serverTimestamp()
-  });
-
-  // Matches your real EmailJS template exactly: {{passcode}} and
-  // {{time}} in the body, {{email}} for the "To Email" field.
-  // to_name is included in case your template uses it elsewhere
-  // (e.g. a greeting), even though it's not shown in the body you
-  // shared.
-  const templateParams = {
-    email: email,
-    to_name: name || "",
-    passcode: code,
-    time: expiresAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
-  };
-
-  await window.emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, templateParams);
+  try {
+    await guardCall("otp_send", { email, name: name || "" });
+  } catch (error) {
+    if (error.message === "limit") {
+      throw new Error("Too many codes were requested for this email. Please try again in an hour.");
+    }
+    if (error.message === "slow_down") {
+      throw new Error("Please wait a moment before asking for another code.");
+    }
+    throw error;
+  }
 }
 
 export async function verifyOtpCode(email, enteredCode) {
-  const ref = doc(db, "otpVerifications", normalizeEmail(email));
-
   try {
-    const snap = await getDoc(ref);
-    if (!snap.exists()) {
-      return { valid: false, message: "No verification code found for this email. Please request a new one." };
-    }
-
-    const data = snap.data();
-    const expiresAtMillis = data.expiresAt?.toMillis?.() || new Date(data.expiresAt).getTime();
-
-    if (Date.now() > expiresAtMillis) {
-      await deleteDoc(ref);
-      return { valid: false, message: "This code has expired. Please request a new one." };
-    }
-
-    if (enteredCode.trim() !== data.code) {
-      return { valid: false, message: "Incorrect code. Please try again." };
-    }
-
-    await deleteDoc(ref); // single-use
-    return { valid: true, message: "" };
+    const data = await guardCall("otp_verify", { email, code: enteredCode });
+    return { valid: data.valid === true, message: data.message || "" };
   } catch (error) {
     console.error("Couldn't verify OTP code:", error);
+    if (error.message === "slow_down") {
+      return { valid: false, message: "Too many attempts. Please wait a moment and try again." };
+    }
     return { valid: false, message: "Something went wrong verifying your code. Please try again." };
   }
 }

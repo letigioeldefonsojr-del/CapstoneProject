@@ -1,0 +1,279 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    // An employee counts as staff only once an admin has approved them.
+    // New sign-ups are written with approved:false and stay locked out of
+    // staff data until an admin flips it on the Accounts page. Accounts
+    // that predate this (no "approved" field at all) are treated as
+    // approved, so existing employees aren't affected.
+    function isEmployee() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/employees/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.get('approved', true) != false &&
+        get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.get('isDriver', false) != true;
+    }
+    // A Driver is an employee account an admin has marked isDriver:true.
+    // Drivers are deliberately NOT counted by isEmployee(), so they lose
+    // access to everything staff-only (sales, stock log, cashier data,
+    // store settings, ...) and get only the order access granted below.
+    function isDriver() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/employees/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.get('approved', true) != false &&
+        get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.get('isDriver', false) == true;
+    }
+    function isAdmin() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    // Customers: owner can fully read/write their own profile. NOT public any
+    // more: the mobile app asks the server (Supabase "login-guard" function) for
+    // the email behind a mobile number before sign-in, instead of reading this
+    // collection. Staff (admins, approved employees) can read and search customers
+    // (Accounts and Cashier pages); a customer can read only their own record.
+    match /users/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin() || isEmployee());
+      allow list: if isSignedIn() && (isAdmin() || isEmployee());
+      allow write: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      match /cart/{cartId} {
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+      }
+      match /addresses/{addressId} {
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+      }
+      match /notifications/{notifId} {
+        allow read: if isSignedIn() && request.auth.uid == userId;
+        allow write: if (isSignedIn() && request.auth.uid == userId) || isEmployee();
+      }
+    }
+    // Employees: no longer readable by the public. The login and sign-up
+    // pages ask the server (Supabase "login-guard" function) for what they
+    // need before sign-in. Signed in, a person may read their OWN record;
+    // staff (admins, approved employees, drivers) may read and list them all
+    // (the Accounts page and rider names need that).
+    // Writes remain restricted to the account owner.
+    match /employees/{employeeId} {
+      allow get: if isSignedIn() &&
+        (request.auth.uid == employeeId || isAdmin() || isEmployee() || isDriver());
+      allow list: if isSignedIn() && (isAdmin() || isEmployee() || isDriver());
+      // Self-sign-up is allowed ONLY as "not yet approved". The owner can
+      // never change their own approval status — only an admin can.
+      // Nor can anyone sign themselves up as a driver — only an admin sets it.
+      allow create: if isSignedIn() && request.auth.uid == employeeId &&
+        request.resource.data.approved == false &&
+        request.resource.data.get('isDriver', false) == false;
+      allow update: if isSignedIn() &&
+        ((request.auth.uid == employeeId &&
+          request.resource.data.get('approved', true) == resource.data.get('approved', true) &&
+          request.resource.data.get('isDriver', false) == resource.data.get('isDriver', false)) ||
+         isAdmin());
+      allow delete: if isSignedIn() && (request.auth.uid == employeeId || isAdmin());
+    }
+    // Admins: same as employees - not public any more. Signed in, you can read
+    // your own record; staff can read and list them. Creating is admin-only
+    // (see below); the owner can update their own.
+    match /admins/{adminId} {
+      allow get: if isSignedIn() &&
+        (request.auth.uid == adminId || isAdmin() || isEmployee() || isDriver());
+      allow list: if isSignedIn() && (isAdmin() || isEmployee() || isDriver());
+      // Only an existing admin can create an admin account (the Accounts
+      // page does this while signed in as the admin). Self-creation is NOT
+      // allowed — otherwise any signed-in user could make themselves admin.
+      allow create: if isAdmin();
+      allow update: if isSignedIn() && (request.auth.uid == adminId || isAdmin());
+      allow delete: if isSignedIn() && (request.auth.uid == adminId || isAdmin());
+    }
+    // Products: anyone signed in can read.
+    // Only admins can add/edit/delete products now — employees have no
+    // write access here at all (matches what the app UI enforces: only
+    // Admin sees Add/Edit/Bulk-Import controls). Customers can still
+    // update stock fields during checkout (separate, narrower clause).
+    match /products/{productId} {
+      allow read: if isSignedIn();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() ||
+        (isSignedIn() &&
+         request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(['stockCount', 'available', 'flavors', 'barcode', 'barcodes']));
+    }
+    // Orders: customers can create/read/update their own; employees,
+    // drivers AND admins can read all, but only admins can update/approve. Deletion is allowed for admins
+    // (any order) or customers (their own cancelled orders only —
+    // "Clear History").
+    match /orders/{orderId} {
+      allow read: if isSignedIn() &&
+        (isEmployee() || isAdmin() || isDriver() || resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      // Admins approve or reject pending orders and nothing else. Regular
+      // employees are view-only. Drivers get the narrow delivery-step clause
+      // below. Customers can still update their own orders (cancel, rate).
+      allow update: if isSignedIn() &&
+        ((isAdmin() &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
+          resource.data.status == 'pending' &&
+          request.resource.data.status in ['approved', 'rejected']) ||
+         // Store pickup (admin only): approved -> ready for pickup, then
+         // ready for pickup -> picked up (stored as 'delivered' so every
+         // report counts it). Never touches delivery orders.
+         (isAdmin() &&
+          resource.data.get('fulfillmentType', 'delivery') == 'pickup' &&
+          ((resource.data.status == 'approved' &&
+            request.resource.data.status == 'ready_for_pickup' &&
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'readyForPickupAt'])) ||
+           (resource.data.status == 'ready_for_pickup' &&
+            request.resource.data.status == 'delivered' &&
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'isPaid', 'pickedUpAt'])))) ||
+         resource.data.userId == request.auth.uid ||
+         // Drivers: delivery steps only (on the way, delivered, undeliverable).
+         (isDriver() &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'isPaid', 'deliveryIssueReason', 'driverUid', 'driverEmail', 'driverName',
+                      'onTheWayLocation', 'deliveredLocation']) &&
+          request.resource.data.get('onTheWayLocation', {'lat': 0, 'lng': 0, 'accuracy': 0, 'at': 0}).keys().hasOnly(['lat', 'lng', 'accuracy', 'at']) &&
+          request.resource.data.get('deliveredLocation', {'lat': 0, 'lng': 0, 'accuracy': 0, 'at': 0}).keys().hasOnly(['lat', 'lng', 'accuracy', 'at']) &&
+          request.resource.data.get('driverName', '') is string &&
+          request.resource.data.get('driverName', '').size() <= 60 &&
+          // The driver record must be the signed-in driver's own (no spoofing).
+          request.resource.data.get('driverUid', request.auth.uid) == request.auth.uid &&
+          request.resource.data.get('driverEmail', request.auth.token.email) == request.auth.token.email &&
+          request.resource.data.diff(resource.data).affectedKeys().hasAny(['status']) &&
+          ((request.resource.data.status in ['on_the_way', 'undelivered'] &&
+            resource.data.status in ['approved', 'on_the_way']) ||
+           (request.resource.data.status == 'delivered' &&
+            resource.data.status == 'on_the_way'))));
+      allow delete: if isAdmin() ||
+        (isSignedIn() && resource.data.userId == request.auth.uid &&
+         resource.data.status == 'cancelled');
+    }
+    // Employee notifications: employees AND admins can read (both roles
+    // see this feed in the app now); any signed-in user can create one
+    // (customers trigger these when placing an order). No one deletes
+    // these from the client anymore — "Clear All" is a per-user,
+    // client-side hide (see ReadStatus.js), not a document delete, so
+    // the shared feed isn't affected by one person clearing their view.
+    match /employeeNotifications/{notifId} {
+      allow read: if isEmployee() || isAdmin();
+      allow create: if isSignedIn() &&
+        request.resource.data.message is string &&
+        request.resource.data.message.size() > 0 &&
+        request.resource.data.message.size() < 500;
+    }
+    // Store settings (banner): anyone signed in can read; employees and
+    // admins can write (matches every other collection's role pattern).
+    match /settings/{settingId} {
+      allow read: if isSignedIn();
+      allow write: if isEmployee() || isAdmin();
+    }
+    // Promotions shown in the customer app's scrolling banner. Same pattern
+    // as settings: any signed-in user reads, staff write.
+    match /storeBanners/{bannerId} {
+      allow read: if isSignedIn();
+      allow write: if isEmployee() || isAdmin();
+    }
+    // Daily sales tally: one document per day with units sold per product.
+    // Written by the Cashier / scanner after each sale, read by Stock
+    // Monitoring. Staff only; never deleted from the app.
+    match /salesDaily/{day} {
+      allow read: if isEmployee() || isAdmin();
+      allow create, update: if isEmployee() || isAdmin();
+    }
+    // Stock movement log: append-only audit trail of inventory stock
+    // changes (barcode scanner sales/counts, manual edits). Both roles
+    // can read and create; nothing is ever updated or deleted here —
+    // it's a log, not editable data.
+    match /stockMovements/{movementId} {
+      allow read: if isEmployee() || isAdmin();
+      allow create: if isEmployee() || isAdmin();
+    }
+    // Counter POS sales (face-to-face). Written by the Cashier page inside
+    // the same transaction that deducts stock. Staff only; the record is
+    // append-only — never edited or deleted from the client — and must be
+    // stamped by the server with the signer's own uid.
+    match /posSales/{saleId} {
+      allow read: if isEmployee() || isAdmin();
+      allow create: if (isEmployee() || isAdmin()) &&
+        request.resource.data.cashierUid == request.auth.uid &&
+        request.resource.data.createdAt == request.time &&
+        request.resource.data.total is number &&
+        request.resource.data.total >= 0 &&
+        request.resource.data.items is list &&
+        request.resource.data.items.size() > 0 &&
+        request.resource.data.items.size() <= 100 &&
+        request.resource.data.paymentMethod in ['cash', 'gcash'];
+      // Refunds/voids may ONLY touch the refund-tracking fields, and the
+      // refunded amount can only go up and never past the sale total.
+      allow update: if (isEmployee() || isAdmin()) &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['refundedQtys', 'refundedTotal', 'refundStatus']) &&
+        request.resource.data.refundedTotal is number &&
+        request.resource.data.refundedTotal <= resource.data.total &&
+        request.resource.data.refundedTotal >= resource.data.get('refundedTotal', 0) &&
+        request.resource.data.refundStatus in ['partial', 'full'];
+    }
+    // Refund / void log: who refunded what, why, and when. Append-only.
+    match /posRefunds/{refundId} {
+      allow read: if isEmployee() || isAdmin();
+      allow create: if (isEmployee() || isAdmin()) &&
+        request.resource.data.cashierUid == request.auth.uid &&
+        request.resource.data.createdAt == request.time &&
+        request.resource.data.total is number &&
+        request.resource.data.total > 0 &&
+        request.resource.data.reason is string &&
+        request.resource.data.reason.size() > 0 &&
+        request.resource.data.reason.size() <= 200;
+    }
+    // Login attempt tracking (rate limiting / escalating lockout) now lives
+    // on the server (Supabase "login-guard" function). Nothing in the browser
+    // may read, write or delete these records any more - that is what stops
+    // someone wiping their own lockout or locking another person out.
+    match /loginAttempts/{attemptId} {
+      allow read, write: if false;
+    }
+    // Staff code: the shared registration code now lives on the server too
+    // (stored as a hash, checked by the "login-guard" function, which only
+    // answers yes or no). Not readable or writable from the browser.
+    match /staffCode/{docId} {
+      allow read, write: if false;
+    }
+    // OTP email verification during signup. Public — this entire flow
+    // happens before the person has an account, so there's no
+    // authenticated user yet to gate it behind.
+    match /otpVerifications/{email} {
+      allow read, write: if true;
+    }
+    // Password reset email rate limiting — same public pre-auth
+    // pattern as loginAttempts/otpVerifications.
+    match /resetEmailAttempts/{email} {
+      allow read, write: if false;
+    }
+    // Live rider location while a delivery is on the way. Each doc is named
+    // after the order. Only the rider handling that order may write it, and
+    // only while it is on the way; staff read it; it is deleted when done.
+    match /driverLocations/{orderId} {
+      // A rider can hide their location from specific accounts (hiddenFrom).
+      // resource == null lets "no location yet" read as empty, not denied.
+      allow read: if isDriver() ||
+        ((isAdmin() || isEmployee()) &&
+         (resource == null || !(request.auth.uid in resource.data.get('hiddenFrom', []))));
+      allow create, update: if isDriver() &&
+        request.resource.data.driverUid == request.auth.uid &&
+        request.resource.data.keys().hasOnly(['orderId', 'driverUid', 'lat', 'lng', 'accuracy', 'hiddenFrom', 'updatedAt']) &&
+        request.resource.data.get('hiddenFrom', []) is list &&
+        request.resource.data.get('hiddenFrom', []).size() <= 40 &&
+        get(/databases/$(database)/documents/orders/$(orderId)).data.status == 'on_the_way' &&
+        get(/databases/$(database)/documents/orders/$(orderId)).data.get('driverUid', '') == request.auth.uid;
+      allow delete: if isAdmin() || (isDriver() && resource.data.driverUid == request.auth.uid);
+    }
+    // Per-user read/cleared notification tracking — private to each
+    // account (moved off localStorage so it survives a domain
+    // change during techno-transfer).
+    match /notificationStatus/{uid} {
+      allow read, write: if isSignedIn() && request.auth.uid == uid;
+    }
+  }
+}

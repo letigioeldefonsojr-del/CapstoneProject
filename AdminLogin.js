@@ -3,7 +3,7 @@ import { guardAutofill } from "./AutofillGuard.js";
 import { promptForgotPassword } from "./ForgotPassword.js?v=20261030d";
 import { checkLoginAllowed, recordFailedAttempt, resetAttempts } from "./LoginAttempts.js?v=20261030d";
 import { guardCall } from "./LoginGuard.js?v=20261030d";
-import { sendOtpCode, verifyOtpCode } from "./OtpVerification.js";
+import { sendOtpCode, verifyOtpCode } from "./OtpVerification.js?v=20261030e";
 import {
   signInWithEmailAndPassword, signOut,
   setPersistence, browserSessionPersistence

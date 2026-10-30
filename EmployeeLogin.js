@@ -5,7 +5,7 @@ import { validatePasswordStrength } from "./PasswordStrength.js";
 import { checkLoginAllowed, recordFailedAttempt, resetAttempts } from "./LoginAttempts.js?v=20261030d";
 import { guardCall } from "./LoginGuard.js?v=20261030d";
 import { verifyStaffCode } from "./StaffCode.js?v=20261030d";
-import { sendOtpCode, verifyOtpCode } from "./OtpVerification.js";
+import { sendOtpCode, verifyOtpCode } from "./OtpVerification.js?v=20261030e";
 import { generateUniqueUsername, isUsernameTaken } from "./UsernameGenerator.js?v=20261030d";
 import {
   signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, onAuthStateChanged, signOut,
