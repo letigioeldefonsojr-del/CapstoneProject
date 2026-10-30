@@ -105,6 +105,10 @@ export async function restockOrder(userId, ref) {
   return await call("restock_order", { userId, ref });
 }
 
+export async function restockUndelivered(userId, ref) {
+  return await call("restock_undelivered", { userId, ref });
+}
+
 export async function linkBarcode(productId, barcode, variantName) {
   await call("link_barcode", { id: productId, barcode, variant: variantName || null });
 }

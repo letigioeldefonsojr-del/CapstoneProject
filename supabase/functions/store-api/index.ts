@@ -153,6 +153,35 @@ Deno.serve(async (req) => {
   let body: any;
   try { body = await req.json(); } catch { return json({ error: "bad_json" }, 400); }
 
+  // ---- Driver/admin: the items of an undeliverable order are back on the shelf ----
+  // body: { userId, ref }. Allowed only for the driver who marked it (or an admin), and only
+  // while the order really is "undelivered". Gives back exactly what was taken, once.
+  if (body.action === "restock_undelivered") {
+    try {
+      const userId = String(body.userId ?? "").trim();
+      const ref = String(body.ref ?? "").trim();
+      if (!userId || !ref || userId.length > 128 || ref.length > 100 || ref.includes("/")) return json({ error: "bad_request" }, 400);
+      const ord = await firestoreDoc(`orders/${ref}`, token); // the caller's own token: Firestore rules decide who can see it
+      const f = ord?.fields ?? {};
+      if (!ord || f.status?.stringValue !== "undelivered" || f.userId?.stringValue !== userId) return json({ error: "not_undelivered" }, 403);
+      const isAdminCaller = (await staffRole(uid, token)) === "admin";
+      if (!isAdminCaller && f.driverUid?.stringValue !== uid) return json({ error: "not_allowed" }, 403);
+      const key = `app:${userId}:${ref}`;
+      const { data: rec } = await admin.from("applied_sales").select("r").eq("ref", `items:${key}`).maybeSingle();
+      if (!rec) return json({ error: "nothing_to_restock" }, 404);
+      const mark = await admin.from("applied_sales").insert({ ref: `restocked:${key}`, r: [] });
+      if (mark.error) return json({ ok: true, already: true });
+      const { data, error } = await admin.rpc("restock", { items: rec.r });
+      if (error) {
+        await admin.from("applied_sales").delete().eq("ref", `restocked:${key}`);
+        return json({ error: error.message }, 409);
+      }
+      return json({ ok: true, updated: data });
+    } catch (e) {
+      return json({ error: String((e as Error)?.message ?? e) }, 500);
+    }
+  }
+
   // ---- Customer app actions: any signed-in user, limited to what a shopper needs ----
   if (typeof body.action === "string" && body.action.startsWith("app_")) {
     try {

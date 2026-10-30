@@ -3,7 +3,7 @@ import {
   collection, doc, getDoc, getDocs, setDoc, deleteDoc, updateDoc, onSnapshot, query, where, Timestamp, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { confirmDialog } from "./ConfirmDialog.js";
-import { restockOrder } from "./SupabaseStore.js?v=20261030f";
+import { restockOrder, restockUndelivered } from "./SupabaseStore.js?v=20261030i";
 
 // ====================================================================
 // CHUNK 0 — CONFIG
@@ -1604,6 +1604,7 @@ async function handleMarkPickedUp(order) {
 function openUndeliverableModal(order) {
   pendingUndeliverableOrderId = order.id;
   document.getElementById("undeliverable-reason").value = "";
+  document.getElementById("undeliverable-restock").checked = true;
   document.getElementById("undeliverable-status").hidden = true;
   document.getElementById("undeliverable-modal-overlay").hidden = false;
 }
@@ -1631,6 +1632,8 @@ async function handleConfirmUndeliverable() {
   }
 
   const confirmBtn = document.getElementById("undeliverable-confirm");
+  const wantsRestock = document.getElementById("undeliverable-restock").checked;
+  let stockNote = "";
   confirmBtn.disabled = true;
   confirmBtn.textContent = "Saving...";
 
@@ -1645,6 +1648,17 @@ async function handleConfirmUndeliverable() {
     if (affectedOrder) {
       sendOrderNotification(affectedOrder, "Delivery Issue", `There was a delivery issue with your order #${shortOrderId(affectedOrder.id)}: ${reason}`);
     }
+    // If the items are coming back, put them back on the shelf (once). Never blocks the status change.
+    if (wantsRestock && affectedOrder?.userId) {
+      try {
+        await restockUndelivered(affectedOrder.userId, affectedOrder.id);
+      } catch (error) {
+        if (error.code !== "nothing_to_restock") {
+          console.error("Couldn't return the stock for an undeliverable order:", error);
+          stockNote = "The order was marked undeliverable, but its items could not be returned to stock automatically. Please check the stock for this order.";
+        }
+      }
+    }
     closeUndeliverableModal();
     await reloadAfterAction();
   } catch (error) {
@@ -1656,4 +1670,5 @@ async function handleConfirmUndeliverable() {
     confirmBtn.disabled = false;
     confirmBtn.textContent = "Confirm";
   }
+  if (stockNote) await confirmDialog(stockNote, { title: "Stock not returned", confirmLabel: "OK" });
 }

@@ -298,7 +298,11 @@
                 <label for="undeliverable-reason">Reason</label>
                 <textarea id="undeliverable-reason" rows="3" placeholder="e.g. Customer not available, wrong address..."></textarea>
             </div>
-            <p class="form-status" id="undeliverable-status" hidden></p>
+            <label class="form-check" style="display:flex;gap:8px;align-items:center;margin-top:10px;">
+                    <input type="checkbox" id="undeliverable-restock" checked>
+                    <span>Items are coming back &mdash; return them to stock</span>
+                </label>
+                <p class="form-status" id="undeliverable-status" hidden></p>
         </div>
         <div class="modal__footer">
             <button type="button" class="btn-outline" id="undeliverable-cancel">Cancel</button>
@@ -339,6 +343,6 @@
 
 <script type="module" src="firebase-config.js"></script>
 <script type="module" src="Sidebar.js?v=20261030m"></script>
-<script type="module" src="Orders.js?v=20261030h"></script>
+<script type="module" src="Orders.js?v=20261030i"></script>
 </body>
 </html>
