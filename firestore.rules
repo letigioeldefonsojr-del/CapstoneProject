@@ -242,11 +242,10 @@ service cloud.firestore {
     match /staffCode/{docId} {
       allow read, write: if false;
     }
-    // OTP email verification during signup. Public — this entire flow
-    // happens before the person has an account, so there's no
-    // authenticated user yet to gate it behind.
+    // One-time email codes now live on the server (Supabase "login-guard" function,
+    // stored only as a hash). Nothing in the browser or the app may read or write them.
     match /otpVerifications/{email} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
     // Password reset email rate limiting — same public pre-auth
     // pattern as loginAttempts/otpVerifications.

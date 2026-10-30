@@ -4,7 +4,7 @@ import {
   getAuth, createUserWithEmailAndPassword, updateProfile, signOut
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import {
-  collection, onSnapshot, doc, setDoc, getDoc, getDocs, getCountFromServer, query, where, limit, updateDoc, deleteDoc, deleteField, Timestamp, serverTimestamp
+  collection, onSnapshot, doc, setDoc, getDoc, getDocs, getCountFromServer, query, where, limit, orderBy, updateDoc, deleteDoc, deleteField, Timestamp, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { confirmDialog } from "./ConfirmDialog.js";
 import { listLocks, unlockAccount } from "./LoginAttempts.js?v=20261030d";
@@ -160,6 +160,25 @@ async function customerPrefixQuery(field, prefix) {
   return snap.docs.map(toCustomerAccount);
 }
 
+// The 25 most recently registered customers (about 25 reads each time it is clicked).
+// Customers saved without a registration date don't show here; search finds them.
+async function loadLatestCustomers() {
+  customerQuery = "";
+  roleFilter = "customer";
+  customerSearching = true;
+  rerenderKeepingSearchFocus();
+  try {
+    const snap = await getDocs(query(collection(db, "users"), orderBy("createdAt", "desc"), limit(25)));
+    customerDocs = snap.docs.map(toCustomerAccount);
+  } catch (error) {
+    console.error("Couldn't load the latest customers:", error);
+    customerDocs = [];
+  } finally {
+    customerSearching = false;
+  }
+  rerenderKeepingSearchFocus();
+}
+
 // Searches by the START of a name or mobile number: a few reads, not the whole list.
 async function runCustomerSearch() {
   const text = customerQuery.trim();
@@ -242,6 +261,7 @@ function applyFilterAndRender() {
     <div class="feedback-list__header">
       <h3 class="panel__title" style="margin:0;">All Registered Accounts</h3>
       <input type="search" id="accounts-customer-search" class="feedback-sort-select" style="min-width:230px;" placeholder="Find a customer: name or mobile" autocomplete="off">
+      <button type="button" class="btn-outline" id="show-latest-customers-btn">Show latest 25 customers</button>
       <button type="button" class="btn-primary" id="add-admin-btn">+ Add New Admin</button>
       <select id="accounts-role-filter" class="feedback-sort-select">
         <option value="all">All roles</option>
@@ -276,6 +296,7 @@ function applyFilterAndRender() {
   });
 
   panel.querySelector("#add-admin-btn").addEventListener("click", handleAddNewAdmin);
+  panel.querySelector("#show-latest-customers-btn").addEventListener("click", loadLatestCustomers);
 
   const searchBox = panel.querySelector("#accounts-customer-search");
   searchBox.value = customerQuery;
@@ -304,7 +325,7 @@ function applyFilterAndRender() {
   if (visibleAccounts.length === 0) {
     tbody.innerHTML = `<tr><td colspan="6" class="inventory-empty">${
       roleFilter === "customer" && !customerQuery.trim()
-        ? "Type a name or mobile number above to find a customer."
+        ? "Type a name or mobile number above to find a customer, or click Show latest 25 customers."
         : customerSearching ? "Searching…" : "No accounts found."}</td></tr>`;
     return;
   }
@@ -331,7 +352,7 @@ function buildAccountRow(account) {
 
   row.innerHTML = `
     <td>${escapeHtml(account.name || "(no name)")}</td>
-    <td>${escapeHtml(account.email || "—")}</td>
+    <td>${escapeHtml(account.email || (account.role === "customer" ? "No email" : "—"))}</td>
     <td>${escapeHtml(account.username || "—")}</td>
     <td><span class="role-pill role-pill--${account.role}">${account.role === "admin" ? "Admin" : account.role === "employee" ? (account.isDriver ? "Driver" : "Employee") : "Customer"}</span></td>
     <td></td>

@@ -41,6 +41,10 @@ const EMAILJS_PUBLIC_KEY = Deno.env.get("EMAILJS_PUBLIC_KEY") ?? "D66Nq0gpzysnBw
 const EMAILJS_APPROVED_TEMPLATE_ID = Deno.env.get("EMAILJS_APPROVED_TEMPLATE_ID") ?? "";
 const EMAILJS_PRIVATE_KEY = Deno.env.get("EMAILJS_PRIVATE_KEY") ?? "";
 
+// Failed-login counts are forgotten only after a full day with no attempt (a permanent lock never is),
+// so the escalating waits - which grow past 15 minutes - can really run their course.
+const LOGIN_STALE_MIN = 1440;
+
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, content-type, apikey, x-client-info, x-firebase-token",
@@ -233,7 +237,7 @@ Deno.serve(async (req) => {
     if (action === "check") {
       const id = norm(body.id);
       if (!validId(id)) return json({ error: "bad_id" }, 400);
-      const { data, error } = await admin.rpc("guard_check", { k: id });
+      const { data, error } = await admin.rpc("guard_check", { k: id, stale_min: LOGIN_STALE_MIN });
       if (error) return json({ error: error.message }, 500);
       return json(data);
     }
@@ -241,7 +245,7 @@ Deno.serve(async (req) => {
     if (action === "fail") {
       const id = norm(body.id);
       if (!validId(id)) return json({ error: "bad_id" }, 400);
-      const { data, error } = await admin.rpc("guard_fail", { k: id });
+      const { data, error } = await admin.rpc("guard_fail", { k: id, stale_min: LOGIN_STALE_MIN });
       if (error) return json({ error: error.message }, 500);
       return json(data);
     }
