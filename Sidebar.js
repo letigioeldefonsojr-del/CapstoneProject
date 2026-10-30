@@ -1,6 +1,6 @@
 import { auth, db } from "./firebase-config.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
-import { doc, getDoc, collection, query, where, orderBy, limit, onSnapshot, enableNetwork, disableNetwork } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { doc, getDoc, collection, query, where, orderBy, limit, onSnapshot, getCountFromServer, Timestamp, enableNetwork, disableNetwork } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getWorstAlertDetail } from "./StockAlerts.js";
 import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
 import { stockSummary, listNotifications } from "./SupabaseStore.js?v=20261029c";
@@ -484,22 +484,47 @@ function loadOrdersBadge() {
   // Everyone (staff and drivers) sees the same count: Pending orders only.
   badge.title = "Pending orders";
 
-  onSnapshot(
-    query(collection(db, "orders"), where("status", "==", "pending")),
-    (snap) => {
-      // Same 60-day window the Orders page loads by default, so the badge
-      // always matches the Pending count shown there (very old orders that
-      // were never approved or rejected are not counted).
-      const cutoff = Date.now() - 60 * 24 * 60 * 60 * 1000;
-      const count = snap.docs.filter((d) => {
-        const created = d.data().createdAt?.toMillis?.();
-        return created == null || created >= cutoff;
-      }).length;
+  // One COUNT instead of downloading every pending order: about 1 read per refresh, however
+  // many orders are pending. It matches the Orders page window (the last 7 days). It refreshes
+  // when the page is shown, every 2 minutes while it is open, and when the Orders page changes.
+  const WINDOW_DAYS = 7;
+  let useWindow = true; // falls back to "all pending" if the date filter needs an index that is missing
+  let lastRun = 0;
+  let running = false;
+
+  async function refreshBadge(force = false) {
+    if (running || document.hidden) return;
+    if (!force && Date.now() - lastRun < 10000) return; // never more than once per 10 seconds
+    running = true;
+    lastRun = Date.now();
+    try {
+      const ordersRef = collection(db, "orders");
+      let count;
+      if (useWindow) {
+        try {
+          const since = Timestamp.fromMillis(Date.now() - WINDOW_DAYS * 86400000);
+          count = (await getCountFromServer(query(ordersRef, where("status", "==", "pending"), where("createdAt", ">=", since)))).data().count;
+        } catch (error) {
+          console.warn("Pending badge: date filter unavailable, counting all pending orders instead.", error?.code || error);
+          useWindow = false;
+        }
+      }
+      if (count === undefined) {
+        count = (await getCountFromServer(query(ordersRef, where("status", "==", "pending")))).data().count;
+      }
       badge.textContent = count > 99 ? "99+" : String(count);
       badge.hidden = count === 0;
-    },
-    (error) => console.error("Couldn't load orders for badge:", error)
-  );
+    } catch (error) {
+      console.error("Couldn't load orders for badge:", error);
+    } finally {
+      running = false;
+    }
+  }
+
+  refreshBadge(true);
+  setInterval(refreshBadge, 120000);
+  document.addEventListener("visibilitychange", () => refreshBadge());
+  document.addEventListener("orders:changed", () => refreshBadge());
 }
 
 // ====================================================================

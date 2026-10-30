@@ -170,6 +170,7 @@ function scheduleMerge() {
     allOrders = [...byId.values()].sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
     updateCounts();
     render();
+    document.dispatchEvent(new Event("orders:changed")); // lets the sidebar badge refresh its count
   }, 60);
 }
 
