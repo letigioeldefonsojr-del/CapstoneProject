@@ -1144,6 +1144,7 @@ async function currentDriverStamp() {
 const LOCATIONS_COLLECTION = "driverLocations";
 const SHARE_INTERVAL_MS = 30000; // each location update is a database write, and every open viewer reads it
 const STALE_AFTER_MS = 2 * 60 * 1000;
+let locationWarmedUp = false;
 const riderLocations = new Map(); // orderId -> live location doc (admin/staff side)
 
 function positionToPlain(pos) {
@@ -1156,13 +1157,15 @@ function positionToPlain(pos) {
 }
 
 // One-shot reading; resolves null if the phone can't or won't share.
-function readPosition(timeoutMs = 7000) {
+// A recent network/Wi-Fi fix (up to 2 minutes old) is fine for these one-off snapshots and comes back
+// at once; waiting for a fresh high-accuracy GPS fix could hold up "On the way" for several seconds.
+function readPosition(timeoutMs = 3000) {
   return new Promise((resolve) => {
     if (!navigator.geolocation) return resolve(null);
     navigator.geolocation.getCurrentPosition(
       (pos) => resolve(positionToPlain(pos)),
       () => resolve(null),
-      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 10000 }
+      { enableHighAccuracy: false, timeout: timeoutMs, maximumAge: 120000 }
     );
   });
 }
@@ -1368,6 +1371,13 @@ function syncRiderSharing() {
   if (!currentIsDriver) return;
   const active = myActiveDeliveries();
   const activeIds = new Set(active.map((o) => o.id));
+
+  // Warm up the location once while this rider has approved deliveries waiting, so the position is
+  // already known (and the permission already answered) when they tap "On the way".
+  if (!locationWarmedUp && allOrders.some((o) => o.status === "approved" && !isPickupOrder(o))) {
+    locationWarmedUp = true;
+    readPosition(8000);
+  }
 
   sharedOrderIds.forEach((id) => {
     if (!activeIds.has(id)) {
