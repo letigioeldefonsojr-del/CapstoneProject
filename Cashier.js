@@ -47,9 +47,39 @@ function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// The cashier's name for receipts and sales ("Maria Santos"), not their email. Read once from their
+// employee profile and remembered for the session; the email is only a fallback.
+let cashierName = "";
+async function loadCashierName() {
+  const user = currentUser;
+  if (!user) return;
+  const key = `almares_cashier_name_${user.uid}`;
+  try {
+    const cached = sessionStorage.getItem(key);
+    if (cached) { cashierName = cached; return; }
+  } catch (e) { /* storage unavailable: just read it */ }
+  let name = "";
+  if (currentRole === "employee") {
+    try {
+      const snap = await getDoc(doc(db, "employees", user.uid));
+      if (snap.exists()) {
+        const d = snap.data();
+        name = [d.firstName, d.lastName].filter(Boolean).join(" ").trim() || String(d.fullName || d.name || "").trim();
+      }
+    } catch (error) { console.error("Couldn't load the cashier's name:", error); }
+  }
+  if (!name) name = user.displayName || "";
+  cashierName = name;
+  if (name) { try { sessionStorage.setItem(key, name); } catch (e) { /* fine */ } }
+}
+function cashierLabel() {
+  return cashierName || currentUser?.displayName || currentUser?.email || "unknown";
+}
+
 document.addEventListener("sidebar:ready", async (event) => {
   currentUser = event.detail.user;
   currentRole = event.detail.role || "employee";
+  loadCashierName(); // in the background; a sale uses the email until it arrives
   wireUi();
   wireHistory();
   await initCatalog();
@@ -868,6 +898,7 @@ async function commitSaleSupabase(ctx) {
     gcashRef: method === "gcash" ? ($("pos-gcash-ref").value.trim() || null) : null,
     cashierUid: currentUser.uid,
     cashierEmail,
+    cashierName: cashierLabel(),
     cashierRole: currentRole,
     ...customerFields(saleCustomer)
   };
@@ -1025,7 +1056,7 @@ async function completeSale() {
     receiptNo, lines, total, units,
     paymentMethod: method, tendered: pay.tendered, change: pay.change,
     gcashRef: method === "gcash" ? $("pos-gcash-ref").value.trim() : "",
-    cashierEmail, when: new Date(),
+    cashierEmail, cashierName: cashierLabel(), when: new Date(),
     customerName: soldTo?.name || ""
   });
 }
@@ -1190,7 +1221,7 @@ function showReceipt(sale) {
       <strong>${STORE_NAME}</strong>
       <span>${esc(sale.receiptNo)}</span>
       <span>${esc(sale.when.toLocaleString())}</span>
-      <span>Cashier: ${esc(sale.cashierEmail)}</span>
+      <span>Cashier: ${esc(sale.cashierName || sale.cashierEmail)}</span>
       ${sale.customerName ? `<span>Customer: ${esc(sale.customerName)}</span>` : ""}
     </div>
     <table>${rows}</table>
@@ -1465,6 +1496,7 @@ async function confirmRefundSupabase() {
         notRestocked: stock.skipped,
         paymentMethod: sale.paymentMethod || null,
         cashierEmail,
+        cashierName: cashierLabel(),
         cashierRole: currentRole
       },
       movements: stock.movements,

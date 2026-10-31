@@ -228,7 +228,7 @@ async function fetchPosSales(start, end) {
       receiptNo: data.receiptNo || "POS",
       itemCount: data.units ?? (Array.isArray(data.items) ? data.items.length : 0),
       paymentMethod: data.paymentMethod === "gcash" ? "GCash" : "Cash",
-      performedByEmail: data.cashierEmail || "unknown",
+      performedByEmail: data.cashierName || data.cashierEmail || "unknown",
       grossTotal: typeof data.total === "number" ? data.total : null,
       refundedTotal: typeof data.refundedTotal === "number" ? data.refundedTotal : 0,
       refundStatus: data.refundStatus || "none",
