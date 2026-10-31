@@ -452,11 +452,11 @@ function wireUi() {
   // Cash received: typed on a keyboard, or tapped on the on-screen number
   // pad. inputmode="none" keeps the tablet's own keyboard from popping up.
   $("pos-tendered").addEventListener("input", () => {
-    setTendered(sanitizeAmount($("pos-tendered").value));
+    setTendered(sanitizeAmount(getTendered()));
   });
   buildNumpad($("pos-pay-pad"), {
     decimal: true,
-    onKey: (key) => setTendered(applyNumpadKey($("pos-tendered").value, key))
+    onKey: (key) => setTendered(applyNumpadKey(getTendered(), key))
   });
   $("pos-quick").addEventListener("click", (event) => {
     const btn = event.target.closest("[data-quick]");
@@ -713,8 +713,19 @@ function sanitizeAmount(raw) {
   return v.slice(0, 10);
 }
 
+// The box shows commas as you type (1,000), but everything else works with the plain number.
+function formatTenderedDisplay(raw) {
+  const v = String(raw ?? "");
+  const dot = v.indexOf(".");
+  const whole = (dot === -1 ? v : v.slice(0, dot)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return dot === -1 ? whole : whole + v.slice(dot);
+}
+function getTendered() {
+  return $("pos-tendered").value.replace(/,/g, "");
+}
+
 function setTendered(value) {
-  $("pos-tendered").value = value;
+  $("pos-tendered").value = formatTenderedDisplay(value);
   renderPayment();
 }
 
@@ -793,7 +804,7 @@ function closeQtyPad() {
 
 function paymentState() {
   const total = cartTotal(cart);
-  return computePayment(total, method, $("pos-tendered").value);
+  return computePayment(total, method, getTendered());
 }
 
 function renderPayment() {
