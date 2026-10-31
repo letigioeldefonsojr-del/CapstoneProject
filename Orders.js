@@ -442,6 +442,7 @@ function render() {
       mainRow.classList.toggle("is-expanded", expanding);
       expandedOrderDetail = expanding ? detailRow : null;
       expandedOrderMainRow = expanding ? mainRow : null;
+      startRiderLocationListener(); // start/stop watching this rider with the open details
     });
 
     if (order.id === previouslyExpandedOrderId) {
@@ -453,6 +454,7 @@ function render() {
   });
 
   handleTargetOrderJump();
+  startRiderLocationListener(); // now that the open row is known
 }
 
 // Arrived here from a notification click ("New order from Elde —
@@ -1135,12 +1137,12 @@ async function currentDriverStamp() {
 //     "On the Way" (onTheWayLocation) and when they finished the delivery
 //     (deliveredLocation). Works every time, no background tracking needed.
 //  2) Live location while a delivery is on the way (driverLocations/{orderId}),
-//     sent every ~10 s. A website can only do this while the page is open and
+//     sent every ~30 s. A website can only do this while the page is open and
 //     the screen is on — browsers pause it in the background — so the admin
 //     sees "Updated … ago" and a warning when the pin stops moving.
 // ====================================================================
 const LOCATIONS_COLLECTION = "driverLocations";
-const SHARE_INTERVAL_MS = 10000;
+const SHARE_INTERVAL_MS = 30000; // each location update is a database write, and every open viewer reads it
 const STALE_AFTER_MS = 2 * 60 * 1000;
 const riderLocations = new Map(); // orderId -> live location doc (admin/staff side)
 
@@ -1404,6 +1406,9 @@ function startRiderLocationListener() {
       .filter((o) => o.status === "on_the_way" && !isPickupOrder(o))
       // A driver only needs their own pin, not every rider's.
       .filter((o) => !currentIsDriver || o.driverUid === auth.currentUser?.uid)
+      // Only the order whose details are open is watched: every location update is one read per
+      // watcher, so watching every delivery in the background would cost reads for nothing.
+      .filter((o) => o.id === expandedOrderMainRow?.dataset.orderId)
       .map((o) => o.id)
   );
   locationUnsubs.forEach((unsub, id) => {
