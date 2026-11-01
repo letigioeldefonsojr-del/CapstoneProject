@@ -1115,9 +1115,10 @@ function nameVariants(text) {
   const t = text.trim();
   const title = t.toLowerCase().replace(/(^|[\s\-.'])([a-z])/g, (m, sep, ch) => sep + ch.toUpperCase());
   const first = t.charAt(0).toUpperCase() + t.slice(1);
-  // Names are saved with capitals ("Juan Dela Cruz"), so these two cover almost every case.
-  // (Each extra spelling is another database query, billed even when it finds nothing.)
-  return [...new Set([title, first])].filter(Boolean);
+  // Names are usually saved with capitals ("Juan Dela Cruz"), but some accounts were typed in all
+  // lower case ("serg"), and the database match is case-sensitive, so the lower-case spelling is
+  // searched too. (Each extra spelling is another database query, billed even when it finds nothing.)
+  return [...new Set([title, first, t.toLowerCase()])].filter(Boolean);
 }
 
 async function prefixQuery(field, prefix) {
