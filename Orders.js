@@ -156,7 +156,9 @@ function scheduleMerge() {
     orderParts.forEach((part) => part.forEach((order, id) => {
       if (!showingFullHistory) {
         const ts = order.createdAt?.toMillis?.() || 0;
-        const keep = !ts || ts >= recentCutoff;
+        // A driver always sees every delivery that is approved or on the way, however old the order
+        // is: the admin may approve an old order, and the 2-day window must not hide it from them.
+        const keep = !ts || ts >= recentCutoff || (currentIsDriver && ["approved", "on_the_way"].includes(order.status));
         if (!keep) {
           // Older than the window: hidden, but counted if it was never finished, so the button can say so.
           if (ACTIVE_STATUSES.includes(order.status)) hiddenUnfinished += 1;
