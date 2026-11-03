@@ -620,6 +620,10 @@ document.addEventListener("DOMContentLoaded", () => {
     hideStatus();
 
     try {
+      // "Remember me" now applies to Google sign-in too (it used to affect email/password only).
+      const rememberBox = document.getElementById("employee-remember-me");
+      const rememberMe = rememberBox ? rememberBox.checked : true;
+      await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
       const existingDoc = await getDoc(doc(db, EMPLOYEE_COLLECTION, user.uid));
