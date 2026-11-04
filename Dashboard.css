@@ -1850,6 +1850,14 @@ button {
     gap: 14px;
 }
 
+.image-upload-row.is-dragover,
+.variant-editor__thumb-wrap.is-dragover {
+    outline: 2px dashed var(--brand, #1f6b46);
+    outline-offset: 3px;
+    border-radius: 10px;
+    background: rgba(31, 107, 70, 0.08);
+}
+
 .image-preview {
     width: 64px;
     height: 64px;
@@ -1881,6 +1889,13 @@ button {
     align-items: center;
     gap: 10px;
     flex-wrap: wrap;
+}
+
+.image-upload-hint {
+    display: block;
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 4px;
 }
 
 .image-upload-status {

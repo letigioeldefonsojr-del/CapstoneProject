@@ -879,6 +879,7 @@ function wireAdminControls() {
     document.getElementById("pf-image-file").click();
   });
   document.getElementById("pf-image-file").addEventListener("change", handleImageFileSelected);
+  setupImageDropAndPaste();
   document.getElementById("pf-has-variants").addEventListener("change", handleVariantModeToggle);
   document.getElementById("add-variant-btn").addEventListener("click", () => addVariantRow());
   document.getElementById("variant-editor-list").addEventListener("click", (event) => {
@@ -1111,6 +1112,10 @@ async function handleVariantImageFileSelected(fileInput) {
   const row = fileInput.closest(".variant-editor__row");
   const file = fileInput.files[0];
   fileInput.value = ""; // allow re-selecting the same file later
+  await uploadVariantImageFile(row, file);
+}
+
+async function uploadVariantImageFile(row, file) {
   if (!file) return;
 
   const statusEl = row.querySelector(".variant-editor__image-status");
@@ -1353,6 +1358,10 @@ function escapeHtmlAttr(value) {
 async function handleImageFileSelected(event) {
   const file = event.target.files[0];
   event.target.value = ""; // allow re-selecting the same file later
+  await uploadProductImageFile(file);
+}
+
+async function uploadProductImageFile(file) {
   if (!file) return;
 
   if (!file.type.startsWith("image/")) {
@@ -1397,6 +1406,70 @@ async function uploadImageToCloudinary(file) {
 
   const data = await response.json();
   return data.secure_url;
+}
+
+// Drag an image onto the product image box (or onto a variant's picture), or paste a copied
+// image with Ctrl+V while the product form is open. Uses the same upload as the Choose Image button.
+function setupImageDropAndPaste() {
+  const firstImageFile = (dataTransfer) =>
+    Array.from(dataTransfer?.files || []).find((f) => f.type.startsWith("image/")) || null;
+  const hasFiles = (event) => Array.from(event.dataTransfer?.types || []).includes("Files");
+
+  const makeDropTarget = (el, onFile) => {
+    el.addEventListener("dragover", (event) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      el.classList.add("is-dragover");
+    });
+    el.addEventListener("dragleave", () => el.classList.remove("is-dragover"));
+    el.addEventListener("drop", (event) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      el.classList.remove("is-dragover");
+      const file = firstImageFile(event.dataTransfer);
+      if (file) onFile(file);
+      else setUploadStatus("Please drop an image file.", "error");
+    });
+  };
+
+  const mainRow = document.querySelector(".image-upload-row");
+  if (mainRow) makeDropTarget(mainRow, uploadProductImageFile);
+
+  // Variant rows are created on demand, so listen on the list and find the row from the event.
+  const list = document.getElementById("variant-editor-list");
+  list.addEventListener("dragover", (event) => {
+    const thumb = event.target.closest(".variant-editor__thumb-wrap");
+    if (!thumb || !hasFiles(event)) return;
+    event.preventDefault();
+    thumb.classList.add("is-dragover");
+  });
+  list.addEventListener("dragleave", (event) => {
+    event.target.closest(".variant-editor__thumb-wrap")?.classList.remove("is-dragover");
+  });
+  list.addEventListener("drop", (event) => {
+    const thumb = event.target.closest(".variant-editor__thumb-wrap");
+    if (!thumb || !hasFiles(event)) return;
+    event.preventDefault();
+    thumb.classList.remove("is-dragover");
+    const file = firstImageFile(event.dataTransfer);
+    if (file) uploadVariantImageFile(thumb.closest(".variant-editor__row"), file);
+  });
+
+  // Stop a missed drop from making the browser open the image and leave the page.
+  ["dragover", "drop"].forEach((type) =>
+    window.addEventListener(type, (event) => { if (hasFiles(event)) event.preventDefault(); }));
+
+  // Paste: goes to the focused variant row if one is focused, otherwise to the main product image.
+  document.addEventListener("paste", (event) => {
+    if (document.getElementById("product-modal-overlay").hidden) return;
+    const item = Array.from(event.clipboardData?.items || []).find((i) => i.type.startsWith("image/"));
+    const file = item?.getAsFile();
+    if (!file) return;
+    event.preventDefault();
+    const row = document.activeElement?.closest?.(".variant-editor__row");
+    if (row) uploadVariantImageFile(row, file);
+    else uploadProductImageFile(file);
+  });
 }
 
 function setUploadStatus(message, kind) {
