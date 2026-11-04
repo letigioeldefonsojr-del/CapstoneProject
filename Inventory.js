@@ -1115,7 +1115,22 @@ async function handleVariantImageFileSelected(fileInput) {
   await uploadVariantImageFile(row, file);
 }
 
-async function uploadVariantImageFile(row, file) {
+// Image uploads still running. Saving the product waits for these, so clicking Save
+// while a picture is still uploading doesn't save the product without it.
+const pendingImageUploads = new Set();
+let waitingForImageUpload = false;
+function trackImageUpload(promise) {
+  pendingImageUploads.add(promise);
+  const done = () => pendingImageUploads.delete(promise);
+  promise.then(done, done);
+  return promise;
+}
+
+function uploadVariantImageFile(row, file) {
+  return trackImageUpload(runVariantImageUpload(row, file));
+}
+
+async function runVariantImageUpload(row, file) {
   if (!file) return;
 
   const statusEl = row.querySelector(".variant-editor__image-status");
@@ -1173,6 +1188,22 @@ function formatPrice(numberValue) {
 async function handleProductFormSubmit(event) {
   event.preventDefault();
   hideFormStatus();
+
+  // A picture is still uploading: wait for it to finish, then save with it included.
+  if (pendingImageUploads.size > 0) {
+    if (waitingForImageUpload) return; // Save was already clicked; don't queue a second save
+    waitingForImageUpload = true;
+    const saveBtn = document.getElementById("product-form-submit");
+    if (saveBtn) saveBtn.disabled = true;
+    showFormStatus("Waiting for the image to finish uploading...", "");
+    try {
+      await Promise.allSettled([...pendingImageUploads]);
+    } finally {
+      waitingForImageUpload = false;
+      if (saveBtn) saveBtn.disabled = false;
+    }
+    hideFormStatus();
+  }
 
   const name = document.getElementById("pf-name").value.trim();
   const category = getCategoryValue();
@@ -1361,7 +1392,11 @@ async function handleImageFileSelected(event) {
   await uploadProductImageFile(file);
 }
 
-async function uploadProductImageFile(file) {
+function uploadProductImageFile(file) {
+  return trackImageUpload(runProductImageUpload(file));
+}
+
+async function runProductImageUpload(file) {
   if (!file) return;
 
   if (!file.type.startsWith("image/")) {
