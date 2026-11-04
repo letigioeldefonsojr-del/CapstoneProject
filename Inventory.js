@@ -1609,6 +1609,13 @@ function showCsvGuide() {
     <div class="modal confirm-dialog csv-guide">
       <div class="modal__header"><h3>Before you import a CSV</h3></div>
       <div class="modal__body">
+        <div class="csv-guide__template-box">
+          <div>
+            <strong>Don't have a file yet?</strong>
+            <span>Download a blank template with the right columns, fill it in, then come back and choose it.</span>
+          </div>
+          <button type="button" class="btn-outline" data-act="template">Download blank template</button>
+        </div>
         <p class="csv-guide__lead">The first row of your file must contain these column names, spelled exactly like this. If any required column is missing, the file is rejected.</p>
         <div class="csv-guide__table-wrap">
           <table class="csv-guide__table">
@@ -1623,9 +1630,8 @@ function showCsvGuide() {
         </ul>
       </div>
       <div class="modal__footer csv-guide__footer">
-        <button type="button" class="btn-outline" data-act="template">Download template</button>
         <button type="button" class="btn-outline" data-act="cancel">Cancel</button>
-        <button type="button" class="btn-primary" data-act="choose">Choose CSV file</button>
+        <button type="button" class="btn-primary" data-act="choose">I have my file: choose CSV</button>
       </div>
     </div>`;
 

@@ -3364,6 +3364,9 @@ body.has-share-bar { padding-bottom: 76px; }
 .csv-guide { max-width: 640px; width: calc(100vw - 32px); max-height: calc(100vh - 40px); display: flex; flex-direction: column; }
 .csv-guide .modal__body { overflow-y: auto; }
 .csv-guide__lead { margin: 0 0 12px; font-size: 14px; }
+.csv-guide__template-box { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 0 0 14px; padding: 10px 12px; border: 1px dashed var(--border); border-radius: 10px; background: rgba(0,0,0,.03); font-size: 13px; }
+.csv-guide__template-box > div { display: flex; flex-direction: column; gap: 2px; flex: 1 1 260px; }
+.csv-guide__template-box span { color: var(--muted); }
 .csv-guide__table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
 .csv-guide__table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .csv-guide__table th, .csv-guide__table td { padding: 8px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
