@@ -172,7 +172,7 @@ async function verifyStaff(request, env, { allowDriver = false } = {}) {
         }
         const isDriver = Boolean(fields.isDriver && fields.isDriver.booleanValue === true);
         if (isDriver && !allowDriver) {
-          return { ok: false, status: 403, error: "Driver accounts can't send promotions." };
+          return { ok: false, status: 403, error: "Rider accounts can't send promotions." };
         }
       }
       return { ok: true, uid };

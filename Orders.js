@@ -925,7 +925,7 @@ function buildActionsForOrder(order) {
     if (!currentIsDriver) {
       const note = document.createElement("span");
       note.className = "orders-table__view-only";
-      note.textContent = isAdminUser ? "Driver handles delivery" : "View only";
+      note.textContent = isAdminUser ? "Rider handles delivery" : "View only";
       wrap.appendChild(note);
     }
     return wrap;

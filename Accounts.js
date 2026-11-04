@@ -354,7 +354,7 @@ function buildAccountRow(account) {
     <td>${escapeHtml(account.name || "(no name)")}</td>
     <td>${escapeHtml(account.email || (account.role === "customer" ? "No email" : "—"))}</td>
     <td>${escapeHtml(account.username || "—")}</td>
-    <td><span class="role-pill role-pill--${account.role}">${account.role === "admin" ? "Admin" : account.role === "employee" ? (account.isDriver ? "Driver" : "Employee") : "Customer"}</span></td>
+    <td><span class="role-pill role-pill--${account.role}">${account.role === "admin" ? "Admin" : account.role === "employee" ? (account.isDriver ? "Rider" : "Employee") : "Customer"}</span></td>
     <td></td>
     <td><div class="accounts-table__actions"></div></td>
   `;
@@ -387,7 +387,7 @@ function buildAccountRow(account) {
   } else {
     if (pendingApproval) {
       actionsCell.appendChild(buildActionButton("Approve", "btn-primary", (event) => handleApprove(account, event.currentTarget)));
-      actionsCell.appendChild(buildActionButton("Approve as Driver", "btn-outline", (event) => handleApprove(account, event.currentTarget, true)));
+      actionsCell.appendChild(buildActionButton("Approve as Rider", "btn-outline", (event) => handleApprove(account, event.currentTarget, true)));
     } else if (suspended) {
       actionsCell.appendChild(buildActionButton("Lift Suspension", "btn-outline", () => handleLiftSuspension(account)));
     } else {
@@ -395,7 +395,7 @@ function buildAccountRow(account) {
     }
     if (account.role === "employee" && !pendingApproval) {
       actionsCell.appendChild(buildActionButton(
-        account.isDriver ? "Make Regular Employee" : "Make Driver",
+        account.isDriver ? "Make Regular Employee" : "Make Rider",
         "btn-outline",
         (event) => handleToggleDriver(account, event.currentTarget)
       ));
@@ -481,9 +481,9 @@ async function handleToggleDriver(account, btn) {
   const makeDriver = !account.isDriver;
   const confirmed = await confirmDialog(
     makeDriver
-      ? `Make ${account.name || "this employee"} a Driver? They will only be able to see Orders and update deliveries.`
-      : `Make ${account.name || "this driver"} a regular employee again? They will get full employee access.`,
-    { title: makeDriver ? "Make Driver?" : "Make regular employee?", confirmLabel: makeDriver ? "Make Driver" : "Confirm" }
+      ? `Make ${account.name || "this employee"} a Rider? They will only be able to see Orders and update deliveries.`
+      : `Make ${account.name || "this rider"} a regular employee again? They will get full employee access.`,
+    { title: makeDriver ? "Make Rider?" : "Make regular employee?", confirmLabel: makeDriver ? "Make Rider" : "Confirm" }
   );
   if (!confirmed) return;
 
