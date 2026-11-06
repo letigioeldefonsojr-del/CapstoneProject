@@ -29,6 +29,16 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="Dashboard.css?v=20261030c">
+    <style>
+        /* Riders never see Pending / Ready for Pickup or the pickup filter, not even
+           for a moment on reload (the is-driver class is set before first paint). */
+        html.is-driver .order-status-card[data-status="pending"],
+        html.is-driver .order-status-card[data-status="ready_for_pickup"],
+        html.is-driver #orders-fulfillment-select,
+        html.driver-check .order-status-card[data-status="pending"],
+        html.driver-check .order-status-card[data-status="ready_for_pickup"],
+        html.driver-check #orders-fulfillment-select { display: none !important; }
+    </style>
 </head>
 <body>
 
@@ -346,6 +356,6 @@
 
 <script type="module" src="firebase-config.js"></script>
 <script type="module" src="Sidebar.js?v=20261030o"></script>
-<script type="module" src="Orders.js?v=20261107b"></script>
+<script type="module" src="Orders.js?v=20261107c"></script>
 </body>
 </html>
