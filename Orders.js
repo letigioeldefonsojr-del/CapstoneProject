@@ -1198,22 +1198,10 @@ let lastWriteAt = 0;
 let shareBarEl = null;
 const sharedOrderIds = new Set();
 
-// Accounts the rider has temporarily hidden their live location from. Kept for
-// this browser tab only and cleared once the rider has no deliveries left.
-const HIDDEN_KEY = "almares_loc_hidden";
-const hiddenFromUids = new Set(readHiddenList());
-let hidePanelEl = null;
-
-function readHiddenList() {
-  try { return JSON.parse(sessionStorage.getItem(HIDDEN_KEY) || "[]").filter((v) => typeof v === "string"); }
-  catch (error) { return []; }
-}
-function saveHiddenList() {
-  try {
-    if (hiddenFromUids.size) sessionStorage.setItem(HIDDEN_KEY, JSON.stringify([...hiddenFromUids]));
-    else sessionStorage.removeItem(HIDDEN_KEY);
-  } catch (error) { /* private mode: it just won't survive a reload */ }
-}
+// Riders no longer hide their live location from other accounts: admins and
+// staff can always see it. (hiddenFrom is still written, always empty.)
+const hiddenFromUids = new Set();
+try { sessionStorage.removeItem("almares_loc_hidden"); } catch (error) { /* ignore */ }
 
 function myActiveDeliveries() {
   const uid = auth.currentUser?.uid;
@@ -1227,78 +1215,15 @@ function showShareBar(message, kind) {
     shareBarEl.className = "rider-share-bar";
     const text = document.createElement("span");
     text.className = "rider-share-bar__text";
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "rider-share-bar__btn";
-    btn.addEventListener("click", toggleHidePanel);
-    shareBarEl.append(text, btn);
+    shareBarEl.append(text);
     document.body.appendChild(shareBarEl);
     document.body.classList.add("has-share-bar"); // leaves room so the bar never covers content
   }
   shareBarEl.dataset.kind = kind;
   shareBarEl.querySelector(".rider-share-bar__text").textContent = message;
-  shareBarEl.querySelector(".rider-share-bar__btn").textContent =
-    hiddenFromUids.size ? `Hidden from ${hiddenFromUids.size} ▾` : "Hide from… ▾";
-}
-
-// Dropdown checklist: untick/tick who may see this rider's live location.
-async function toggleHidePanel() {
-  if (hidePanelEl) { closeHidePanel(); return; }
-  hidePanelEl = document.createElement("div");
-  hidePanelEl.className = "rider-hide-panel";
-  hidePanelEl.innerHTML = `
-    <p class="rider-hide-panel__title">Hide my live location from:</p>
-    <p class="rider-hide-panel__note">Temporary. Everyone can see you by default, and this resets after your deliveries.</p>
-    <div class="rider-hide-panel__list">Loading…</div>`;
-  document.body.appendChild(hidePanelEl);
-  const list = hidePanelEl.querySelector(".rider-hide-panel__list");
-
-  try {
-    const [admins, employees] = await Promise.all([
-      getDocs(collection(db, "admins")),
-      getDocs(collection(db, "employees"))
-    ]);
-    const me = auth.currentUser?.uid;
-    const people = [];
-    admins.forEach((d) => people.push({ uid: d.id, role: "Admin", label: d.data().email || d.data().name || d.id }));
-    employees.forEach((d) => {
-      const data = d.data();
-      if (d.id === me || data.isDriver === true || data.approved === false) return;
-      people.push({ uid: d.id, role: "Employee", label: data.email || data.firstName || d.id });
-    });
-    if (!hidePanelEl) return;
-    list.textContent = "";
-    if (people.length === 0) { list.textContent = "No other accounts found."; return; }
-    people.forEach((person) => {
-      const row = document.createElement("label");
-      row.className = "rider-hide-panel__row";
-      const box = document.createElement("input");
-      box.type = "checkbox";
-      box.checked = hiddenFromUids.has(person.uid);
-      box.addEventListener("change", () => {
-        if (box.checked) hiddenFromUids.add(person.uid); else hiddenFromUids.delete(person.uid);
-        saveHiddenList();
-        showShareBar(shareBarEl.querySelector(".rider-share-bar__text").textContent, shareBarEl.dataset.kind);
-        writeLiveLocations(true);
-      });
-      const text = document.createElement("span");
-      text.textContent = `${person.label} (${person.role})`;
-      row.append(box, text);
-      list.appendChild(row);
-    });
-  } catch (error) {
-    console.error("Couldn't load the account list:", error);
-    list.textContent = "Couldn't load the account list.";
-  }
-}
-
-function closeHidePanel() {
-  if (hidePanelEl) hidePanelEl.remove();
-  hidePanelEl = null;
 }
 
 function hideShareBar() {
-  closeHidePanel();
   if (shareBarEl) shareBarEl.remove();
   shareBarEl = null;
   document.body.classList.remove("has-share-bar");
@@ -1390,7 +1315,6 @@ function syncRiderSharing() {
 
   if (active.length === 0) {
     stopLocationWatch();
-    if (hiddenFromUids.size) { hiddenFromUids.clear(); saveHiddenList(); } // temporary: reset
     return;
   }
   const hadNew = active.some((o) => !sharedOrderIds.has(o.id));
