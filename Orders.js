@@ -85,6 +85,16 @@ document.addEventListener("sidebar:ready", (event) => {
   currentRole = event.detail.role;
   currentIsDriver = Boolean(event.detail.isDriver);
 
+  if (currentIsDriver) {
+    // Riders only deal with deliveries that are approved, on the way or done:
+    // "Pending" (the admin reviews those) and "Ready for Pickup" (store pickup
+    // orders) are not theirs, and neither is the pickup/delivery filter.
+    document.querySelectorAll('.order-status-card[data-status="pending"], .order-status-card[data-status="ready_for_pickup"]')
+      .forEach((card) => { card.style.display = "none"; });
+    const fulfillmentSelect = document.getElementById("orders-fulfillment-select");
+    if (fulfillmentSelect) fulfillmentSelect.style.display = "none";
+  }
+
   wireTabs();
   wireSearch();
   wireSort();
@@ -165,6 +175,7 @@ function scheduleMerge() {
           return;
         }
       }
+      if (currentIsDriver && isPickupOrder(order)) return; // store pickups never involve a rider
       byId.set(id, order);
     }));
     hiddenUnfinishedCount = hiddenUnfinished;
