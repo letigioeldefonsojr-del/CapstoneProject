@@ -98,9 +98,9 @@ function loadProductStats() {
     const lowStockCount = products.filter((product) => isProductInAlertState(product)).length;
 
     // The banner is specifically titled "Critically Low Stock Items
-    // Warning" — so it only counts items actually in the critical
-    // tier (not merely "low", and not "out of stock" either, since
-    // an item at zero isn't "critically low", it's already gone).
+    // Warning" - so it only counts items actually in the critical tier
+    // (49 or fewer left, but not zero). For a variant product, one
+    // variant at 49 or fewer is enough.
     const criticalCount = products.filter((product) => {
       const detail = getWorstAlertDetail(product);
       return detail?.status === "critical";
@@ -147,8 +147,8 @@ function wireNotificationSettings(uid, role, preferences) {
 
 function updateLowStockBanner(count) {
   const banner = document.getElementById("low-stock-banner");
-  const countLabel = document.getElementById("low-stock-count");
-  countLabel.textContent = count;
+  const message = document.getElementById("low-stock-message");
+  message.textContent = `${count} item${count === 1 ? "" : "s"} ${count === 1 ? "needs" : "need"} restocking. Please review and order supplies.`;
   banner.hidden = count === 0;
 }
 

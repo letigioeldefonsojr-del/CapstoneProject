@@ -8,6 +8,7 @@ import { kMeansCluster, normalizeFeatures } from "./KMeans.js";
 import { sendPromotionPushes } from "./PromotionPush.js";
 import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
 import * as SB from "./SupabaseStore.js?v=20261106a";
+import { getWorstAlertDetail } from "./StockAlerts.js";
 
 // ====================================================================
 // STOCK MONITORING — demand trend & restock recommendations
@@ -483,7 +484,11 @@ function renderResults(clustered, productsWithoutData) {
 
   const allTracked = [...clustered.fast, ...clustered.moderate, ...clustered.slow];
 
-  if (allTracked.length === 0) {
+  const hasStockAlerts = allProducts.some((p) => {
+    const a = getWorstAlertDetail(p);
+    return a && a.status !== "unknown";
+  });
+  if (allTracked.length === 0 && !hasStockAlerts) {
     container.innerHTML = `
       <div class="forecast-empty">
         <h3>No sales data yet</h3>
@@ -499,9 +504,26 @@ function renderResults(clustered, productsWithoutData) {
   const bestSellersAlmostOut = allTracked.filter((p) =>
     p.velocityTier === "fast" && p.currentStock > 0 && isLowOrOut(p.currentStock)
   );
-  const restockRecommended = allTracked
-    .filter((p) => isLowOrOut(p.currentStock))
-    .sort((a, b) => (a.daysUntilStockout ?? Infinity) - (b.daysUntilStockout ?? Infinity));
+  // Restocking is decided by the STOCK COUNT in Inventory (the same rule as
+  // the Dashboard banner and the sidebar alerts: 99 or fewer = low, 49 or
+  // fewer = critical, 0 = out; for a variant product, one variant running low
+  // is enough). It no longer depends on a product having sales history. A
+  // product that also has sales data keeps its selling-pace details.
+  const trackedById = new Map(allTracked.map((e) => [e.product.id, e]));
+  const restockRecommended = [];
+  allProducts.forEach((product) => {
+    const alert = getWorstAlertDetail(product);
+    if (!alert || alert.status === "unknown") return;
+    const base = trackedById.get(product.id) || { product };
+    restockRecommended.push({
+      ...base,
+      currentStock: typeof alert.stock === "number" ? alert.stock : 0,
+      variantLabel: alert.variantLabel || null,
+      alertStatus: alert.status
+    });
+  });
+  restockRecommended.sort((a, b) =>
+    (a.currentStock - b.currentStock) || ((a.daysUntilStockout ?? Infinity) - (b.daysUntilStockout ?? Infinity)));
 
   // Same daysUntilStockout number as restockRecommended above — just
   // looking at the opposite end. A very HIGH number here means the
@@ -536,8 +558,8 @@ function renderResults(clustered, productsWithoutData) {
 
   if (restockRecommended.length > 0) {
     container.appendChild(buildSection(
-      "Recommended Restock",
-      "Ranked by how soon each is projected to run out, based on current selling pace.",
+      "Needs Restocking",
+      "Based on the stock count in Inventory: 99 or fewer left is low, 49 or fewer is critical. Lowest stock first. For products with variants, one running low is enough.",
       restockRecommended,
       "restock",
       "restock"
@@ -651,7 +673,8 @@ function buildEntryRow(entry, mode) {
   const row = document.createElement("div");
   row.className = "forecast-item";
 
-  const name = entry.product.name || "Unnamed product";
+  const name = (entry.product.name || "Unnamed product") + (entry.variantLabel ? ` — ${entry.variantLabel}` : "");
+  const hasSales = typeof entry.velocity === "number";
   const velocityLabel = entry.velocity >= 1
     ? `~${entry.velocity.toFixed(1)} units/day`
     : `~${(entry.velocity * 7).toFixed(1)} units/week`;
@@ -691,8 +714,10 @@ function buildEntryRow(entry, mode) {
   }
 
   row.querySelector(".forecast-item__name").textContent = name;
-  row.querySelector(".forecast-item__meta").textContent =
-    `${velocityLabel} (${windowLabel})${stockoutLabel ? " · " + stockoutLabel : ""}`;
+  const urgencyText = { out: "Out of stock", critical: "Critically low", low: "Low stock" }[getStockUrgency(entry)] || "";
+  row.querySelector(".forecast-item__meta").textContent = hasSales
+    ? `${velocityLabel} (${windowLabel})${stockoutLabel ? " · " + stockoutLabel : ""}`
+    : `${urgencyText} · no sales data yet`;
 
   const right = row.querySelector(".forecast-item__right");
   const stockBadge = document.createElement("span");
