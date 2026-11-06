@@ -139,15 +139,72 @@ function toWire(value) {
   return value;
 }
 
-// Every product, fetched in pages. (Supabase does not bill per row read.)
-export async function listAllProducts() {
-  const all = [];
-  for (let offset = 0; offset < 100000; offset += 1000) {
-    const data = await call("list_products", { offset, limit: 1000 });
-    all.push(...data.products.map(rowToProduct));
-    if (data.done) break;
+// Every product, fetched in pages of 1,000. (Supabase does not bill per row read.)
+// The first page and the total count are asked for at the same moment; once the
+// total is known the remaining pages are fetched together instead of one after
+// another. onFirstPage(products) lets the screen draw as soon as page 1 is in.
+const LIST_PAGE = 1000;
+
+export async function listAllProducts(onFirstPage) {
+  const [first, total] = await Promise.all([
+    call("list_products", { offset: 0, limit: LIST_PAGE }),
+    call("stock_summary").then((d) => Number(d.total) || 0).catch(() => 0)
+  ]);
+  const firstRows = first.products.map(rowToProduct);
+  if (typeof onFirstPage === "function") onFirstPage(firstRows, !!first.done);
+  if (first.done) return firstRows;
+
+  const pages = [firstRows];
+  if (total > LIST_PAGE) {
+    const offsets = [];
+    for (let o = LIST_PAGE; o < total; o += LIST_PAGE) offsets.push(o);
+    const rest = await Promise.all(offsets.map((offset) => call("list_products", { offset, limit: LIST_PAGE })));
+    rest.forEach((d) => pages.push(d.products.map(rowToProduct)));
+    // If the count was stale and more rows exist, keep going one page at a time.
+    let last = rest[rest.length - 1];
+    let offset = offsets[offsets.length - 1] + LIST_PAGE;
+    while (last && !last.done && offset < 100000) {
+      last = await call("list_products", { offset, limit: LIST_PAGE });
+      pages.push(last.products.map(rowToProduct));
+      offset += LIST_PAGE;
+    }
+  } else {
+    // Total unknown: fall back to one page at a time.
+    for (let offset = LIST_PAGE; offset < 100000; offset += LIST_PAGE) {
+      const d = await call("list_products", { offset, limit: LIST_PAGE });
+      pages.push(d.products.map(rowToProduct));
+      if (d.done) break;
+    }
   }
-  return all;
+  return pages.flat();
+}
+
+// A copy of the last list is kept in this browser so the page can draw at once
+// next time while the fresh list downloads. Best effort: any failure is ignored.
+const LIST_DB = "almares_inventory_list";
+function idb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(LIST_DB, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore("kv");
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+export async function readCachedList() {
+  try {
+    const db = await idb();
+    return await new Promise((resolve) => {
+      const r = db.transaction("kv").objectStore("kv").get("list");
+      r.onsuccess = () => resolve(r.result || null);
+      r.onerror = () => resolve(null);
+    });
+  } catch { return null; }
+}
+export async function writeCachedList(products) {
+  try {
+    const db = await idb();
+    db.transaction("kv", "readwrite").objectStore("kv").put({ at: Date.now(), uid: auth.currentUser?.uid || null, products }, "list");
+  } catch { /* ignore */ }
 }
 
 // items: [{ id, fields, create? }]. Returns the saved products.

@@ -1,4 +1,4 @@
-import { db } from "./firebase-config.js";
+import { db, auth } from "./firebase-config.js";
 import {
   collection, addDoc, updateDoc, doc, writeBatch, serverTimestamp, runTransaction,
   getDocs, query, orderBy, limit, deleteField, Timestamp, onSnapshot, setDoc
@@ -11,7 +11,7 @@ import { buildSearchFields, needsIndexUpdate } from "./ProductIndex.js";
 import { recordSaleTally } from "./SalesDaily.js?v=20261029b";
 import { sendPromotionPushes } from "./PromotionPush.js";
 import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
-import * as SB from "./SupabaseStore.js?v=20261029c";
+import * as SB from "./SupabaseStore.js?v=20261106a";
 
 // ====================================================================
 // CHUNK 0 — CONFIG
@@ -228,11 +228,34 @@ async function refreshListFromSupabase(silent) {
   if (listRefreshing) return;
   listRefreshing = true;
   try {
-    allProducts = await SB.listAllProducts();
+    let drewEarly = false;
+    if (!silent && !allProducts.length) {
+      // Last visit's list (same account) draws immediately; the fresh one replaces it.
+      const cached = await SB.readCachedList();
+      if (cached && cached.uid === auth.currentUser?.uid && Array.isArray(cached.products) && cached.products.length) {
+        allProducts = cached.products;
+        populateCategoryFilter(allProducts);
+        applyUrlFilter();
+        applyFiltersAndRender();
+        drewEarly = true;
+      }
+    }
+    const fresh = await SB.listAllProducts((firstPage) => {
+      // Nothing on screen yet: show page 1 while the rest downloads.
+      if (!drewEarly && !allProducts.length) {
+        allProducts = firstPage;
+        populateCategoryFilter(allProducts);
+        if (!silent) applyUrlFilter();
+        applyFiltersAndRender();
+        drewEarly = true;
+      }
+    });
+    allProducts = fresh;
     lastListAt = Date.now();
+    SB.writeCachedList(fresh);
     const selectionChanged = selectAfterReload();
     populateCategoryFilter(allProducts);
-    if (!silent) applyUrlFilter();
+    if (!silent && !drewEarly) applyUrlFilter();
     applyFiltersAndRender();
     if (selectionChanged) updateBulkDeleteBar();
   } finally {
