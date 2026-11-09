@@ -1,7 +1,7 @@
 import { auth, db } from "./firebase-config.js";
 import {
   EmailAuthProvider, reauthenticateWithCredential, reauthenticateWithPopup,
-  GoogleAuthProvider, deleteUser
+  GoogleAuthProvider, deleteUser, signOut
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import { doc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 
@@ -174,9 +174,13 @@ export function promptDeleteAccount(user, role) {
     // verified at this point, so a failure here is a real problem —
     // but nothing about their login has changed yet.
     const profileCollection = role === "admin" ? "admins" : "employees";
+    // Tell the sidebar's live account watcher this removal is intentional, so it
+    // doesn't sign out and redirect before the login itself (step 3) is deleted.
+    window.__almaresDeletingAccount = true;
     try {
       await deleteDoc(doc(db, profileCollection, user.uid));
     } catch (error) {
+      window.__almaresDeletingAccount = false;
       console.error("Couldn't delete profile document:", error);
       showStatus(statusEl, "Couldn't remove your profile data. Please try again.", "error");
       confirmBtn.disabled = false;
@@ -196,6 +200,7 @@ export function promptDeleteAccount(user, role) {
       await deleteUser(user);
     } catch (error) {
       console.error("Profile was deleted, but deleting the login itself failed:", error);
+      window.__almaresDeletingAccount = false;
       showStatus(
         statusEl,
         "Your profile was removed, but we couldn't finish deleting your login. Please click Delete Account one more time to finish.",
@@ -206,6 +211,7 @@ export function promptDeleteAccount(user, role) {
       return;
     }
 
+    try { await signOut(auth); } catch (_) { /* the user is already gone */ }
     sessionStorage.clear();
     window.location.href = LOGIN_PAGE_URL;
   });

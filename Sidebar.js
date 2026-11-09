@@ -6,7 +6,7 @@ import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
 import { stockSummary, listNotifications } from "./SupabaseStore.js?v=20261029c";
 import { getPreferences } from "./NotificationPreferences.js";
 import { getReadSet, getClearedSet, loadReadStatus } from "./ReadStatus.js";
-import { promptDeleteAccount } from "./DeleteAccount.js";
+import { promptDeleteAccount } from "./DeleteAccount.js?v=20261109a";
 import { confirmDialog } from "./ConfirmDialog.js";
 
 // ====================================================================
@@ -343,7 +343,7 @@ function watchAccountLive(uid, role) {
   onSnapshot(
     doc(db, collectionName, uid),
     (snap) => {
-      if (handled) return;
+      if (handled || window.__almaresDeletingAccount) return;
       const data = snap.exists() ? snap.data() : null;
       if (!snap.exists() && snap.metadata.fromCache) return; // not a real answer yet
       if (!data) {
