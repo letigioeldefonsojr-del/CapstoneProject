@@ -406,7 +406,8 @@ function buildAccountRow(account) {
     } else {
       actionsCell.appendChild(buildActionButton("Suspend", "btn-outline", () => handleSuspend(account)));
     }
-    if (account.role === "employee" && !pendingApproval) {
+    // Rider/Employee can only be changed once the account is approved.
+    if (account.role === "employee" && !pendingApproval && !rejectedSignup) {
       actionsCell.appendChild(buildActionButton(
         account.isDriver ? "Make Regular Employee" : "Make Rider",
         "btn-outline",
@@ -1036,7 +1037,7 @@ async function sendAccountActionEmail(account, action, reason, untilDate) {
       detail_label: "Reason",
       detail_value: reason || "-",
       reason,
-      login_url: "https://capstoneproject-403.pages.dev/EmployeeLogin.html",
+      login_url: "https://capstoneproject-403.pages.dev/EmployeeLogin",
       until_date: untilDate ? untilDate.toLocaleDateString() : ""
     });
     console.info(`Account email (${label}) sent to ${account.email}`);
