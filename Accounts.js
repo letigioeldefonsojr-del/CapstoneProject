@@ -1003,7 +1003,7 @@ function handleTerminate(account) {
 // verification code, wrong shape for an account-status notice).
 // Variables sent: to_email, email, to_name, name, action, message, detail_label, detail_value, reason, login_url, until_date.
 // ====================================================================
-const ACCOUNT_EMAIL_TEMPLATE_ID = "template_aigi7ef";
+const ACCOUNT_EMAIL_TEMPLATE_ID = "template_mu3ud2r";
 const EMAILJS_SERVICE_ID = "service_mmg4ncm"; // same service as the OTP emails — only the template differs
 
 async function sendAccountActionEmail(account, action, reason, untilDate) {
