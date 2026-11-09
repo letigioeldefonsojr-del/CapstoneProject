@@ -1010,6 +1010,12 @@ async function sendAccountActionEmail(account, action, reason, untilDate) {
       to_email: account.email,
       name: account.name || "",
       action: action === "suspended" ? "Suspended" : action === "rejected" ? "Rejected" : "Terminated",
+      // A ready-made sentence for each case, so one template reads right for all three.
+      message: action === "suspended"
+        ? (untilDate ? `Your Almares 328 account has been suspended until ${untilDate.toLocaleDateString()}.` : "Your Almares 328 account has been suspended.")
+        : action === "rejected"
+          ? "Your request for an Almares 328 account was not approved."
+          : "Your Almares 328 account has been terminated.",
       reason,
       until_date: untilDate ? untilDate.toLocaleDateString() : ""
     });
