@@ -385,7 +385,8 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       if (data.approved === false) {
-        showPendingApprovalOverlay();
+        if (data.rejected === true) showRejectedOverlay(data.rejectionReason || "");
+        else showPendingApprovalOverlay();
         return;
       }
 
@@ -648,7 +649,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (data.approved === false) {
           await signOut(auth);
-          showPendingApprovalOverlay();
+          if (data.rejected === true) showRejectedOverlay(data.rejectionReason || "");
+          else showPendingApprovalOverlay();
           return;
         }
 
@@ -884,6 +886,37 @@ function showPendingApprovalOverlay(username = "", email = "") {
   document.body.appendChild(overlay);
 
   overlay.querySelector("#pending-dismiss-btn").addEventListener("click", () => overlay.remove());
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) overlay.remove();
+  });
+}
+
+// An admin looked at the sign-up and declined it. Shown instead of the
+// "pending" card so the person isn't left waiting for nothing.
+function showRejectedOverlay(reason = "") {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay lock-overlay";
+  const card = document.createElement("div");
+  card.className = "lock-card pending-card";
+  card.innerHTML = `
+    <div class="lock-card__icon pending-card__icon">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.8"/>
+        <path d="M9 9l6 6M15 9l-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <h3>Your account request was not approved</h3>
+    <p class="lock-card__note">The administrator did not approve this account, so you can't log in.</p>
+    <p class="lock-card__note pending-card__reason"></p>
+    <p class="lock-card__note">If you think this is a mistake, please contact the store.</p>
+    <button type="button" class="btn-primary" id="rejected-dismiss-btn">Okay</button>
+  `;
+  const reasonLine = card.querySelector(".pending-card__reason");
+  if (reason) reasonLine.textContent = `Reason: ${reason}`;
+  else reasonLine.remove();
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+  overlay.querySelector("#rejected-dismiss-btn").addEventListener("click", () => overlay.remove());
   overlay.addEventListener("click", (event) => {
     if (event.target === overlay) overlay.remove();
   });

@@ -111,6 +111,8 @@ function loadAccounts() {
         phone: d.data().phone,
         suspendedUntil: d.data().suspendedUntil,
         approved: d.data().approved, // false = waiting for an admin to approve
+        rejected: d.data().rejected === true, // an admin declined the sign-up
+        rejectionReason: d.data().rejectionReason || "",
         isDriver: d.data().isDriver === true // set by an admin only; drivers see only Orders
       }));
       employeeLoaded = true;
@@ -348,7 +350,8 @@ function buildAccountRow(account) {
   const row = document.createElement("tr");
   const isSelf = account.id === currentAdminUid;
   const suspended = isCurrentlySuspended(account);
-  const pendingApproval = account.role === "employee" && account.approved === false;
+  const rejectedSignup = account.role === "employee" && account.approved === false && account.rejected;
+  const pendingApproval = account.role === "employee" && account.approved === false && !account.rejected;
 
   row.innerHTML = `
     <td>${escapeHtml(account.name || "(no name)")}</td>
@@ -364,6 +367,12 @@ function buildAccountRow(account) {
     const badge = document.createElement("span");
     badge.className = "stock-badge stock-badge--low";
     badge.textContent = "Pending approval";
+    statusCell.appendChild(badge);
+  } else if (rejectedSignup) {
+    const badge = document.createElement("span");
+    badge.className = "stock-badge stock-badge--critical";
+    badge.textContent = "Rejected";
+    if (account.rejectionReason) badge.title = account.rejectionReason;
     statusCell.appendChild(badge);
   } else if (suspended) {
     const untilDate = account.suspendedUntil.toDate();
@@ -388,6 +397,10 @@ function buildAccountRow(account) {
     if (pendingApproval) {
       actionsCell.appendChild(buildActionButton("Approve", "btn-primary", (event) => handleApprove(account, event.currentTarget)));
       actionsCell.appendChild(buildActionButton("Approve as Rider", "btn-outline", (event) => handleApprove(account, event.currentTarget, true)));
+      actionsCell.appendChild(buildActionButton("Reject", "btn-danger-outline", () => handleReject(account)));
+    } else if (rejectedSignup) {
+      // A rejected sign-up can still be approved later if the admin changes their mind.
+      actionsCell.appendChild(buildActionButton("Approve", "btn-primary", (event) => handleApprove(account, event.currentTarget)));
     } else if (suspended) {
       actionsCell.appendChild(buildActionButton("Lift Suspension", "btn-outline", () => handleLiftSuspension(account)));
     } else {
@@ -460,7 +473,9 @@ async function handleApprove(account, btn, asDriver = false) {
   btn.disabled = true;
   btn.textContent = "Approving...";
   try {
-    await updateDoc(doc(db, "employees", account.id), asDriver ? { approved: true, isDriver: true } : { approved: true });
+    const approval = asDriver ? { approved: true, isDriver: true } : { approved: true };
+    // If this sign-up had been rejected earlier, clear that now.
+    await updateDoc(doc(db, "employees", account.id), { ...approval, rejected: deleteField(), rejectionReason: deleteField(), rejectedAt: deleteField() });
     // Tell the employee by email that they can log in now. A failure here
     // (e.g. email not set up yet) never affects the approval itself.
     guardCall("notify_approved", { id: account.id }, { signedIn: true })
@@ -518,12 +533,12 @@ const PRESET_REASONS = [
   "Other (please specify)"
 ];
 
-function buildReasonFieldHtml(idPrefix) {
+function buildReasonFieldHtml(idPrefix, reasons = PRESET_REASONS) {
   return `
     <div class="form-field" style="margin-top: 14px;">
       <label for="${idPrefix}-reason-select">Reason</label>
       <select id="${idPrefix}-reason-select">
-        ${PRESET_REASONS.map((r) => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join("")}
+        ${reasons.map((r) => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join("")}
       </select>
     </div>
     <div class="form-field" id="${idPrefix}-reason-custom-field" hidden>
@@ -834,6 +849,79 @@ async function handleLiftSuspension(account) {
   }
 }
 
+// An admin declines a pending employee sign-up. The profile is kept (marked
+// rejected, with the reason) so the person sees "not approved" when they try
+// to log in, instead of an unexplained "no account found". The admin can
+// still approve it later, or Terminate it to delete it for good.
+const REJECT_REASONS = [
+  "Not an employee of the store",
+  "Incomplete or incorrect details",
+  "Duplicate sign-up request",
+  "Other (please specify)"
+];
+
+function handleReject(account) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal">
+      <div class="modal__header">
+        <h3>Reject ${escapeHtml(account.name || "this sign-up")}?</h3>
+        <button type="button" class="modal__close" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M6 6L18 18M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modal__body">
+        <p class="confirm-dialog__message">They won't be able to log in. When they try, they'll see that their request was not approved, with the reason below. You can still approve it later.</p>
+        ${buildReasonFieldHtml("reject", REJECT_REASONS)}
+        <p class="form-status" id="reject-status" hidden></p>
+      </div>
+      <div class="modal__footer">
+        <button type="button" class="btn-outline" data-action="cancel">Cancel</button>
+        <button type="button" class="btn-danger-outline" data-action="confirm">Reject</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const statusEl = overlay.querySelector("#reject-status");
+  wireReasonField(overlay, "reject");
+
+  function close() { overlay.remove(); }
+  overlay.querySelector(".modal__close").addEventListener("click", close);
+  overlay.querySelector('[data-action="cancel"]').addEventListener("click", close);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+  overlay.querySelector('[data-action="confirm"]').addEventListener("click", async (event) => {
+    const reason = getSelectedReason(overlay, "reject");
+    if (!reason) {
+      statusEl.textContent = "Enter a reason.";
+      statusEl.dataset.kind = "error";
+      statusEl.hidden = false;
+      return;
+    }
+    const btn = event.currentTarget;
+    btn.disabled = true;
+    btn.textContent = "Rejecting...";
+    try {
+      await updateDoc(doc(db, "employees", account.id), {
+        rejected: true,
+        rejectionReason: reason,
+        rejectedAt: serverTimestamp()
+      });
+      // Tell them by email too; a failure here never undoes the rejection.
+      sendAccountActionEmail(account, "rejected", reason, null);
+      close();
+    } catch (error) {
+      console.error("Couldn't reject sign-up:", error);
+      statusEl.textContent = "Something went wrong. Please try again.";
+      statusEl.dataset.kind = "error";
+      statusEl.hidden = false;
+      btn.disabled = false;
+      btn.textContent = "Reject";
+    }
+  });
+}
+
 function handleTerminate(account) {
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
@@ -921,7 +1009,7 @@ async function sendAccountActionEmail(account, action, reason, untilDate) {
     await window.emailjs.send(EMAILJS_SERVICE_ID, ACCOUNT_EMAIL_TEMPLATE_ID, {
       to_email: account.email,
       name: account.name || "",
-      action: action === "suspended" ? "Suspended" : "Terminated",
+      action: action === "suspended" ? "Suspended" : action === "rejected" ? "Rejected" : "Terminated",
       reason,
       until_date: untilDate ? untilDate.toLocaleDateString() : ""
     });

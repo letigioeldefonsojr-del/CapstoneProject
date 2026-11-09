@@ -126,6 +126,10 @@ async function initSidebar(user) {
   const preferences = await getPreferences(user.uid, role);
 
   renderIdentity(role, user);
+  if (isDriver) {
+    const badge = document.getElementById("role-badge");
+    if (badge) badge.textContent = "rider";
+  }
   startClock();
   if (isDriver) applyDriverNav();
   highlightActiveNav();
