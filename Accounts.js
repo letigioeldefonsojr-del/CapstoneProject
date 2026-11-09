@@ -1001,7 +1001,7 @@ function handleTerminate(account) {
 // Uses a dedicated EmailJS template (confirmed set up, not the OTP
 // one — that one is built specifically around a {{passcode}}/{{time}}
 // verification code, wrong shape for an account-status notice).
-// Variables sent: to_email, name, action, reason, until_date.
+// Variables sent: to_email, email, to_name, name, action, message, detail_label, detail_value, reason, login_url, until_date.
 // ====================================================================
 const ACCOUNT_EMAIL_TEMPLATE_ID = "template_aigi7ef";
 const EMAILJS_SERVICE_ID = "service_mmg4ncm"; // same service as the OTP emails — only the template differs
@@ -1016,19 +1016,30 @@ async function sendAccountActionEmail(account, action, reason, untilDate) {
     if (!window.emailjs) throw new Error("EmailJS SDK not loaded");
     window.emailjs.init({ publicKey: "D66Nq0gpzysnBwvyP" });
 
+    const label = action === "suspended" ? "Suspended" : action === "rejected" ? "Rejected" : "Terminated";
+    // A ready-made sentence for each case, so one template reads right for all three.
+    const message = action === "suspended"
+      ? (untilDate ? `Your Almares 328 account has been suspended until ${untilDate.toLocaleDateString()}.` : "Your Almares 328 account has been suspended.")
+      : action === "rejected"
+        ? "Your request for an Almares 328 account was not approved."
+        : "Your Almares 328 account has been terminated.";
+    const person = account.name || "";
+
+    // Both the old and the new variable names are sent, so either version of the template fills in.
     await window.emailjs.send(EMAILJS_SERVICE_ID, ACCOUNT_EMAIL_TEMPLATE_ID, {
       to_email: account.email,
-      name: account.name || "",
-      action: action === "suspended" ? "Suspended" : action === "rejected" ? "Rejected" : "Terminated",
-      // A ready-made sentence for each case, so one template reads right for all three.
-      message: action === "suspended"
-        ? (untilDate ? `Your Almares 328 account has been suspended until ${untilDate.toLocaleDateString()}.` : "Your Almares 328 account has been suspended.")
-        : action === "rejected"
-          ? "Your request for an Almares 328 account was not approved."
-          : "Your Almares 328 account has been terminated.",
+      email: account.email,
+      to_name: person,
+      name: person,
+      action: label,
+      message,
+      detail_label: "Reason",
+      detail_value: reason || "-",
       reason,
+      login_url: "https://capstoneproject-403.pages.dev/EmployeeLogin.html",
       until_date: untilDate ? untilDate.toLocaleDateString() : ""
     });
+    console.info(`Account email (${label}) sent to ${account.email}`);
   } catch (error) {
     // Deliberately doesn't block or fail the actual suspend/terminate
     // action — the account status change already succeeded in
