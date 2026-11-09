@@ -3,7 +3,7 @@ import {
   EmailAuthProvider, reauthenticateWithCredential, reauthenticateWithPopup,
   GoogleAuthProvider, deleteUser, signOut
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
-import { doc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { doc, deleteDoc, getDocFromServer, waitForPendingWrites } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 
 // ====================================================================
 // DELETE ACCOUNT
@@ -178,7 +178,11 @@ export function promptDeleteAccount(user, role) {
     // doesn't sign out and redirect before the login itself (step 3) is deleted.
     window.__almaresDeletingAccount = true;
     try {
-      await deleteDoc(doc(db, profileCollection, user.uid));
+      const profileRef = doc(db, profileCollection, user.uid);
+      await deleteDoc(profileRef);
+      await waitForPendingWrites(db); // the delete must reach the server before anything else happens
+      const stillThere = await getDocFromServer(profileRef).then((s) => s.exists());
+      if (stillThere) throw new Error("The profile is still on the server after delete.");
     } catch (error) {
       window.__almaresDeletingAccount = false;
       console.error("Couldn't delete profile document:", error);
