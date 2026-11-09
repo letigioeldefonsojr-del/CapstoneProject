@@ -481,8 +481,7 @@ async function handleApprove(account, btn, asDriver = false) {
     await updateDoc(doc(db, "employees", account.id), { ...approval, rejected: deleteField(), rejectionReason: deleteField(), rejectedAt: deleteField() });
     // Tell the employee by email that they can log in now. A failure here
     // (e.g. email not set up yet) never affects the approval itself.
-    guardCall("notify_approved", { id: account.id }, { signedIn: true })
-      .catch((error) => console.warn("Approval email not sent:", error.message));
+    sendAccountActionEmail({ ...account, isDriver: asDriver || account.isDriver }, "approved", "", null);
     // The live listener re-renders the row — nothing else to do.
   } catch (error) {
     console.error("Couldn't approve account:", error);
@@ -1019,9 +1018,11 @@ async function sendAccountActionEmail(account, action, reason, untilDate) {
     if (!window.emailjs) throw new Error("EmailJS SDK not loaded");
     window.emailjs.init({ publicKey: "D66Nq0gpzysnBwvyP" });
 
-    const label = action === "suspended" ? "Suspended" : action === "rejected" ? "Rejected" : "Terminated";
-    // A ready-made sentence for each case, so one template reads right for all three.
-    const message = action === "suspended"
+    const label = action === "approved" ? "Approved" : action === "suspended" ? "Suspended" : action === "rejected" ? "Rejected" : "Terminated";
+    // A ready-made sentence for each case, so one template reads right for all of them.
+    const message = action === "approved"
+      ? `Good news! Your Almares 328 ${account.isDriver ? "rider" : "employee"} account has been approved. You can log in now.`
+      : action === "suspended"
       ? (untilDate ? `Your Almares 328 account has been suspended until ${untilDate.toLocaleDateString()}.` : "Your Almares 328 account has been suspended.")
       : action === "rejected"
         ? "Your request for an Almares 328 account was not approved."
@@ -1036,8 +1037,8 @@ async function sendAccountActionEmail(account, action, reason, untilDate) {
       name: person,
       action: label,
       message,
-      detail_label: "Reason",
-      detail_value: reason || "-",
+      detail_label: action === "approved" ? "Username" : "Reason",
+      detail_value: action === "approved" ? (account.username || "-") : (reason || "-"),
       reason,
       login_url: "https://capstoneproject-403.pages.dev/EmployeeLogin",
       until_date: untilDate ? untilDate.toLocaleDateString() : ""
