@@ -536,10 +536,14 @@ const PRESET_REASONS = [
 function buildReasonFieldHtml(idPrefix, reasons = PRESET_REASONS) {
   return `
     <div class="form-field" style="margin-top: 14px;">
-      <label for="${idPrefix}-reason-select">Reason</label>
-      <select id="${idPrefix}-reason-select">
-        ${reasons.map((r) => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join("")}
-      </select>
+      <label>Reason</label>
+      <div id="${idPrefix}-reason-group" role="radiogroup" style="display:flex;flex-direction:column;gap:8px;margin-top:6px;">
+        ${reasons.map((r, i) => `
+          <label style="display:flex;align-items:center;gap:8px;font-weight:400;cursor:pointer;">
+            <input type="radio" name="${idPrefix}-reason" value="${escapeHtml(r)}" ${i === 0 ? "checked" : ""} style="width:auto;margin:0;">
+            <span>${escapeHtml(r)}</span>
+          </label>`).join("")}
+      </div>
     </div>
     <div class="form-field" id="${idPrefix}-reason-custom-field" hidden>
       <label for="${idPrefix}-reason-custom">Specify reason</label>
@@ -549,19 +553,25 @@ function buildReasonFieldHtml(idPrefix, reasons = PRESET_REASONS) {
 }
 
 function wireReasonField(overlay, idPrefix) {
-  const select = overlay.querySelector(`#${idPrefix}-reason-select`);
   const customField = overlay.querySelector(`#${idPrefix}-reason-custom-field`);
-  select.addEventListener("change", () => {
-    customField.hidden = select.value !== "Other (please specify)";
+  overlay.querySelectorAll(`input[name="${idPrefix}-reason"]`).forEach((radio) => {
+    radio.addEventListener("change", () => {
+      customField.hidden = getRadioValue(overlay, idPrefix) !== "Other (please specify)";
+    });
   });
 }
 
+function getRadioValue(overlay, idPrefix) {
+  const checked = overlay.querySelector(`input[name="${idPrefix}-reason"]:checked`);
+  return checked ? checked.value : "";
+}
+
 function getSelectedReason(overlay, idPrefix) {
-  const select = overlay.querySelector(`#${idPrefix}-reason-select`);
-  if (select.value === "Other (please specify)") {
+  const value = getRadioValue(overlay, idPrefix);
+  if (value === "Other (please specify)") {
     return overlay.querySelector(`#${idPrefix}-reason-custom`).value.trim();
   }
-  return select.value;
+  return value;
 }
 
 // ====================================================================

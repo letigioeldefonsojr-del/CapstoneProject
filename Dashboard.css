@@ -3462,3 +3462,6 @@ body.has-share-bar .scroll-to-top-btn { bottom: 84px; z-index: 85; }
 .pager__btn { border: 0; background: transparent; font-size: 22px; line-height: 1; padding: 4px 10px; border-radius: 8px; cursor: pointer; color: inherit; }
 .pager__btn:hover:not([disabled]) { background: rgba(0,0,0,.06); }
 .pager__btn[disabled] { opacity: .3; cursor: default; }
+
+/* The rider's location bar sits along the bottom of the screen; shorten the desktop sidebar so Log out stays visible above it. */
+@media (min-width: 901px) { body.has-share-bar .sidebar { height: calc(100vh - 52px); } }
