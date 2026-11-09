@@ -1041,6 +1041,7 @@ async function sendAccountActionEmail(account, action, reason, untilDate) {
       detail_value: action === "approved" ? (account.username || "-") : (reason || "-"),
       reason,
       login_url: "https://capstoneproject-403.pages.dev/EmployeeLogin",
+      button_display: action === "approved" ? "block" : "none", // the Log in button only shows on approval emails
       until_date: untilDate ? untilDate.toLocaleDateString() : ""
     });
     console.info(`Account email (${label}) sent to ${account.email}`);
