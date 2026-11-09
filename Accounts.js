@@ -1046,7 +1046,7 @@ async function sendAccountActionEmail(account, action, reason, untilDate) {
     // Firestore by the time this runs. A failed notification email
     // shouldn't undo that or confuse the admin with an error for
     // something that actually worked.
-    console.error("Couldn't send account action email:", error);
+    console.error("Couldn't send account action email:", error?.status, error?.text || error);
   }
 }
 
