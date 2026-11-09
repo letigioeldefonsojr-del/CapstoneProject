@@ -396,7 +396,6 @@ function buildAccountRow(account) {
   } else {
     if (pendingApproval) {
       actionsCell.appendChild(buildActionButton("Approve", "btn-primary", (event) => handleApprove(account, event.currentTarget)));
-      actionsCell.appendChild(buildActionButton("Approve as Rider", "btn-outline", (event) => handleApprove(account, event.currentTarget, true)));
       actionsCell.appendChild(buildActionButton("Reject", "btn-danger-outline", () => handleReject(account)));
     } else if (rejectedSignup) {
       // A rejected sign-up can still be approved later if the admin changes their mind.
@@ -414,7 +413,10 @@ function buildAccountRow(account) {
         (event) => handleToggleDriver(account, event.currentTarget)
       ));
     }
-    actionsCell.appendChild(buildActionButton("Terminate", "btn-danger-outline", () => handleTerminate(account)));
+    // Terminate is only for approved accounts; a pending or rejected sign-up is just approved or rejected.
+    if (!pendingApproval && !rejectedSignup) {
+      actionsCell.appendChild(buildActionButton("Terminate", "btn-danger-outline", () => handleTerminate(account)));
+    }
 
     // Checked separately from the main render (progressive
     // enhancement) — doesn't block the whole table on N sequential
