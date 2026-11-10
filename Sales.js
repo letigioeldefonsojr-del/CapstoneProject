@@ -1,3 +1,5 @@
+// sales — Sales page: reports from orders and POS sales.
+
 import { db } from "./firebase-config.js";
 import {
   collection, query, where, getDocs, doc, getDoc, Timestamp
@@ -14,9 +16,6 @@ const PRODUCTS_COLLECTION = "products";
 let viewMode = "day"; // "day" | "week" | "month" | "year"
 
 document.addEventListener("sidebar:ready", (event) => {
-  // Admin-only page. The nav link is already hidden for employees
-  // (see Sidebar.js), but that alone doesn't stop someone from typing
-  // the URL directly — this is the actual enforcement.
   if (event.detail.role !== "admin") {
     window.location.replace("Dashboard.html");
     return;
@@ -56,10 +55,6 @@ function formatDateForInput(dateObj) {
   return `${dateObj.getFullYear()}-${pad(dateObj.getMonth() + 1)}-${pad(dateObj.getDate())}`;
 }
 
-// Computes [start, end) for whichever view is active, anchored on the
-// date picker's value. Week starts on Sunday, matching the same
-// convention Orders.js already uses for its own "group by week"
-// feature, so the two pages don't disagree with each other.
 function computeDateRange(dateString) {
   const [year, month, day] = dateString.split("-").map(Number);
   const anchor = new Date(year, month - 1, day, 0, 0, 0, 0);
@@ -121,10 +116,6 @@ async function loadSales() {
     ]);
     const inPersonSales = scannerSales; // scanner/manual single-item sales (estimated pricing applies to these)
 
-    // In-person sales logged before the price-at-time-of-sale feature
-    // existed have no unitPrice at all — those need the product's
-    // CURRENT price as a best-effort estimate, clearly labeled as
-    // such rather than presented as an exact figure.
     const productIdsNeedingCurrentPrice = [...new Set(
       inPersonSales.filter((s) => s.unitPrice == null).map((s) => s.productId)
     )];
@@ -163,9 +154,6 @@ async function fetchOnlineSales(start, end) {
     return {
       source: "online",
       id: docSnap.id,
-      // Full raw order data kept here too — needed to build a receipt
-      // on demand without a second fetch, since it's already sitting
-      // right here from this same query.
       orderData: { id: docSnap.id, ...data },
       customerName: data.customerName || "—",
       itemCount: data.itemCount ?? (Array.isArray(data.items) ? data.items.length : 0),
@@ -322,9 +310,6 @@ function render(container, combined, rangeLabel) {
     onSize: (n) => { salesPerPage = n; salesPage = 1; render(container, combined, rangeLabel); }
   });
 
-  // Wire receipt buttons after the table is actually in the DOM —
-  // only online orders get one, since in-person sales are single-item
-  // transactions without the richer order structure a receipt needs.
   container.querySelectorAll("[data-receipt-order-id]").forEach((btn) => {
     const orderData = combined.find((s) => s.id === btn.dataset.receiptOrderId)?.orderData;
     if (orderData) {
@@ -404,26 +389,6 @@ function shortOrderId(id) {
   return id.slice(0, 8).toUpperCase();
 }
 
-// ====================================================================
-// RECEIPT / INVOICE PDF (moved here from Orders.js)
-// ----------------------------------------------------------------
-// Generated fresh, in the browser, the moment someone clicks the
-// button — nothing pre-generated or stored ahead of time.
-//
-// Builds the receipt as real, styled HTML first (a hidden div,
-// removed right after) — the ₱ symbol renders correctly there, same
-// as it already does everywhere else in this app, since that's just
-// normal browser text rendering. html2canvas then captures that HTML
-// as an image, which jsPDF embeds into the actual PDF page. This
-// sidesteps jsPDF's own built-in fonts entirely, which is what
-// couldn't render ₱ reliably in the first place.
-//
-// Deliberately no <table> anywhere in the receipt's own markup below
-// — html2canvas doesn't reliably replicate table layout, since it
-// reimplements CSS layout itself rather than using a real browser
-// engine for the capture. Plain flexbox divs with fixed pixel widths
-// render far more predictably.
-// ====================================================================
 async function downloadReceipt(order) {
   const html = buildReceiptHtml(order);
 
@@ -450,12 +415,6 @@ async function downloadReceipt(order) {
     const { jsPDF } = window.jspdf;
     const pxWidth = canvas.width / 2;
     const pxHeight = canvas.height / 2;
-    // Root cause, confirmed directly: without an explicit orientation,
-    // jsPDF silently swaps width/height to force portrait whenever the
-    // content is wider than it is tall (a short receipt, few items) —
-    // squeezing the image into a page narrower than itself and
-    // cropping the right side. Explicitly matching orientation to the
-    // actual shape stops it from ever guessing.
     const pdf = new jsPDF({
       unit: "px",
       format: [pxWidth, pxHeight],
@@ -493,11 +452,6 @@ function buildReceiptHtml(order) {
   const total = typeof order.total === "number" ? order.total : null;
   const totalLabel = total != null ? `₱${total.toFixed(2)}` : "—";
 
-  // Layout modeled after a clean, standard invoice format (metadata
-  // block, two-column billing section, itemized table, right-aligned
-  // totals) rather than a heavily-branded storefront receipt — easier
-  // to read at a glance and consistent with what customers already
-  // expect a formal receipt to look like.
   return `
     <div style="box-sizing:border-box; width:${CONTENT_WIDTH}px; font-family: Arial, sans-serif; color: #222; padding: 40px; word-wrap: break-word; overflow-wrap: break-word;">
 

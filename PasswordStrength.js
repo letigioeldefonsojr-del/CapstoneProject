@@ -1,17 +1,5 @@
-// ====================================================================
-// PASSWORD STRENGTH VALIDATION
-// ----------------------------------------------------------------
-// Requires: 8+ characters, at least one uppercase, one lowercase, one
-// digit, one special character. Also rejects a small list of common
-// weak passwords, and rejects passwords containing the person's own
-// name or a birthday-shaped year (1900-2099) — the two specific
-// things asked for beyond raw complexity rules.
-//
-// Honest limit: this can only catch what's actually detectable from
-// the password text itself. It can't know someone's real birthday if
-// they don't type a year-shaped number, and it can only check against
-// the name typed into the SAME form — not some other name/nickname.
-// ====================================================================
+// password-rules — Password strength validation rules.
+
 const COMMON_WEAK_PASSWORDS = new Set([
   "password", "password1", "password123", "12345678", "123456789",
   "1234567890", "qwerty123", "qwertyui", "letmein1", "welcome1",
@@ -41,9 +29,6 @@ export function validatePasswordStrength(password, fullName) {
     return { valid: false, message: "That password is too common. Please choose a more unique one." };
   }
 
-  // Shouldn't contain the person's own name (checked word-by-word,
-  // ignoring short words like initials/"de"/"la" to avoid false
-  // positives on very short name parts).
   if (fullName) {
     const nameParts = fullName.toLowerCase().split(/\s+/).filter((part) => part.length >= 3);
     for (const part of nameParts) {
@@ -53,9 +38,6 @@ export function validatePasswordStrength(password, fullName) {
     }
   }
 
-  // Crude but useful birthday/date heuristic: a 4-digit run that
-  // looks like a plausible birth year (1900-2099) embedded anywhere
-  // in the password.
   if (/19\d{2}|20\d{2}/.test(password)) {
     return { valid: false, message: "Password shouldn't be based on a birthday or date." };
   }

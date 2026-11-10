@@ -1,3 +1,5 @@
+// orders — Orders page: customer orders, status changes, rider assignment.
+
 import { db, auth } from "./firebase-config.js";
 import {
   collection, doc, getDoc, getDocs, setDoc, deleteDoc, updateDoc, onSnapshot, query, where, Timestamp, serverTimestamp
@@ -6,36 +8,10 @@ import { confirmDialog } from "./ConfirmDialog.js";
 import { renderPager, pageSlice, clampPage } from "./Pager.js?v=20261030a";
 import { restockOrder, restockUndelivered } from "./SupabaseStore.js?v=20261030i";
 
-// ====================================================================
-// CHUNK 0 — CONFIG
-// ----------------------------------------------------------------
-// Schema confirmed directly from your mobile app's main.dart, not
-// guessed: orders/{orderId} has userId, customerName, customerAddress,
-// total, itemCount, items[] ({productId, productName, imageUrl,
-// flavor, amount, unitPrice, subtotal}), status, createdAt,
-// estimatedDelivery, and (once marked delivered) isPaid. There is no
-// customer "Confirm Received" step any more: Delivered is final.
-//
-// This page works for both Employee and Admin — your Firestore rules
-// grant orders read/write to isEmployee() || isAdmin().
-//
-// NOT replicated here: your mobile app calls notifyCustomerOrderUpdate
-// (OneSignal push) after every status change. That's a server-side
-// concern (needs an API key that shouldn't live in client JS) — status
-// updates from this page will NOT push a notification to the
-// customer's phone. Worth building as a Cloud Function later if you
-// want web actions to notify customers too.
-// ====================================================================
 const ORDERS_COLLECTION = "orders";
 
-// UPDATE THIS after deploying onesignal-worker.js — shown in the
-// Cloudflare dashboard right after deployment, same pattern as the
-// Gemini Worker URL.
 const NOTIFICATION_WORKER_URL = "https://onesignal-notify.eldefonsojrletigio.workers.dev";
 
-// "Rejected" folds into the Cancelled tab (both mean the order never
-// proceeded); "Undelivered" gets its own tab since it's a distinct
-// state your staff need to follow up on.
 const TAB_STATUS_MAP = {
   all: null,
   pending: ["pending"],
@@ -75,9 +51,6 @@ let currentRole = "employee";
 let currentIsDriver = false; // drivers only get the delivery buttons
 let pendingUndeliverableOrderId = null;
 
-// ====================================================================
-// CHUNK 1 — WAIT FOR THE SHARED SIDEBAR (auth guard lives there)
-// ====================================================================
 let targetOrderId = new URLSearchParams(window.location.search).get("orderId");
 let hasHandledTargetOrder = false;
 
@@ -86,9 +59,6 @@ document.addEventListener("sidebar:ready", (event) => {
   currentIsDriver = Boolean(event.detail.isDriver);
 
   if (currentIsDriver) {
-    // Riders only deal with deliveries that are approved, on the way or done:
-    // "Pending" (the admin reviews those) and "Ready for Pickup" (store pickup
-    // orders) are not theirs, and neither is the pickup/delivery filter.
     document.querySelectorAll('.order-status-card[data-status="pending"], .order-status-card[data-status="ready_for_pickup"]')
       .forEach((card) => { card.style.display = "none"; });
     const fulfillmentSelect = document.getElementById("orders-fulfillment-select");
@@ -105,22 +75,9 @@ document.addEventListener("sidebar:ready", (event) => {
   loadOrders();
 });
 
-// ====================================================================
-// CHUNK 2 — LOAD ORDERS
-// ====================================================================
-// Recent-only by default — an order history that grows forever would
-// otherwise mean this page gets slower every month, with no ceiling.
-// "Show older orders" switches to the full, unfiltered query on
-// demand, so anyone tracking down an old order can still find it —
-// it's just not downloaded automatically on every single page visit.
 const RECENT_WINDOW_DAYS = 7;
 const DRIVER_RECENT_DAYS = 2;
-// An order still "in progress" after this long is almost certainly leftover
-// (test data, or one nobody closed). It is hidden by default and still
-// reachable with "Show older orders".
 const STUCK_ORDER_DAYS = 30;
-// Orders that still need someone to act, whatever their age: they are always
-// loaded, so a stuck order older than the window never disappears.
 const ACTIVE_STATUSES = ["pending", "approved", "ready_for_pickup", "on_the_way"];
 let showingFullHistory = false;
 let hiddenUnfinishedCount = 0;
@@ -166,8 +123,6 @@ function scheduleMerge() {
     orderParts.forEach((part) => part.forEach((order, id) => {
       if (!showingFullHistory) {
         const ts = order.createdAt?.toMillis?.() || 0;
-        // A driver always sees every delivery that is approved or on the way, however old the order
-        // is: the admin may approve an old order, and the 2-day window must not hide it from them.
         const keep = !ts || ts >= recentCutoff || (currentIsDriver && ["approved", "on_the_way"].includes(order.status));
         if (!keep) {
           // Older than the window: hidden, but counted if it was never finished, so the button can say so.
@@ -193,16 +148,10 @@ function loadOrders() {
   orderParts.clear();
   const ordersRef = collection(db, ORDERS_COLLECTION);
 
-  // Real-time, like before: a staff action here or a customer-side change
-  // from the mobile app shows up without reloading. What changed is how much
-  // is downloaded: only recent orders plus the ones still in progress, and
-  // drivers get just their own deliveries.
   if (currentIsDriver) {
     watchOrders("active", query(ordersRef, where("status", "in", ["approved", "on_the_way"])), true);
     const uid = auth.currentUser?.uid;
     if (uid) {
-      // Needs a composite index (driverUid + createdAt). If it is missing the
-      // driver still sees their open deliveries; only their finished ones drop off.
       watchOrders("mine", query(ordersRef, where("driverUid", "==", uid), where("createdAt", ">=", daysAgoTimestamp(DRIVER_RECENT_DAYS))), false);
     }
     return;
@@ -231,16 +180,8 @@ function updateShowOlderButton() {
     : `Show older orders (beyond the last ${RECENT_WINDOW_DAYS} days)${hiddenUnfinishedCount ? ` \u2014 ${hiddenUnfinishedCount} older order${hiddenUnfinishedCount === 1 ? " is" : "s are"} still unfinished` : ""}`;
 }
 
-// No longer needed for its own sake — the onSnapshot listener above
-// already catches every change (including the ones this function used
-// to be called after) automatically and near-instantly. Kept as a
-// harmless no-op rather than removing every call site, so nothing
-// breaks if it's called from somewhere.
 async function reloadAfterAction() {}
 
-// ====================================================================
-// CHUNK 3 — STATUS COUNT / TAB CARDS
-// ====================================================================
 function updateCounts() {
   document.getElementById("count-all").textContent = allOrders.length;
   Object.entries(TAB_STATUS_MAP).forEach(([tab, statuses]) => {
@@ -326,18 +267,12 @@ function buildGroupHeaderRow(label, isExpanded) {
     </td>
   `;
   row.addEventListener("click", () => {
-    // True accordion — only one group open at a time, matching "click
-    // September, only September shows" rather than independently
-    // toggleable sections.
     expandedGroupLabel = expandedGroupLabel === label ? null : label;
     render();
   });
   return row;
 }
 
-// Computes which time-period bucket an order belongs to, based on the
-// current groupBy setting — used to insert section headers ("August
-// 2026", "Week of Aug 18, 2026", etc.) between orders in the table.
 function getGroupLabel(order) {
   const millis = order.createdAt?.toMillis?.();
   if (!millis) return "Unknown date";
@@ -377,18 +312,12 @@ function wireSort() {
   });
 }
 
-// ====================================================================
-// CHUNK 4 — RENDER TABLE
-// ====================================================================
 function render() {
   document.getElementById("cancelled-subtabs").hidden = activeTab !== "cancelled";
   loadRiderNames(); // real rider names; redraws once if any arrive
   startRiderLocationListener(); // live rider pins (follows the visible orders)
   syncRiderSharing(); // riders: start/stop sharing their location for their deliveries
 
-  // Remember which order was expanded before rebuilding the table, so
-  // a live update elsewhere doesn't silently collapse whatever the
-  // admin is currently looking at.
   const previouslyExpandedOrderId = expandedOrderMainRow?.dataset.orderId || null;
   expandedOrderDetail = null;
   expandedOrderMainRow = null;
@@ -420,10 +349,6 @@ function render() {
     if (groupBy !== "none") {
       currentGroupLabel = getGroupLabel(order);
       if (currentGroupLabel !== lastGroupLabel) {
-        // Nothing expanded yet (grouping was just turned on, or this
-        // is the first render since) — default to opening the first
-        // group encountered, rather than starting with everything
-        // collapsed and nothing visible at all.
         if (expandedGroupLabel === undefined) expandedGroupLabel = currentGroupLabel;
         tbody.appendChild(buildGroupHeaderRow(currentGroupLabel, currentGroupLabel === expandedGroupLabel));
         lastGroupLabel = currentGroupLabel;
@@ -470,12 +395,6 @@ function render() {
   startRiderLocationListener(); // now that the open row is known
 }
 
-// Arrived here from a notification click ("New order from Elde —
-// ₱855.00") — jump straight to that specific order: switch to the
-// "All" tab (guarantees it's actually in the rendered table
-// regardless of its current status), scroll it into view, expand its
-// detail, and highlight it. Runs once, not on every subsequent
-// real-time re-render.
 function handleTargetOrderJump() {
   if (!targetOrderId || hasHandledTargetOrder) return;
 
@@ -498,25 +417,16 @@ function handleTargetOrderJump() {
       if (wanted !== ordersPage) { ordersPage = wanted; render(); return; }
     }
     if (!showingFullHistory && !currentIsDriver) {
-      // Not found yet, but might just be older than the recent
-      // window — expand to full history and let the next render
-      // retry, rather than assuming it's genuinely missing.
       showingFullHistory = true;
       updateShowOlderButton();
       loadOrders();
       return;
     }
-    // Genuinely isn't in the list even with full history (deleted,
-    // or the ID was stale) — stop trying rather than retrying forever.
     hasHandledTargetOrder = true;
     targetOrderId = null;
     return;
   }
 
-  // If grouping is active and this order's group is currently
-  // collapsed, its row exists in the DOM but is hidden — expand that
-  // specific group first, then let the next render's pass find it
-  // visible and proceed normally.
   if (targetRow.hidden && groupBy !== "none") {
     const targetOrder = allOrders.find((o) => o.id === targetOrderId);
     if (targetOrder) {
@@ -539,9 +449,6 @@ function handleTargetOrderJump() {
   setTimeout(() => targetRow.classList.remove("is-highlighted-from-notification"), 3000);
 }
 
-// Orders from before "Pick Up In Store" have no fulfillmentType at all —
-// those are deliveries. Pickup orders also skip the delivery-only fields
-// (map pin, distance, delivery branch), so nothing below may assume those exist.
 function isPickupOrder(order) {
   return order.fulfillmentType === "pickup";
 }
@@ -565,24 +472,6 @@ function safeMapUrl(value) {
   }
 }
 
-// ====================================================================
-// DELIVERY ADDRESS MAP
-// ----------------------------------------------------------------
-// Orders only store a plain text address (whatever the customer
-// typed or picked from their saved addresses in the mobile app,
-// landmarks included as free text) — no actual coordinates. So this
-// works by ADDRESS SEARCH, not by plotting a known exact point;
-// accuracy depends on how specific/well-formed the customer's typed
-// address (and any landmark mentioned in it) actually is.
-//
-// Uses Google's plain address-search embed URL, which — unlike the
-// official Maps Embed API — doesn't require an API key or any setup.
-// HONEST NOTE: this is a long-standing but technically unofficial
-// pattern; Google could change it without notice. The "Open in
-// Google Maps" link below is a reliable fallback either way, and
-// works the exact same way regardless.
-// ====================================================================
-// Reads a saved coordinate (number, or numeric string) and checks its range.
 function toCoord(value, limit) {
   const n = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
   return typeof n === "number" && Number.isFinite(n) && Math.abs(n) <= limit ? n : null;
@@ -592,10 +481,6 @@ function buildAddressMap(order) {
   const wrap = document.createElement("div");
   wrap.className = "order-detail__map-wrap";
 
-  // Exact pin first: the customer app saves deliveryLat/deliveryLng, so the
-  // embedded map is centred on (and marks) those coordinates directly. The
-  // typed address is only searched when no coordinates were saved (older
-  // orders, or addresses that were never re-pinned).
   const lat = toCoord(order.deliveryLat, 90);
   const lng = toCoord(order.deliveryLng, 180);
   const hasCoords = lat !== null && lng !== null;
@@ -609,8 +494,6 @@ function buildAddressMap(order) {
   iframe.title = "Delivery location map";
   wrap.appendChild(iframe);
 
-  // Link below the map: the customer's own pin link when present, otherwise
-  // a Google Maps link built from the coordinates, otherwise from the text.
   const pinUrl = safeMapUrl(order.deliveryMapUrl);
   const link = document.createElement("a");
   link.href = pinUrl || `https://www.google.com/maps/search/?api=1&query=${encoded}`;
@@ -623,12 +506,6 @@ function buildAddressMap(order) {
   return wrap;
 }
 
-// Fire-and-forget — a failed push notification shouldn't block or
-// undo the actual order status change, which already succeeded in
-// Firestore by the time this runs. Requires the Flutter app to have
-// called OneSignal.login(firebaseUid) after the customer signed in —
-// without that link on the mobile side, this will run without error
-// but the notification won't reach anyone yet.
 async function sendOrderNotification(order, title, message) {
   if (!order.userId) {
     console.warn("Order has no userId on file — skipping push notification.");
@@ -740,8 +617,6 @@ function buildOrderDetailRow(order) {
   const pickup = isPickupOrder(order);
 
   if (pickup) {
-    // Store pickup: no address, pin or map. (customerAddress may be empty or
-    // stale on these orders, so it is deliberately not shown.)
     const pickupLine = document.createElement("p");
     pickupLine.className = "order-detail__address";
     const pickupText = document.createElement("span");
@@ -772,8 +647,6 @@ function buildOrderDetailRow(order) {
     }
     addressLine.appendChild(addressText);
 
-    // Exact pin from the customer app (only on orders where the delivery fee
-    // was calculated). Hidden entirely when missing or not a real web link.
     const mapUrl = safeMapUrl(order.deliveryMapUrl);
     if (mapUrl) {
       const mapLink = document.createElement("a");
@@ -885,26 +758,11 @@ function buildOrderDetailRow(order) {
   return row;
 }
 
-// ====================================================================
-// CHUNK 5 — STAFF ACTIONS (per status)
-// ----------------------------------------------------------------
-// Every action confirms first (in-app dialog, not window.confirm),
-// then writes directly to Firestore. No customer push notification
-// fires from here — see the CHUNK 0 note.
-// ====================================================================
 function buildActionsForOrder(order) {
   const wrap = document.createElement("div");
   wrap.className = "orders-table__action-group";
 
-  // Who can do what:
-  //   Admin             approve / reject only
-  //   Driver            delivery steps only (on the way, delivered, undeliverable)
-  //   Regular employee  view only — no order actions at all
   const isAdminUser = currentRole === "admin";
-  // Pickup orders have their own steps, and only the admin runs them:
-  //   approved -> "Mark Ready for Pickup" (customer gets a push)
-  //   ready_for_pickup -> "Mark Picked Up" (completes the order, marks it paid)
-  // They never use the driver's delivery steps.
   if (isPickupOrder(order) && ["approved", "ready_for_pickup", "on_the_way"].includes(order.status)) {
     if (!isAdminUser) {
       if (!currentIsDriver) {
@@ -931,8 +789,6 @@ function buildActionsForOrder(order) {
   const allowed = order.status === "pending" ? isAdminUser : currentIsDriver;
 
   if (actionable && !allowed) {
-    // Nothing to click for this person. Drivers see a blank cell on pending
-    // orders (the admin approves first); everyone else gets a small note.
     if (!currentIsDriver) {
       const note = document.createElement("span");
       note.className = "orders-table__view-only";
@@ -956,10 +812,6 @@ function buildActionsForOrder(order) {
     rejectNote.textContent = order.rejectReason;
     wrap.appendChild(rejectNote);
   } else if (order.status === "cancelled" && order.cancelReason) {
-    // Cancelled orders have no actions left to take — this column
-    // would otherwise sit empty, so the customer's own cancellation
-    // reason goes here instead, visible immediately without needing
-    // to expand the row.
     const reasonNote = document.createElement("span");
     reasonNote.className = "orders-table__cancel-reason";
     reasonNote.textContent = order.cancelReason;
@@ -993,7 +845,6 @@ async function handleApprove(order) {
   sendOrderNotification(order, "Order Approved", `Your order #${shortOrderId(order.id)} has been approved!`);
   await reloadAfterAction();
 }
-
 
 // ---- Ready-made reasons (with "Other" for anything else) ----
 const REJECT_REASONS = [
@@ -1084,8 +935,6 @@ async function handleConfirmReject() {
     await updateDoc(doc(db, ORDERS_COLLECTION, order.id), { status: "rejected", rejectReason: reason });
     sendOrderNotification(order, "Order Rejected", `Your order #${shortOrderId(order.id)} was rejected. Reason: ${reason}`);
 
-    // The customer app took these items out of stock when the order was placed;
-    // a rejected order gives them back (once). A failure here never blocks the rejection.
     if (order.userId) {
       try {
         await restockOrder(order.userId, order.id);
@@ -1110,10 +959,6 @@ async function handleConfirmReject() {
   if (stockNote) await confirmDialog(stockNote, { title: "Stock not returned", confirmLabel: "OK" });
 }
 
-// Records WHICH driver account handled the delivery, so the admin can see
-// who it was. The driver's own sign-in is the record (the rules require the
-// uid/email to match the person writing it, so it can't be faked).
-// The employee profile keeps the real name in "firstName" (what the greeting uses).
 function profileName(snap) {
   if (!snap.exists()) return "";
   const data = snap.data();
@@ -1124,9 +969,6 @@ function profileName(snap) {
 async function currentDriverStamp() {
   const user = auth.currentUser;
   if (!user) return {};
-  // The real name lives on the employee profile (the same one the greeting
-  // uses). The sign-in's own display name can be a username, so it is only
-  // the fallback.
   let name = "";
   try {
     const snap = await getDoc(doc(db, "employees", user.uid));
@@ -1141,19 +983,6 @@ async function currentDriverStamp() {
   };
 }
 
-
-// ====================================================================
-// RIDER LOCATION
-// ----------------------------------------------------------------
-// Two things, both written by the rider's own phone:
-//  1) Snapshots saved on the order — where the rider was when they tapped
-//     "On the Way" (onTheWayLocation) and when they finished the delivery
-//     (deliveredLocation). Works every time, no background tracking needed.
-//  2) Live location while a delivery is on the way (driverLocations/{orderId}),
-//     sent every ~30 s. A website can only do this while the page is open and
-//     the screen is on — browsers pause it in the background — so the admin
-//     sees "Updated … ago" and a warning when the pin stops moving.
-// ====================================================================
 const LOCATIONS_COLLECTION = "driverLocations";
 const SHARE_INTERVAL_MS = 30000; // each location update is a database write, and every open viewer reads it
 const STALE_AFTER_MS = 2 * 60 * 1000;
@@ -1169,9 +998,6 @@ function positionToPlain(pos) {
   };
 }
 
-// One-shot reading; resolves null if the phone can't or won't share.
-// A recent network/Wi-Fi fix (up to 2 minutes old) is fine for these one-off snapshots and comes back
-// at once; waiting for a fresh high-accuracy GPS fix could hold up "On the way" for several seconds.
 function readPosition(timeoutMs = 3000) {
   return new Promise((resolve) => {
     if (!navigator.geolocation) return resolve(null);
@@ -1209,8 +1035,6 @@ let lastWriteAt = 0;
 let shareBarEl = null;
 const sharedOrderIds = new Set();
 
-// Riders no longer hide their live location from other accounts: admins and
-// staff can always see it. (hiddenFrom is still written, always empty.)
 const hiddenFromUids = new Set();
 try { sessionStorage.removeItem("almares_loc_hidden"); } catch (error) { /* ignore */ }
 
@@ -1303,15 +1127,11 @@ function stopLocationWatch() {
   hideShareBar();
 }
 
-// Called on every render: starts/stops sharing to match this rider's open
-// deliveries, and removes the live pin of any delivery that has finished.
 function syncRiderSharing() {
   if (!currentIsDriver) return;
   const active = myActiveDeliveries();
   const activeIds = new Set(active.map((o) => o.id));
 
-  // Warm up the location once while this rider has approved deliveries waiting, so the position is
-  // already known (and the permission already answered) when they tap "On the way".
   if (!locationWarmedUp && allOrders.some((o) => o.status === "approved" && !isPickupOrder(o))) {
     locationWarmedUp = true;
     readPosition(8000);
@@ -1334,10 +1154,6 @@ function syncRiderSharing() {
   if (hadNew) writeLiveLocations(true);
 }
 
-// ---- Viewer side: see where the rider is ----
-// One listener per on-the-way delivery (not the whole collection): the rules
-// can hide a rider's location from specific accounts, and a collection-wide
-// query would be rejected outright if even one document were hidden.
 const locationUnsubs = new Map();
 let locationTickerStarted = false;
 
@@ -1353,8 +1169,6 @@ function startRiderLocationListener() {
       .filter((o) => o.status === "on_the_way" && !isPickupOrder(o))
       // A driver only needs their own pin, not every rider's.
       .filter((o) => !currentIsDriver || o.driverUid === auth.currentUser?.uid)
-      // Only the order whose details are open is watched: every location update is one read per
-      // watcher, so watching every delivery in the background would cost reads for nothing.
       .filter((o) => o.id === expandedOrderMainRow?.dataset.orderId)
       .map((o) => o.id)
   );
@@ -1504,8 +1318,6 @@ function fillRiderTrack(box, order) {
   link.textContent = "Open in Google Maps ↗";
 }
 
-// What the admin sees as the rider: the profile name when we have it, else
-// the name saved on the order, else the email (very old orders).
 const riderNamesByUid = new Map(); // uid -> real name from the employee profile
 const riderLookupsStarted = new Set();
 
@@ -1517,8 +1329,6 @@ function riderLabel(order) {
     || "";
 }
 
-// Looks up the real names of any riders on the loaded orders, once each,
-// and redraws the table when new names arrive.
 async function loadRiderNames() {
   const uids = [...new Set(allOrders.map((o) => o.driverUid).filter(Boolean))]
     .filter((uid) => !riderLookupsStarted.has(uid));
@@ -1567,8 +1377,6 @@ async function handleMarkOnTheWay(order) {
   await reloadAfterAction();
 }
 
-// Delivered is final: the order is marked delivered (and paid) right away.
-// No customer confirmation step and no countdown timer.
 async function handleMarkDelivered(order) {
   const isPaid = await confirmDialog(
     "Confirm whether the customer has paid for this order.",
@@ -1624,10 +1432,6 @@ async function handleMarkPickedUp(order) {
   await reloadAfterAction();
 }
 
-// ====================================================================
-// CHUNK 6 — MARK UNDELIVERABLE (needs a reason, so it's its own modal
-// rather than a simple confirm)
-// ====================================================================
 function openUndeliverableModal(order) {
   pendingUndeliverableOrderId = order.id;
   resetReasonPicker("undeliverable-reason-select", "undeliverable-reason");

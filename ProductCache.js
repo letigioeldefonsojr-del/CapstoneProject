@@ -1,20 +1,8 @@
+// product-cache — Shared cached product list.
+
 import { db } from "./firebase-config.js";
 import { collection, getDocs } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 
-// ====================================================================
-// SHARED PRODUCT CACHE
-// ----------------------------------------------------------------
-// getProducts() returns the whole products list, reading Firestore
-// only when it has to. Three layers, fastest first:
-//   1. memory      — instant, lasts while the page stays open
-//   2. IndexedDB   — survives page changes; has room for thousands of
-//                    products (sessionStorage's ~5 MB limit silently
-//                    failed once the catalog got big)
-//   3. Firestore   — the real read (costs one read per product)
-// Two callers asking at the same moment share ONE Firestore read.
-// Stock changes can take up to CACHE_TTL_MS to show on another page;
-// call invalidateProductsCache() after any write to force a fresh read.
-// ====================================================================
 const PRODUCTS_COLLECTION = "products";
 const CACHE_TTL_MS = 600000; // 10 minutes
 const DB_NAME = "almares_cache";

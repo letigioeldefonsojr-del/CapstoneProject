@@ -1,17 +1,5 @@
-// ====================================================================
-// DAILY SALES TALLY
-// ----------------------------------------------------------------
-// One small document per day ("salesDaily/2026-10-28") holding how many
-// units of each product were sold that day:
-//   { date: "2026-10-28", units: { <productId>: 14, <productId>: 3 } }
-//
-// Stock Monitoring reads these (at most one document per day) instead of
-// every individual sale line from the last 60 days, which would cost one
-// database read per line.
-//
-// The tally is written AFTER a sale has been saved and is never part of
-// the sale itself, so a problem here can never stop a checkout.
-// ====================================================================
+// sales-daily — Daily sales tally documents.
+
 import { db } from "./firebase-config.js";
 import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
 import { doc, setDoc, increment } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
@@ -31,8 +19,6 @@ export function dayKeyToMillis(key, hour = 0) {
   return new Date(y, (m || 1) - 1, d || 1, hour, 0, 0, 0).getTime();
 }
 
-// Adds the units sold in one sale to today's tally. `movements` are entries
-// with { productId, previousStock, newStock } (units sold = previous - new).
 export function recordSaleTally(movements, when = new Date()) {
   // With Supabase the sale record and the stock log save the tally themselves.
   if (SUPABASE_ENABLED) return Promise.resolve();

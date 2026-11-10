@@ -1,18 +1,5 @@
-// ====================================================================
-// PROMOTION PUSH (shared helper)
-// ----------------------------------------------------------------
-// Sends a push to every customer who has "Promotions & Offers" turned on
-// (they carry the OneSignal tag promotions_enabled = "true"). The call
-// goes through the Cloudflare Worker, which holds the OneSignal key and
-// checks that the caller is a signed-in staff account.
-//
-// Usage anywhere on the admin site:
-//   import { sendPromotionPush } from "./PromotionPush.js";
-//   await sendPromotionPush("🔥 Milk is now 10% off!");
-//
-// Never throws — a failed push must not undo the save that triggered it.
-// Returns { ok: true } or { ok: false, error }.
-// ====================================================================
+// promo-push — Push notifications for promotions to opted-in customers.
+
 import { auth } from "./firebase-config.js";
 
 // Same Worker that already sends order-status pushes.
@@ -48,12 +35,6 @@ export async function sendPromotionPush(message, { title } = {}) {
   }
 }
 
-// Sends one push per item when there are only a few, otherwise a single
-// summary — so applying a discount to 80 products doesn't send 80 pushes.
-//   items:       array of anything
-//   maxIndividual: how many separate pushes are acceptable
-//   one(item):   message for a single item
-//   many(items): one summary message for the whole group
 export async function sendPromotionPushes(items, { maxIndividual = 3, one, many }) {
   if (!items || items.length === 0) return { ok: true, sent: 0 };
 

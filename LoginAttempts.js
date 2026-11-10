@@ -1,29 +1,7 @@
-import { guardCall } from "./LoginGuard.js?v=20261030d";
+// lockout — Escalating login lockout tracking and unlocking.
 
-// ====================================================================
-// LOGIN ATTEMPT TRACKING / ESCALATING LOCKOUT
-// ----------------------------------------------------------------
-// Tracked by whatever identifier the person actually typed (email for
-// Administrator, username for Employee) and checked BEFORE attempting
-// Firebase sign-in, so a locked-out attempt never even reaches Firebase
-// Auth.
-//
-// Schedule: the first 6 failures show a plain error, then a 30s wait
-// after the next failure, doubling each time (60s, 120s, 240s...). After
-// more than 15 total failures the account is locked outright until an
-// administrator unlocks it. 15 minutes without a failure starts the
-// count again.
-//
-// The counters now live on the server (the login-guard function), not in
-// Firestore: the browser can't read, edit or delete them any more, so the
-// lockout can't be skipped by wiping a record. If the guard can't be
-// reached, checking fails open (the real password check still has to
-// pass) - a broken check shouldn't lock legitimate people out.
-//
-// Honest limit that remains: this stops attempts made through THIS web
-// app's login page. Someone calling Firebase Authentication directly is
-// held back only by Firebase's own built-in throttling.
-// ====================================================================
+import { guardCall } from "./LoginGuard.js?v=20261030c";
+
 const LOCKED_MESSAGE = "This account has been locked after too many failed attempts. Contact an administrator to unlock it.";
 const FREE_ATTEMPTS = 6;
 
@@ -69,14 +47,10 @@ export async function recordFailedAttempt(identifier) {
   }
 }
 
-// After a good login: clears the signed-in person's OWN records (the
-// server works out which they are from their login, not from what was typed).
 export async function resetAttempts() {
   try {
     await guardCall("reset", {}, { signedIn: true });
   } catch (error) {
-    // Non-fatal - a leftover record just means the next failed attempt
-    // (if any) starts counting from whatever was there.
     console.error("Couldn't reset login attempt record:", error);
   }
 }

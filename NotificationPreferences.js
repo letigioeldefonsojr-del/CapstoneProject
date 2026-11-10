@@ -1,16 +1,8 @@
+// notif-prefs — Per-user notification preferences stored in Firestore.
+
 import { db } from "./firebase-config.js";
 import { doc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 
-// ====================================================================
-// NOTIFICATION PREFERENCES
-// ----------------------------------------------------------------
-// Per-person, stored directly on their own admins/{uid} or
-// employees/{uid} document under notificationPreferences — never
-// affects anyone else's view. Missing/undefined defaults to "on" for
-// both categories, so existing accounts (created before this feature
-// existed) behave exactly as they always have until someone actually
-// opens Settings and changes something.
-// ====================================================================
 const DEFAULTS = { stockAlerts: true, orderNotifications: true };
 
 export async function getPreferences(uid, role) {

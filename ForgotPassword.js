@@ -1,27 +1,15 @@
-import { guardCall } from "./LoginGuard.js?v=20261030d";
+// forgot-password — Find an account and send a password reset email.
 
-// ====================================================================
-// FORGOT PASSWORD — search first, then reset
-// ----------------------------------------------------------------
-// Step 1: search by username, phone number, or (partial) name — both
-// admins and employees collections are checked. Step 2: shows
-// matching accounts with the email masked (e.g. "jo***@gm***.com")
-// so the real owner can recognize their own account without fully
-// exposing it to anyone just guessing. Clicking an account sends the
-// actual reset email to its real (unmasked) address.
-//
-// Honest privacy note: letting people search accounts by name has a
-// real tradeoff — it lets someone probe for who has an account here,
-// even with masking. That's a deliberate choice matching what was
-// asked for; worth knowing it's not zero-risk.
-//
-// Everything sensitive now happens on the server (the login-guard
-// function): it searches the accounts, shows only a MASKED email to the
-// browser, looks up the real address itself and asks Firebase to send
-// the reset link (to the same custom ResetPassword.html page as before,
-// which still needs this domain under Authentication → Settings →
-// Authorized domains). The 5-per-hour limit per address is enforced there too.
-// ====================================================================
+import { auth, db } from "./firebase-config.js";
+import { sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
+import { collection, getDocs } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { checkResetEmailAllowed, recordResetEmailSent } from "./ResetEmailLimiter.js";
+
+const RESET_PASSWORD_URL = "https://capstoneproject-403.pages.dev/ResetPassword.html";
+const actionCodeSettings = {
+  url: RESET_PASSWORD_URL,
+  handleCodeInApp: true
+};
 
 export function promptForgotPassword() {
   const overlay = document.createElement("div");
@@ -106,12 +94,7 @@ export function promptForgotPassword() {
       renderResults(results);
     } catch (error) {
       console.error("Couldn't search accounts:", error);
-      showStatus(
-        String(error?.message) === "slow_down"
-          ? "Too many searches. Please wait a moment and try again."
-          : "Something went wrong searching. Please try again.",
-        "error"
-      );
+      showStatus("Something went wrong searching. Please try again.", "error");
     } finally {
       footerBtn.disabled = false;
       footerBtn.textContent = "Search";
@@ -134,7 +117,7 @@ export function promptForgotPassword() {
       `;
       item.querySelector(".fp-account-result__role").textContent = account.role === "admin" ? "Admin" : "Employee";
       item.querySelector(".fp-account-result__name").textContent = account.name || "(no name on file)";
-      item.querySelector(".fp-account-result__email").textContent = account.maskedEmail || "No email on file";
+      item.querySelector(".fp-account-result__email").textContent = account.email ? maskEmail(account.email) : "No email on file";
 
       item.addEventListener("click", () => handleAccountSelected(account));
       resultsList.appendChild(item);
@@ -163,26 +146,32 @@ export function promptForgotPassword() {
   async function handleAccountSelected(account) {
     hideStatus();
 
-    if (!account.maskedEmail) {
+    if (!account.email) {
       showStatus("This account has no email on file. Contact an administrator.", "error");
+      return;
+    }
+
+    const rateStatus = await checkResetEmailAllowed(account.email);
+    if (!rateStatus.allowed) {
+      showStatus(rateStatus.message, "error");
       return;
     }
 
     resultsList.innerHTML = "";
     searchField.hidden = true;
     footerBtn.hidden = true;
-    introEl.textContent = `Sending a reset link to ${account.maskedEmail}...`;
+    introEl.textContent = `Sending a reset link to ${maskEmail(account.email)}...`;
 
     try {
-      await guardCall("send_reset", { role: account.role, id: account.id });
+      await sendPasswordResetEmail(auth, account.email, actionCodeSettings);
+      await recordResetEmailSent(account.email);
       introEl.textContent = "Reset link sent!";
-      showStatus(`Check the inbox for ${account.maskedEmail} — click the link there to set a new password.`, "success");
+      showStatus(`Check the inbox for ${maskEmail(account.email)} — click the link there to set a new password.`, "success");
     } catch (error) {
       console.error("Couldn't send reset email:", error);
-      showStatus(resetErrorMessage(error), "error");
+      showStatus("Something went wrong sending the reset link. Please try again.", "error");
       searchField.hidden = false;
       footerBtn.hidden = false;
-      introEl.textContent = "Enter your email, username, phone number, or name to find your account.";
     }
   }
 
@@ -198,18 +187,74 @@ export function promptForgotPassword() {
   searchInput.focus();
 }
 
-// ---- Account search: done on the server; only masked emails come back ----
 async function searchAccounts(term) {
-  const result = await guardCall("find_accounts", { term });
-  return result.accounts || [];
+  const normalizedTerm = term.trim().toLowerCase();
+  const normalizedPhone = term.replace(/\D/g, "");
+
+  const [adminsSnap, employeesSnap] = await Promise.all([
+    getDocs(collection(db, "admins")),
+    getDocs(collection(db, "employees"))
+  ]);
+
+  const results = [];
+
+  adminsSnap.forEach((docSnap) => {
+    const data = docSnap.data();
+    if (matchesSearch(data, data.name, normalizedTerm, normalizedPhone)) {
+      results.push({
+        id: docSnap.id,
+        role: "admin",
+        name: data.name,
+        email: data.email
+      });
+    }
+  });
+
+  employeesSnap.forEach((docSnap) => {
+    const data = docSnap.data();
+    if (matchesSearch(data, data.firstName, normalizedTerm, normalizedPhone)) {
+      results.push({
+        id: docSnap.id,
+        role: "employee",
+        name: data.firstName,
+        email: data.email
+      });
+    }
+  });
+
+  return results;
 }
 
-function resetErrorMessage(error) {
-  const code = String(error?.message || "");
-  if (code === "limit") {
-    return "You've reached the limit of 5 reset emails for this account. Try again in a while.";
-  }
-  if (code === "slow_down") return "Too many attempts. Please wait a moment and try again.";
-  if (code === "no_email") return "This account has no email on file. Contact an administrator.";
-  return "Something went wrong sending the reset link. Please try again.";
+function matchesSearch(data, nameValue, normalizedTerm, normalizedPhone) {
+  const username = (data.username || "").toLowerCase();
+  const email = (data.email || "").toLowerCase();
+  const phone = (data.phone || "").replace(/\D/g, "");
+  const name = (nameValue || "").toLowerCase();
+
+  if (username && username === normalizedTerm) return true;
+  if (email && email === normalizedTerm) return true;
+  if (normalizedPhone && phone && phone === normalizedPhone) return true;
+  if (name && normalizedTerm && name.includes(normalizedTerm)) return true;
+  return false;
+}
+
+function maskEmail(email) {
+  const atIndex = email.indexOf("@");
+  if (atIndex === -1) return email;
+
+  const local = email.slice(0, atIndex);
+  const domain = email.slice(atIndex + 1);
+
+  const maskedLocal = local.length <= 2
+    ? local[0] + "*"
+    : local.slice(0, 2) + "*".repeat(Math.max(local.length - 2, 1));
+
+  const dotIndex = domain.indexOf(".");
+  const domainName = dotIndex === -1 ? domain : domain.slice(0, dotIndex);
+  const domainRest = dotIndex === -1 ? "" : domain.slice(dotIndex);
+  const maskedDomainName = domainName.length <= 2
+    ? domainName[0] + "*"
+    : domainName.slice(0, 2) + "*".repeat(Math.max(domainName.length - 2, 1));
+
+  return `${maskedLocal}@${maskedDomainName}${domainRest}`;
 }

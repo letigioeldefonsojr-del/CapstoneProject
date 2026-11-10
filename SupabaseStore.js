@@ -1,15 +1,8 @@
+// supabase-store — Client for the store-api function (products, stock, sales).
+
 import { auth } from "./firebase-config.js";
 import { SUPABASE_URL, SUPABASE_KEY } from "./SupabaseConfig.js";
 
-// ====================================================================
-// SUPABASE STORE (talks to the store-api function)
-// ----------------------------------------------------------------
-// Every call sends the signed-in person's Firebase login; the function
-// checks it and that the person is staff. Products come back already
-// reshaped into the same form the Cashier has always used (prices as
-// "₱45.00", stockCount, flavors...), so the rest of the Cashier code
-// does not need to know where they came from.
-// ====================================================================
 const money = (n) => (n === null || n === undefined || Number.isNaN(Number(n)) ? null : `₱${Number(n).toFixed(2)}`);
 
 export class StoreError extends Error {
@@ -87,8 +80,6 @@ export async function getProductsByIds(ids) {
 // lines: [{ productId, variantName|null, qty }]
 const toItems = (lines) => lines.map((l) => ({ id: l.productId, variant: l.variantName ?? null, qty: l.qty }));
 
-// Deducts stock for a sale in one all-or-nothing step. Returns the stock
-// left per line (same order as the lines).
 export async function applySale(lines, ref) {
   const data = await call("apply_sale", { items: toItems(lines), ref: ref || null });
   return data.updated;
@@ -99,8 +90,6 @@ export async function restock(lines) {
   return data.updated;
 }
 
-// Admin rejected an online order: give back what the customer app took for it.
-// Safe to repeat - the server does it once per order. Resolves { ok, already? }.
 export async function restockOrder(userId, ref) {
   return await call("restock_order", { userId, ref });
 }
@@ -118,10 +107,6 @@ export async function linkBarcode(productId, barcode, variantName) {
   await call("link_barcode", { id: productId, barcode, variant: variantName || null });
 }
 
-// ----------------------------- INVENTORY -------------------------------
-// Edits are written with the app's usual field names. Firebase's special
-// values (timestamps, "delete this field", "server time") are turned into
-// plain data the function understands.
 function toWire(value) {
   if (value === null || value === undefined) return value;
   if (Array.isArray(value)) return value.map(toWire);
@@ -139,10 +124,6 @@ function toWire(value) {
   return value;
 }
 
-// Every product, fetched in pages of 1,000. (Supabase does not bill per row read.)
-// The first page and the total count are asked for at the same moment; once the
-// total is known the remaining pages are fetched together instead of one after
-// another. onFirstPage(products) lets the screen draw as soon as page 1 is in.
 const LIST_PAGE = 1000;
 
 export async function listAllProducts(onFirstPage) {
@@ -179,8 +160,6 @@ export async function listAllProducts(onFirstPage) {
   return pages.flat();
 }
 
-// A copy of the last list is kept in this browser so the page can draw at once
-// next time while the fresh list downloads. Best effort: any failure is ignored.
 const LIST_DB = "almares_inventory_list";
 function idb() {
   return new Promise((resolve, reject) => {
@@ -235,9 +214,6 @@ export async function stockSummary() {
   return { total: data.total, products: data.products.map(rowToProduct) };
 }
 
-// ----------------------------- SALES RECORDS ---------------------------
-// Rows come back in the same shape the pages already use from Firebase
-// (createdAt behaves like a Firebase timestamp: toMillis(), toDate()).
 function stamp(iso) {
   const ms = Date.parse(iso);
   return { seconds: Math.floor(ms / 1000), nanoseconds: 0, toMillis: () => ms, toDate: () => new Date(ms) };

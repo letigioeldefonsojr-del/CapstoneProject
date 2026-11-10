@@ -1,44 +1,8 @@
-// ====================================================================
-// GEMINI FORECAST INSIGHT — Cloudflare Worker
-// ----------------------------------------------------------------
-// Does the same job as the Firebase Cloud Function version, on
-// infrastructure you already have (Cloudflare) instead of requiring
-// Firebase's Blaze plan and its payment-method verification.
-//
-// The Gemini API key is stored as a Worker SECRET (set via the
-// Cloudflare dashboard or `wrangler secret put`) — it never appears
-// in this file or anywhere the browser can see it.
-//
-// HONEST TRADEOFF vs the Firebase Function version: this doesn't
-// verify the caller is a signed-in Firebase user (that would need
-// JWT verification logic, more setup). It's still far more secure
-// than putting the key in client JS — the key stays hidden either
-// way — but it's a slightly lower bar than the Firebase version.
-// Reasonable for a capstone's actual usage scale; worth tightening
-// later if this becomes a real production concern.
-// ====================================================================
-// Switched from gemini-2.5-flash (20 requests/day free tier) to the
-// Flash-Lite variant — confirmed directly from the account's own
-// live usage dashboard to have a 500/day limit instead, a 25x
-// increase with no billing needed. HONEST NOTE: the exact API model
-// ID string (as opposed to the human-readable name shown on that
-// dashboard) is my best-formed guess based on Google's usual naming
-// pattern — if this specific ID is wrong, the detailed error
-// passthrough already built into this Worker will surface exactly
-// that (a clear "model not found" style message, not a silent
-// failure), so it's immediately diagnosable either way.
+// gemini-worker — Cloudflare Worker that returns Gemini forecast insights.
+
 const GEMINI_MODEL = "gemini-3.1-flash-lite";
-// If the primary model's daily quota runs out (429/RESOURCE_EXHAUSTED
-// specifically — not any other kind of error), automatically retry
-// the exact same request against this model instead, which has its
-// own separate, untouched quota. Only kicks in for quota exhaustion —
-// a genuine bad-request or malformed-prompt error wouldn't be fixed
-// by switching models, so those still fail normally without wasting
-// a second API call.
 const GEMINI_FALLBACK_MODEL = "gemini-3.5-flash-lite";
 
-// Only your own site is allowed to call this — blocks random other
-// websites from using your Gemini quota via this endpoint.
 const ALLOWED_ORIGIN = "https://capstoneproject-403.pages.dev";
 
 export default {
@@ -48,9 +12,6 @@ export default {
     }
 
     if (request.method === "GET") {
-      // Bare visits (e.g. typing the URL directly) just confirm the
-      // Worker is alive and reachable — the real work only happens on
-      // POST, which is what Forecast.js actually sends.
       return jsonResponse({ status: "Worker is running. Send a POST request to get an AI insight." });
     }
 
@@ -77,10 +38,6 @@ export default {
     try {
       geminiResponse = await callGemini(GEMINI_MODEL, prompt, env);
 
-      // Only retry on quota exhaustion specifically — a malformed
-      // prompt or bad request would fail identically on the fallback
-      // model too, so retrying would just waste a second call for no
-      // benefit. 429 is genuinely quota-specific for this API.
       if (geminiResponse.status === 429) {
         console.warn(`${GEMINI_MODEL} hit its quota — retrying with ${GEMINI_FALLBACK_MODEL}.`);
         geminiResponse = await callGemini(GEMINI_FALLBACK_MODEL, prompt, env);
@@ -97,10 +54,6 @@ export default {
         detail: errorBody,
         status: geminiResponse.status,
         modelTried: usedModel,
-        // Diagnostic only — tells us exactly which Cloudflare data
-        // center/country handled this specific request, since Gemini's
-        // "location not supported" error depends on where the WORKER
-        // itself executes from, not where the end user is.
         workerLocation: { colo: request.cf?.colo, country: request.cf?.country }
       }, 502);
     }

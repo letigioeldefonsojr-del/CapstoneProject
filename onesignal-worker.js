@@ -1,40 +1,6 @@
-// ====================================================================
-// ONESIGNAL NOTIFICATION — Cloudflare Worker
-// ----------------------------------------------------------------
-// OneSignal's REST API Key is effectively a password for your OneSignal
-// account, so it lives here as a Worker secret (ONESIGNAL_REST_API_KEY)
-// and never in browser code. The admin site calls this Worker instead
-// of OneSignal directly.
-//
-// TWO MODES (decided by the JSON body):
-//
-// 1) ORDER STATUS PUSH — { targetUid, title, message }
-//    Targets one customer through OneSignal's External ID alias and
-//    attaches data.orderId (the order's Firestore doc id) when given.
-//    Requires the same staff sign-in as promotions (see below).
-//
-// 2) PROMOTION PUSH (new) — { type: "promotion", message, title? }
-//    Sent to every device tagged promotions_enabled = "true" (the
-//    customer app keeps that tag in sync with the customer's
-//    "Promotions & Offers" setting). Because this reaches EVERYONE, it
-//    requires a Firebase sign-in: the request must carry
-//    "Authorization: Bearer <Firebase ID token>" and that account must
-//    have an admins/{uid} or employees/{uid} document.
-//    `data` is { type: "promotion" } with NO orderId, so tapping the
-//    push opens the app's Home tab, not Orders.
-//
-// SETUP (Cloudflare dashboard → this Worker → Settings → Variables):
-//   ONESIGNAL_REST_API_KEY  (secret)  — already set for order pushes
-//   FIREBASE_API_KEY        (text)    — the public apiKey from
-//                                       firebase-config.js (used only to
-//                                       verify the caller's ID token)
-//
-// NOTE: the Authorization scheme is "Key", not "Basic" — OneSignal's own
-// 401 told us so when order pushes were first set up.
-// ====================================================================
+// onesignal-worker — Cloudflare Worker that sends OneSignal push notifications.
+
 const ONESIGNAL_APP_ID = "c3b735fb-99e4-49be-8f63-e8606b95d918";
-// Addresses the admin site is served from. The Worker echoes back the
-// caller's origin only when it is on this list.
 const ALLOWED_ORIGINS = [
   "https://capstoneproject-403.pages.dev",
   "https://capstoneproject.eldefonsojrletigio.workers.dev"
@@ -79,10 +45,6 @@ async function handleOrderPush(request, env, body) {
     return jsonResponse({ error: "Invalid message." }, 400);
   }
 
-  // Order updates are sent by staff from the Orders page, so require the
-  // same staff sign-in as promotions — otherwise anyone could push fake
-  // order updates to any customer.
-  // Drivers may send order-status pushes (that's their job).
   const auth = await verifyStaff(request, env, { allowDriver: true });
   if (!auth.ok) return jsonResponse({ error: auth.error }, auth.status);
 
@@ -92,8 +54,6 @@ async function handleOrderPush(request, env, body) {
     headings: { en: title || DEFAULT_TITLE },
     contents: { en: message }
   };
-  // The customer app reads data.orderId to open that exact order when the
-  // notification is tapped. Value = the order's Firestore document id.
   if (typeof orderId === "string" && orderId.trim()) {
     payload.data = { orderId: orderId.trim() };
   }
@@ -126,10 +86,6 @@ async function handlePromotion(request, env, body) {
   });
 }
 
-// Checks the Firebase ID token, then that the account is staff.
-// Firestore REST is called WITH the caller's own ID token: admins/ and
-// employees/ are no longer publicly readable, but a signed-in staff
-// member may read their OWN record, which is all this check needs.
 async function verifyStaff(request, env, { allowDriver = false } = {}) {
   const header = request.headers.get("Authorization") || "";
   const idToken = header.startsWith("Bearer ") ? header.slice(7).trim() : "";

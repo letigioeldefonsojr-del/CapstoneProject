@@ -1,16 +1,5 @@
-// ====================================================================
-// AUTOFILL GUARD
-// ----------------------------------------------------------------
-// Browsers (Chrome especially) fill a saved login into the page the
-// moment it opens. That puts a password on screen with nobody asking
-// for it. This keeps those boxes empty until the person actually
-// interacts with them:
-//   - anything that appears BEFORE they click/tap/type in one of the
-//     boxes is cleared;
-//   - once they click into a box, the browser's suggestion list shows
-//     and picking a saved login fills the boxes normally.
-// Pass the ids of every box in one form (username + password).
-// ====================================================================
+// autofill — Stops the browser from auto-filling saved logins into the wrong fields.
+
 export function guardAutofill(ids) {
   const inputs = ids.map((id) => document.getElementById(id)).filter(Boolean);
   if (inputs.length === 0) return;
@@ -32,8 +21,6 @@ export function guardAutofill(ids) {
     });
   });
 
-  // Autofill can land a moment after load, and not every browser fires
-  // an event for it, so sweep a few times as well.
   [0, 100, 300, 700, 1500, 3000].forEach((ms) => setTimeout(clearAll, ms));
   window.addEventListener("pageshow", clearAll);
 }

@@ -1,7 +1,5 @@
-// ====================================================================
-// PAGER: "Rows per page [50]   1–50 of 128   <  >"
-// Shared by the Orders and Sales pages.
-// ====================================================================
+// pager — Rows-per-page pager shared by Orders and Sales.
+
 export const PAGE_SIZES = [25, 50, 100];
 
 export function pageSlice(items, page, perPage) {

@@ -1,3 +1,5 @@
+// dashboard — Dashboard page: totals, charts, preferences, rider location bar.
+
 import { db } from "./firebase-config.js";
 import {
   collection, getDocs, getCountFromServer, query, where, doc, getDoc, setDoc, deleteDoc, serverTimestamp, Timestamp
@@ -10,21 +12,9 @@ import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
 import { sendPromotionPush } from "./PromotionPush.js";
 import { confirmDialog } from "./ConfirmDialog.js";
 
-// ====================================================================
-// CHUNK 0 — CONFIG
-// This page's own data needs only. Sidebar/auth/identity/clock/logout
-// all live in Sidebar.js now and are shared by every page.
-// ====================================================================
 const ORDERS_COLLECTION = "orders";
 const ORDER_DATE_FIELD = "createdAt";
 
-// ====================================================================
-// CHUNK 1 — WAIT FOR THE SHARED SIDEBAR TO FINISH ITS OWN SETUP
-// ----------------------------------------------------------------
-// Sidebar.js handles the auth guard and fires this event once a
-// signed-in user is confirmed and identity/clock are wired up. This
-// page's own content only starts loading after that.
-// ====================================================================
 document.addEventListener("sidebar:ready", (event) => {
   const { role, user, preferences } = event.detail;
   applyRoleVisibility(role);
@@ -35,14 +25,6 @@ document.addEventListener("sidebar:ready", (event) => {
   wireNotificationSettings(user.uid, role, preferences);
 });
 
-// ====================================================================
-// CHUNK 1B — ROLE-BASED QUICK ACTION
-// ----------------------------------------------------------------
-// Employees can't add products (that's Admin-only), so instead of
-// hiding this slot and leaving a gap in the grid, it becomes a
-// genuinely useful employee action: jump straight into Inventory
-// pre-filtered to what actually needs restocking.
-// ====================================================================
 function applyRoleVisibility(role) {
   const action = document.getElementById("qa-role-action");
   const icon = document.getElementById("qa-role-icon");
@@ -60,22 +42,12 @@ function applyRoleVisibility(role) {
   // Admin keeps the default markup already in Dashboard.html (Add Product).
 }
 
-// ====================================================================
-// CHUNK 2 — LIVE STATS (Total Products, Low Stock, Orders Today)
-// ====================================================================
 function loadStats() {
   loadProductStats();
   loadOrdersTodayStat();
 }
 
 function loadProductStats() {
-  // Total count needs its OWN source — the shared products:live data
-  // is now deliberately filtered to just low-stock items (see
-  // Sidebar.js), which is exactly right for the two stats below, but
-  // wrong for a true catalog-wide total. getCountFromServer() is a
-  // lightweight aggregation — it downloads a single number, not every
-  // product document, so this stays scalable regardless of catalog
-  // size.
   if (SUPABASE_ENABLED) {
     // Total comes with the sidebar's Supabase refresh (no Firebase reads).
     const showTotal = (n) => {
@@ -97,10 +69,6 @@ function loadProductStats() {
   function renderFromProducts(products) {
     const lowStockCount = products.filter((product) => isProductInAlertState(product)).length;
 
-    // The banner is specifically titled "Critically Low Stock Items
-    // Warning" - so it only counts items actually in the critical tier
-    // (49 or fewer left, but not zero). For a variant product, one
-    // variant at 49 or fewer is enough.
     const criticalCount = products.filter((product) => {
       const detail = getWorstAlertDetail(product);
       return detail?.status === "critical";
@@ -110,18 +78,12 @@ function loadProductStats() {
     updateLowStockBanner(criticalCount);
   }
 
-  // Sidebar.js (loaded on every page already) maintains its own live
-  // listener on this exact collection for the notification badge —
-  // reusing that instead of opening a second, duplicate one here.
   const alreadyLoaded = getLatestProducts();
   if (alreadyLoaded) renderFromProducts(alreadyLoaded);
 
   document.addEventListener("products:live", (event) => renderFromProducts(event.detail.products));
 }
 
-// Reflects the preferences Sidebar.js already loaded (no extra fetch
-// needed) and saves any change back — only affects this signed-in
-// person's own account, nothing else.
 function wireNotificationSettings(uid, role, preferences) {
   const stockToggle = document.getElementById("pref-stock-alerts");
   const orderToggle = document.getElementById("pref-order-notifications");
@@ -175,9 +137,6 @@ async function loadOrdersTodayStat() {
   }
 }
 
-// ====================================================================
-// CHUNK 3 — RECENT NOTIFICATIONS FEED
-// ====================================================================
 function loadRecentNotifications(uid) {
   const list = document.getElementById("notif-list");
 
@@ -220,9 +179,6 @@ function loadRecentNotifications(uid) {
 
   loadReadStatus(uid)
     .then(() => {
-      // Same idea as loadProductStats — reuse Sidebar.js's existing
-      // live listener on this collection instead of opening a
-      // duplicate one here.
       const alreadyLoaded = getLatestNotifications();
       if (alreadyLoaded) renderFromNotifications(alreadyLoaded);
 
@@ -234,20 +190,6 @@ function loadRecentNotifications(uid) {
     });
 }
 
-// ====================================================================
-// CHUNK — STORE BANNERS (multiple promotions)
-// ----------------------------------------------------------------
-// Each promotion is its own document in storeBanners/{id}:
-// {offer, description, imageUrl, scheduleStart, scheduleEnd, sortOrder,
-// createdAt, updatedAt}. The customer app shows every promotion that is
-// live right now as a banner that scrolls automatically and repeats.
-//
-// Backward compatibility: the first promotion (by sortOrder) is also
-// mirrored to settings/storeBanner, the single document older versions
-// of the customer app read, so those keep working until updated. If the
-// collection is empty, a leftover settings/storeBanner is imported once.
-// Available to both Admin and Employee (settings/storeBanners write rule).
-// ====================================================================
 const BANNER_CLOUDINARY_CLOUD_NAME = "h5291fss";
 const BANNER_CLOUDINARY_UPLOAD_PRESET = "productsweb";
 const BANNER_CLOUDINARY_FOLDER = "banners";
@@ -283,10 +225,6 @@ async function loadBannerPanel() {
       }
     }
 
-    // Housekeeping: a promotion that ended more than 12 hours ago is deleted.
-    // (There is no server here to do it on a timer, so it runs whenever
-    // someone opens the Dashboard.) During the 12 hours it stays visible as
-    // "Ended" so it can still be edited or extended.
     const cutoff = Date.now() - BANNER_EXPIRY_GRACE_HOURS * 60 * 60 * 1000;
     const expired = banners.filter((b) => {
       const end = b.scheduleEnd?.toDate?.()?.getTime();
@@ -433,8 +371,6 @@ function closeBannerForm() {
   currentBannerImageUrl = null;
 }
 
-// Keep settings/storeBanner (read by older customer-app versions) pointing
-// at the first promotion, or removed when there are none.
 async function syncLegacyBanner() {
   const first = banners[0];
   try {
@@ -517,9 +453,6 @@ async function handleBannerSave(event) {
 
     let statusText = "Promotion saved — now in the customer app's banner.";
 
-    // Promotion push: this promotion's offer + description. Only when it is
-    // live right now — one scheduled for later sends nothing (no server here
-    // to fire it on that day).
     if (document.getElementById("banner-notify")?.checked) {
       const now = Date.now();
       const startsLater = startValue && new Date(startValue).getTime() > now;
@@ -560,10 +493,6 @@ async function handleBannerRemove(banner) {
     await deleteDoc(doc(db, BANNERS_COLLECTION, banner.id));
     if (editingBannerId === banner.id) closeBannerForm();
 
-    // Update the list from memory. Do NOT re-run loadBannerPanel() here:
-    // when the last promotion is deleted it sees an empty list, finds the
-    // old single-banner copy in settings/storeBanner and "imports" it
-    // straight back — which is why the promotion seemed undeletable.
     banners = banners.filter((b) => b.id !== banner.id);
     banners.sort((x, y) => (x.sortOrder || 0) - (y.sortOrder || 0));
     await syncLegacyBanner(); // removes (or updates) the old copy so it can't come back

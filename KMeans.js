@@ -1,25 +1,8 @@
-// ====================================================================
-// K-MEANS CLUSTERING
-// ----------------------------------------------------------------
-// A genuine, standard unsupervised machine learning algorithm — the
-// same technique used for things like customer segmentation in real
-// business analytics. It doesn't use hardcoded "fast = 5 units/day"
-// thresholds; it discovers the natural groupings directly from your
-// actual product data, and those groupings shift automatically as
-// real sales patterns change over time.
-//
-// How it works, briefly: start with K guessed group centers
-// ("centroids"), assign every product to whichever center it's
-// closest to, recompute each center as the average of its assigned
-// products, and repeat until assignments stop changing (or a max
-// iteration cap is hit, as a safety net).
-// ====================================================================
+// kmeans — K-means clustering used by stock monitoring.
 
 export function kMeansCluster(points, k, maxIterations = 50) {
   if (points.length === 0) return { assignments: [], centroids: [] };
 
-  // Not enough data points to form K meaningful groups — each point
-  // just becomes its own singleton cluster rather than forcing a fit.
   if (points.length <= k) {
     return {
       assignments: points.map((_, i) => i),
@@ -47,10 +30,6 @@ export function kMeansCluster(points, k, maxIterations = 50) {
   return { assignments, centroids };
 }
 
-// Deterministic initialization (evenly spaced along the first
-// dimension after sorting) rather than random — makes results
-// reproducible run to run, which matters for something people will
-// actually look at and want consistent, explainable behavior from.
 function initializeCentroids(points, k) {
   const sorted = [...points].sort((a, b) => a[0] - b[0]);
   const centroids = [];
@@ -99,11 +78,6 @@ function recomputeCentroids(points, assignments, oldCentroids, k) {
   );
 }
 
-// Min-max normalization — puts every feature on a comparable 0-1
-// scale first. Without this, a feature like "velocity" (small
-// numbers, e.g. 0.1-10) would be completely drowned out by a feature
-// like "days since last sale" (larger numbers, e.g. 0-60) in the
-// distance calculation, badly skewing the clustering.
 export function normalizeFeatures(points) {
   if (points.length === 0) return [];
   const dims = points[0].length;

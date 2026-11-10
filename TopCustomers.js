@@ -1,3 +1,5 @@
+// top-customers — Top customers block on the Sales page.
+
 import { db } from "./firebase-config.js";
 import {
   collection, query, where, getDocs, Timestamp
@@ -5,22 +7,6 @@ import {
 import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
 import * as SB from "./SupabaseStore.js?v=20261029c";
 
-// ====================================================================
-// TOP CUSTOMERS (admin only, shown on the Sales page)
-// ----------------------------------------------------------------
-// Ranks customers by how many times they bought, counting BOTH
-//  - online orders (delivered, which includes picked-up orders), and
-//  - face-to-face sales at the cashier that the cashier attached a
-//    customer to.
-// A registered customer is the same person in both (matched by account
-// id), so their online and in-store purchases add up. Walk-in names the
-// cashier typed are listed too, by name. In-store sales with no customer
-// attached can't be credited to anyone and are not counted here.
-// Fully refunded in-store sales are left out.
-// ====================================================================
-// The ranking is per calendar year and starts again from zero on January 1
-// at 12:00 midnight (the clock of the device the admin is using). Earlier
-// years stay available in the dropdown, and "All time" is there too.
 const THIS_YEAR = () => new Date().getFullYear();
 function periodOptions() {
   const y = THIS_YEAR();

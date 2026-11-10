@@ -1,3 +1,5 @@
+// inventory — Inventory page: products, variants, CSV import, stock edits.
+
 import { db, auth } from "./firebase-config.js";
 import {
   collection, addDoc, updateDoc, doc, writeBatch, serverTimestamp, runTransaction,
@@ -13,28 +15,6 @@ import { sendPromotionPushes } from "./PromotionPush.js";
 import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
 import * as SB from "./SupabaseStore.js?v=20261106a";
 
-// ====================================================================
-// CHUNK 0 — CONFIG
-// Field names confirmed against a real product document:
-// name, category, price (already a formatted string, e.g. "₱45.00"),
-// stockCount, available (boolean), imageUrl.
-//
-// VARIANT PRODUCTS (flavors array): I haven't seen a real example of
-// what's inside one flavor entry, so this guesses the same field
-// names as the parent product (name/price/stockCount/available) per
-// entry, and falls back gracefully if an entry is just a plain
-// string instead of an object. If variants render oddly, share one
-// expanded "flavors" array from the Firestore console and I'll fix
-// these field names to match.
-//
-// STOCK TIERS: In Stock > Low Stock > Critically Low Stock > Out of
-// Stock, based on these two thresholds. Adjust to taste.
-//
-// ADMIN EDITING SCOPE: Add/Edit/Bulk-Import all work on simple
-// (non-variant) products. Editing individual flavor variants isn't
-// built yet — that's a reasonable follow-up once you confirm the
-// real shape of a flavor entry (see note above).
-// ====================================================================
 const PRODUCTS_COLLECTION     = "products";
 const PRODUCT_NAME_FIELD      = "name";
 const PRODUCT_CATEGORY_FIELD  = "category";
@@ -42,19 +22,12 @@ const PRODUCT_PRICE_FIELD     = "price";
 const PRODUCT_AVAILABLE_FIELD = "available";
 const PRODUCT_IMAGE_FIELD     = "imageUrl";
 const PRODUCT_VARIANTS_FIELD  = "flavors";
-// How this product is sold — distinct from the free-text "unit" field
-// (which stays as-is, e.g. "pcs", "box"). Lives on the parent product,
-// not per-variant, since a product's packaging type is normally the
-// same across all its flavors.
 const PRODUCT_SELLING_TYPE_FIELD = "sellingType";
 const SELLING_TYPE_LABELS = { ream: "Ream", bulk: "Bulk", piece: "Piece" };
 const BARCODE_FIELD           = "barcode"; // same field name at parent and variant level
 const STOCK_MOVEMENTS_COLLECTION = "stockMovements";
 const STOCK_FIELD             = "stockCount"; // parent product's own stock field
 const VARIANT_STOCK_FIELD     = "stock";       // a flavor entry's stock field — CONFIRMED from
-                                                // your mobile app's readStockDeduction() function.
-                                                // Different name than the parent's STOCK_FIELD —
-                                                // don't merge these into one constant.
 const LOW_STOCK_THRESHOLD      = 99; // at or below this (and above critical) = "Low Stock"
 const CRITICAL_STOCK_THRESHOLD = 49; // at or below this (and above 0) = "Critically Low Stock"
 
@@ -66,22 +39,11 @@ const STATUS_LABELS = {
   unknown: "Stock Not Set"
 };
 
-// Cloudinary — used for uploading product images from Add/Edit Product.
-// Cloud name confirmed from your existing product data
-// (res.cloudinary.com/h5291fss/...). Unsigned upload preset "productsweb"
-// uploads straight from the browser with no server involved and no
-// secret key exposed client-side.
 const CLOUDINARY_CLOUD_NAME = "h5291fss";
 const CLOUDINARY_UPLOAD_PRESET = "productsweb";
 const CLOUDINARY_FOLDER = "products";
 const MAX_IMAGE_SIZE_MB = 8;
 
-// CSV bulk-import column mapping — matches the header row you shared:
-// sku, description, category, principal, unit, qty, qty 1, qty 2,
-// unit_price, unit_ws. "description" is treated as the product name
-// (no separate "name" column existed). qty1/qty2/wholesalePrice are
-// stored as extra fields since their exact meaning wasn't specified —
-// adjust CSV_COLUMN_MAP below if that guess is wrong.
 const CSV_COLUMN_MAP = {
   sku: "sku",
   description: "name",
@@ -107,17 +69,6 @@ let editingProductId = null; // null = Add mode, a product id = Edit mode
 let parsedCsvRows = [];      // rows staged for the CSV preview/confirm step
 let rawCsvRows = [];         // unmapped rows from Papa Parse — re-mapped whenever the ignore-qty checkbox changes
 
-// ====================================================================
-// CHUNK 0B — FORCE-CLOSE MODALS ON PAGE ENTRY
-// ----------------------------------------------------------------
-// If a modal was left open and the browser restores this page from
-// its back-forward cache (bfcache) — e.g. navigating away and then
-// hitting Back — it can restore the exact DOM snapshot, modals and
-// all, without re-running this script. That leaves an invisible
-// full-screen overlay blocking every click on the page. Closing both
-// modals unconditionally here, on every entry to this page, prevents
-// that regardless of how the page was reached.
-// ====================================================================
 function forceCloseAllModals() {
   const productModal = document.getElementById("product-modal-overlay");
   const csvModal = document.getElementById("csv-modal-overlay");
@@ -151,9 +102,6 @@ window.addEventListener("pageshow", (event) => {
   if (event.persisted) forceCloseAllModals();
 });
 
-// ====================================================================
-// CHUNK 1 — WAIT FOR THE SHARED SIDEBAR (auth guard lives there)
-// ====================================================================
 document.addEventListener("sidebar:ready", (event) => {
   isAdmin = event.detail.role === "admin";
   currentUserRole = event.detail.role;
@@ -166,15 +114,9 @@ document.addEventListener("sidebar:ready", (event) => {
   if (isAdmin) wireAdminControls();
 });
 
-// ====================================================================
-// CHUNK 2 — LOAD (via the shared cache — see ProductCache.js. On a
-// cache hit this resolves near-instantly with zero network request.)
-// ====================================================================
 let productsUnsub = null;       // live listener handle
 let liveRenderTimer = null;     // groups rapid changes (e.g. bulk delete) into one redraw
 
-// Keeps the list in sync with Firestore: deletes, additions and edits made
-// here or anywhere else show up without a refresh.
 function startLiveProducts(onFirst, onFirstError) {
   if (productsUnsub) return;
   let gotFirst = false;
@@ -210,10 +152,6 @@ function startLiveProducts(onFirst, onFirstError) {
   );
 }
 
-// ---- Supabase product list ------------------------------------------------
-// The whole list is held in memory (as before), so search, filters and sorting
-// work the same. It is re-fetched when the tab comes back after a while, so
-// stock changes made at the Cashier show up.
 let lastListAt = 0;
 let listRefreshing = false;
 
@@ -299,9 +237,6 @@ async function loadInventory() {
     }
     return;
   }
-  // One read path only: the live listener. Its first result fills the
-  // page, so products are downloaded once (not once for the page plus
-  // once more for the listener).
   const firstDraw = new Promise((resolve, reject) => {
     startLiveProducts(resolve, reject);
   });
@@ -341,13 +276,6 @@ async function reloadAfterWrite() {
   applyFiltersAndRender();
 }
 
-// ====================================================================
-// CHUNK 2B — STOCK CLASSIFICATION (single source of truth)
-// ----------------------------------------------------------------
-// Returns "out" | "critical" | "low" | "in". Every badge, filter, and
-// summary in this file goes through this one function so the tiers
-// can never drift out of sync with each other.
-// ====================================================================
 function getStockStatus(stock, isAvailable) {
   if (isAvailable === false || stock === 0) return "out";
   if (typeof stock !== "number") return "unknown";
@@ -356,9 +284,6 @@ function getStockStatus(stock, isAvailable) {
   return "in";
 }
 
-// ====================================================================
-// CHUNK 2C — URL-DRIVEN FILTER (?filter=attention)
-// ====================================================================
 function applyUrlFilter() {
   const params = new URLSearchParams(window.location.search);
   const requested = params.get("filter");
@@ -369,9 +294,6 @@ function applyUrlFilter() {
   if (validValues.includes(requested)) select.value = requested;
 }
 
-// ====================================================================
-// CHUNK 3 — SEARCH + CATEGORY + STOCK STATUS FILTER + SORT
-// ====================================================================
 function wireControls() {
   document.getElementById("inventory-search").addEventListener("input", applyFiltersAndRender);
   document.getElementById("inventory-category").addEventListener("change", applyFiltersAndRender);
@@ -401,8 +323,6 @@ function populateCategoryFilter(products) {
   refreshOpenCategorySelect();
 }
 
-// If the Add/Edit Product window is already open when the product list finishes
-// (re)loading, its Category drop-down is rebuilt too, keeping what was chosen or typed.
 function refreshOpenCategorySelect() {
   const overlay = document.getElementById("product-modal-overlay");
   const select = document.getElementById("pf-category");
@@ -502,13 +422,6 @@ function numericPrice(product) {
   return isNaN(parsed) ? -1 : parsed;
 }
 
-// ====================================================================
-// CHUNK 4 — RENDER TABLE
-// ----------------------------------------------------------------
-// The Actions column (Edit button) only renders for admin, and only
-// on simple products — not on variant breakdown rows (see CHUNK 0
-// note on admin editing scope).
-// ====================================================================
 const INVENTORY_PAGE_SIZE = 100; // rows drawn per batch
 
 function renderInventoryTable(products, stockFilter) {
@@ -519,8 +432,6 @@ function renderInventoryTable(products, stockFilter) {
   expandedVariantRow = null;
   expandedVariantMainRow = null;
 
-  // Selection resets on every re-render (filter/search/sort change) —
-  // safer than silently keeping a selection the user can no longer see.
   selectedProductIds.clear();
   updateBulkDeleteBar();
   const selectAllCheckbox = document.getElementById("select-all-checkbox");
@@ -533,10 +444,6 @@ function renderInventoryTable(products, stockFilter) {
     return;
   }
 
-  // Only the first INVENTORY_PAGE_SIZE products are drawn at once; "Show more"
-  // draws the next batch. Drawing thousands of table rows in one go freezes
-  // the page, and nobody scrolls through them all — search and filters still
-  // look through every product.
   tbody.innerHTML = "";
   let shown = 0;
   const colCount = isAdmin ? 9 : 7;
@@ -560,8 +467,6 @@ function renderInventoryTable(products, stockFilter) {
           if (event.target.closest(".inventory-edit-btn, .inventory-row-checkbox")) return;
           const expanding = variantRow.hidden;
 
-          // Accordion: collapse whichever product's variant row was
-          // previously open, if any.
           if (expandedVariantRow && expandedVariantRow !== variantRow) {
             expandedVariantRow.hidden = true;
             expandedVariantMainRow.classList.remove("is-expanded");
@@ -603,12 +508,6 @@ function renderInventoryTable(products, stockFilter) {
   renderNextBatch();
 }
 
-// ====================================================================
-// CHUNK 4B — MAIN PRODUCT ROW
-// ====================================================================
-// Featured star: admins click it to feature/unfeature a product. Writes
-// `featured` (boolean) + `featuredAt` (server time) on the product doc;
-// the mobile app reads those. Non-admins just see the star if featured.
 function buildFeaturedStar(product) {
   const star = document.createElement("button");
   star.type = "button";
@@ -758,9 +657,6 @@ function buildProductRow(product, hasVariants, variants) {
   return row;
 }
 
-// ====================================================================
-// CHUNK 4C — VARIANT BREAKDOWN ROW
-// ====================================================================
 function buildVariantRow(variants, product) {
   const row = document.createElement("tr");
   row.className = "inventory-variant-row";
@@ -882,9 +778,6 @@ function variantWholesaleRange(variants) {
   return min === max ? `₱${min.toFixed(2)}` : `₱${min.toFixed(2)}–₱${max.toFixed(2)}`;
 }
 
-// ====================================================================
-// CHUNK 5 — ADMIN CONTROLS: WIRE-UP
-// ====================================================================
 function wireAdminControls() {
   document.getElementById("admin-toolbar").hidden = false;
 
@@ -935,20 +828,6 @@ function wireAdminControls() {
   document.getElementById("csv-confirm-import").addEventListener("click", handleConfirmCsvImport);
 }
 
-// ====================================================================
-// CHUNK 6 — ADD / EDIT PRODUCT MODAL
-// ----------------------------------------------------------------
-// One modal, two modes. editingProductId is null for Add, or the
-// product's doc ID for Edit (pre-fills the form). Every save — add
-// or edit — goes through a native confirm() summarizing exactly
-// what's about to change, per your "prevent accidental change" ask.
-// ====================================================================
-// ---------------------------- CATEGORY PICKER ------------------------
-// The category is a drop-down of the categories that already exist on
-// products, plus "+ Add new category..." which reveals a text box. A new
-// name that matches an existing one (ignoring capital letters / extra
-// spaces) reuses the existing spelling, so "snacks" can't become a
-// second category next to "Snacks".
 const NEW_CATEGORY_VALUE = "__new__";
 
 function normalizeCategoryName(value) {
@@ -1068,9 +947,6 @@ function openEditModal(product) {
   document.getElementById("product-modal-overlay").hidden = false;
 }
 
-// ====================================================================
-// CHUNK 6C — VARIANT MODE UI (checkbox toggle + dynamic row list)
-// ====================================================================
 function handleVariantModeToggle(event) {
   applyVariantModeUI(event.target.checked);
   if (event.target.checked && document.getElementById("variant-editor-list").children.length === 0) {
@@ -1116,13 +992,6 @@ function readVariantRows() {
   }));
 }
 
-// ====================================================================
-// CHUNK 6D — PER-VARIANT IMAGE UPLOAD
-// ----------------------------------------------------------------
-// Rows are created dynamically (cloned from <template>), so their
-// image button/file input are wired via event delegation on the
-// list container rather than per-row listeners.
-// ====================================================================
 function setVariantRowImage(row, url) {
   row.querySelector(".variant-editor__image-url").value = url || "";
   const thumb = row.querySelector(".variant-editor__thumb");
@@ -1138,8 +1007,6 @@ async function handleVariantImageFileSelected(fileInput) {
   await uploadVariantImageFile(row, file);
 }
 
-// Image uploads still running. Saving the product waits for these, so clicking Save
-// while a picture is still uploading doesn't save the product without it.
 const pendingImageUploads = new Set();
 let waitingForImageUpload = false;
 function trackImageUpload(promise) {
@@ -1196,8 +1063,6 @@ function parsePriceNumber(value) {
   return isNaN(parsed) ? "" : parsed;
 }
 
-// Prices are stored as text like "₱45.00" — the stock log needs a real
-// number (null when there's no usable price).
 function priceToNumberOrNull(value) {
   if (typeof value === "number") return isNaN(value) ? null : value;
   const parsed = parseFloat(String(value ?? "").replace(/[^\d.]/g, ""));
@@ -1382,14 +1247,6 @@ function hideFormStatus() {
   document.getElementById("product-form-status").hidden = true;
 }
 
-// ====================================================================
-// CHUNK 6B — IMAGE UPLOAD (Cloudinary, unsigned)
-// ----------------------------------------------------------------
-// Uploads straight from the browser to Cloudinary using an unsigned
-// preset — no server, no secret key exposed. The hidden #pf-image
-// field holds the resulting secure_url, which is what actually gets
-// saved to Firestore's imageUrl field on submit.
-// ====================================================================
 function setImagePreview(url) {
   document.getElementById("pf-image").value = url || "";
   const preview = document.getElementById("pf-image-preview");
@@ -1402,9 +1259,6 @@ function setImagePreview(url) {
   }
 }
 
-// Minimal escaping since this URL either comes from Cloudinary's own
-// response or an existing Firestore value — not free-text user input,
-// but cheap insurance against a malformed URL breaking the attribute.
 function escapeHtmlAttr(value) {
   return value.replace(/"/g, "&quot;");
 }
@@ -1466,8 +1320,6 @@ async function uploadImageToCloudinary(file) {
   return data.secure_url;
 }
 
-// Drag an image onto the product image box (or onto a variant's picture), or paste a copied
-// image with Ctrl+V while the product form is open. Uses the same upload as the Choose Image button.
 function setupImageDropAndPaste() {
   const firstImageFile = (dataTransfer) =>
     Array.from(dataTransfer?.files || []).find((f) => f.type.startsWith("image/")) || null;
@@ -1540,19 +1392,6 @@ function setUploadStatus(message, kind) {
   }
 }
 
-// ====================================================================
-// CHUNK 7 — BULK CSV IMPORT
-// ----------------------------------------------------------------
-// Parses via PapaParse (loaded globally in Inventory.html — not an
-// ES module import), maps columns per CSV_COLUMN_MAP, shows a
-// preview table, and only writes to Firestore after an explicit
-// "Confirm Import" click. Writes are batched (max 450 per batch,
-// under Firestore's 500-op limit) since a CSV could have many rows.
-// ====================================================================
-// The exact column set the CSV must have to be accepted at all —
-// matches CSV_COLUMN_MAP's keys. If any of these are missing from
-// the uploaded file's header row, the import is rejected outright
-// with a warning, before any row data is even looked at.
 const EXPECTED_CSV_HEADERS = Object.keys(CSV_COLUMN_MAP);
 
 function findMissingHeaders(actualFields) {
@@ -1560,10 +1399,6 @@ function findMissingHeaders(actualFields) {
   return EXPECTED_CSV_HEADERS.filter((expected) => !normalizedActual.includes(expected));
 }
 
-// ---- Save the current inventory as a CSV (backup / copy) -------------
-// Same columns the importer expects, so the file can be imported again.
-// A product with variants becomes one row per variant. Extra columns
-// (barcode, product_name, variant_name) are ignored by the importer.
 function csvCell(value) {
   const text = value === null || value === undefined ? "" : String(value);
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
@@ -1734,16 +1569,9 @@ function handleCsvFileSelected(event) {
   });
 }
 
-// Re-runs the raw→product mapping (honoring the current ignore-qty
-// checkbox state) and re-renders the preview — used both on first
-// parse and whenever the checkbox is toggled, without re-parsing the file.
 function remapAndRenderCsvPreview() {
   const ignoreQty = document.getElementById("csv-ignore-qty").checked;
   parsedCsvRows = rawCsvRows.map((row) => csvRowToProduct(row, ignoreQty));
-  // Keep categories in sync: a CSV category that matches an existing one
-  // (ignoring capitals and extra spaces) reuses the existing spelling, so
-  // "canned goods" never becomes a second "Canned Goods". Truly new
-  // categories are kept and appear in every category list automatically.
   const knownCategories = new Map(existingCategories().map((c) => [c.toLowerCase(), c]));
   parsedCsvRows.forEach((row) => {
     const name = normalizeCategoryName(row[PRODUCT_CATEGORY_FIELD]);
@@ -1756,13 +1584,6 @@ function remapAndRenderCsvPreview() {
   renderCsvPreview();
 }
 
-// ---- Suggested variant groups --------------------------------------
-// The CSV has no "variant" column, so rows that look like the same
-// product in different sizes/packs (e.g. several "Emperador Light"
-// rows) are SUGGESTED as one product with variants. Nothing is grouped
-// unless the admin leaves the group ticked in the preview. Groups
-// whose rows sit in different categories start unticked, since that is
-// where a name match is most likely to be a coincidence.
 let csvGroups = [];
 const csvGroupChoice = new Map(); // group key -> ticked/unticked, kept while the preview is open
 
@@ -1853,8 +1674,6 @@ function buildCsvGroups(rows) {
   return groups.sort((a, b) => b.indexes.length - a.indexes.length || a.name.localeCompare(b.name));
 }
 
-// What will actually be written: one product per ticked group (with a
-// variant for each row), and one product for every other valid row.
 function buildImportDocs() {
   const ignoreQty = document.getElementById("csv-ignore-qty").checked;
   const grouped = new Set();
@@ -1989,8 +1808,6 @@ function updateCsvSummary() {
   document.getElementById("csv-confirm-import").disabled = validCount === 0;
 }
 
-// Rejects the file entirely — no preview, no row data, Confirm Import
-// stays disabled — until a CSV with the correct headers is uploaded.
 function showCsvHeaderError(missingHeaders) {
   rawCsvRows = [];
   parsedCsvRows = [];
@@ -2025,9 +1842,6 @@ function csvRowToProduct(rawRow, ignoreQty) {
 
   const name = get("description");
   const category = get("category");
-  // Optional column — not in CSV_COLUMN_MAP/EXPECTED_CSV_HEADERS on
-  // purpose, so older CSV files without this column still import fine
-  // (sellingType just comes through as null/not set).
   const sellingType = normalizeSellingType(get("selling_type"));
 
   return {
@@ -2039,10 +1853,6 @@ function csvRowToProduct(rawRow, ignoreQty) {
     principal: get("principal") || null,
     unit: get("unit") || null,
     [PRODUCT_SELLING_TYPE_FIELD]: sellingType,
-    // When ignoreQty is true, stock is deliberately left unset (null)
-    // rather than trusting a "qty" column that isn't confirmed
-    // accurate — shows correctly as "Stock Not Set" instead of
-    // falsely appearing In Stock. See CHUNK 0 note above.
     [STOCK_FIELD]: ignoreQty ? null : (isNaN(stockCount) ? 0 : stockCount),
     qty1: isNaN(qty1) ? null : qty1,
     qty2: isNaN(qty2) ? null : qty2,
@@ -2155,29 +1965,6 @@ async function handleConfirmCsvImport() {
   }
 }
 
-// ====================================================================
-// CHUNK 8 — BARCODE SCANNER (both roles)
-// ----------------------------------------------------------------
-// A USB/Bluetooth barcode scanner works as a "keyboard emulator" — it
-// just types the barcode digits into whatever input is focused, then
-// sends Enter. No special API needed; this just listens for Enter on
-// a plain text input.
-//
-// Two modes:
-//   "sale"  — deducts a quantity (e.g. a customer bought 2). Fails if
-//             there isn't enough stock.
-//   "count" — sets the exact stock number directly (a physical count
-//             / stock-take correction). No validation against the
-//             old value — it's an overwrite by design.
-//
-// Both go through a Firestore transaction (runTransaction), same
-// pattern your mobile app's own checkout uses — reads the current
-// value, computes the new one, and writes it atomically, so two
-// people scanning at once can't silently clobber each other. For a
-// variant, the matching flavor entry is re-located BY BARCODE inside
-// the transaction (not by a cached array index), so it can't target
-// the wrong entry even if the array changed since the page loaded.
-// ====================================================================
 let scannerMode = "sale";
 let scannerCurrentMatch = null; // { product, barcode, info }
 
@@ -2228,13 +2015,9 @@ function openScannerModal() {
 
 function closeScannerModal() {
   document.getElementById("scanner-modal-overlay").hidden = true;
-  // Refresh the main table — scans done in this session may have
-  // changed stock the visible rows/badges should now reflect.
   applyFiltersAndRender();
 }
 
-// ---- Lookup (uses the already-cached product list — instant, no
-// network round-trip; the actual write below re-verifies fresh) -----
 function findProductByBarcode(barcode) {
   for (const product of allProducts) {
     if (product[BARCODE_FIELD] === barcode) return product;
@@ -2268,12 +2051,6 @@ function handleBarcodeScanned(barcode) {
   hideScannerStatus();
   if (!barcode) return;
 
-  // Sale mode: scanning the SAME item again before clicking "Record
-  // Sale" just bumps the quantity by 1, instead of resetting back to
-  // 1 — matches how a real cashier scans the same product multiple
-  // times in a row rather than typing a number. Doesn't apply in
-  // Stock Count mode, since that's meant to be an exact count, not
-  // an incrementing tally.
   if (scannerMode === "sale" && scannerCurrentMatch && scannerCurrentMatch.barcode === barcode) {
     const qtyInput = document.getElementById("scanner-qty-input");
     qtyInput.value = (parseInt(qtyInput.value, 10) || 0) + 1;
@@ -2385,8 +2162,6 @@ async function handleScannerAction() {
   }
 }
 
-// The actual write — re-verifies everything fresh inside the
-// transaction rather than trusting cached data or a cached array index.
 async function performScanAction(productId, barcode, mode, value) {
   if (SUPABASE_ENABLED) return SB.scanStock(productId, barcode, mode, value);
   const productRef = doc(db, PRODUCTS_COLLECTION, productId);
@@ -2415,8 +2190,6 @@ async function performScanAction(productId, barcode, mode, value) {
       };
     }
 
-    // Otherwise it must be a variant — re-locate it by barcode in the
-    // freshly-read array, not by a cached index.
     const variants = Array.isArray(data[PRODUCT_VARIANTS_FIELD]) ? [...data[PRODUCT_VARIANTS_FIELD]] : [];
     const idx = variants.findIndex((v) => v && typeof v === "object" && v[BARCODE_FIELD] === barcode);
     if (idx === -1) throw new Error("This barcode is no longer on this product.");
@@ -2448,10 +2221,6 @@ function computeNewStock(currentStock, mode, value) {
   return value; // "count" mode — direct overwrite
 }
 
-// Patches the in-memory cache so subsequent scans in this same
-// session see the fresh number without a network round-trip. The
-// sessionStorage cache is separately invalidated so other pages get
-// a real fetch next time, rather than serving this now-stale copy.
 function patchLocalProductStock(productId, barcode, newStock) {
   const product = allProducts.find((p) => p.id === productId);
   if (!product) return;
@@ -2500,21 +2269,6 @@ function hideScannerStatus() {
   document.getElementById("scanner-status").hidden = true;
 }
 
-// ====================================================================
-// CHUNK 9 — STOCK MOVEMENT LOG (both roles)
-// ----------------------------------------------------------------
-// Deliberately lightweight — this is NOT a sales/POS/receipt system.
-// It's an append-only audit trail answering "why did this stock
-// number change" for scanner actions and manual Add/Edit Product
-// stock edits. Nothing here handles pricing breakdowns, payment, or
-// anything resembling a receipt — that was a conscious scope decision
-// to stay within Inventory Management rather than building a
-// separate point-of-sale feature.
-// ====================================================================
-// Compares the pre-edit product against what was just saved, logging
-// one entry per value that actually changed — parent stock, and/or
-// any individual variant whose stock differs from before. Unchanged
-// values (e.g. only the price or category was edited) log nothing.
 function logManualStockChanges(oldProduct, newProductData, productName, productId) {
   if (!oldProduct) return;
 
@@ -2530,8 +2284,6 @@ function logManualStockChanges(oldProduct, newProductData, productName, productI
     return;
   }
 
-  // Variant mode: match old vs new variants by name (barcode may not
-  // be set on older entries, name is the more reliable common key).
   newVariants.forEach((newVariant) => {
     const oldVariant = oldVariants.find((v) => v && typeof v === "object" && v.name === newVariant.name);
     const oldStock = oldVariant && typeof oldVariant[VARIANT_STOCK_FIELD] === "number" ? oldVariant[VARIANT_STOCK_FIELD] : null;
@@ -2549,8 +2301,6 @@ function logManualStockChanges(oldProduct, newProductData, productName, productI
 }
 
 function logStockMovement({ productId, productName, variantName, type, previousStock, newStock, unitPrice }) {
-  // Fire-and-forget on purpose — a failed log write shouldn't block
-  // or roll back the actual stock change, which already succeeded.
   if (SUPABASE_ENABLED) {
     SB.logMovement({
       productId, productName, variantName: variantName || null, type, previousStock, newStock,
@@ -2566,10 +2316,6 @@ function logStockMovement({ productId, productName, variantName, type, previousS
     type,
     previousStock,
     newStock,
-    // Only meaningful for sales — captured at the exact moment of
-    // sale so future sales reports can compute real revenue instead
-    // of estimating from whatever the CURRENT price happens to be,
-    // which could easily differ from what it was on the actual day.
     unitPrice: typeof unitPrice === "number" ? unitPrice : null,
     performedByEmail: currentUser?.email || "unknown",
     performedByRole: currentUserRole,
@@ -2721,16 +2467,6 @@ function buildStockLogItem(entry, date) {
   return el;
 }
 
-// ====================================================================
-// CHUNK 10 — BULK SELECT / DELETE (admin only)
-// ----------------------------------------------------------------
-// Select individual rows, or all currently-visible rows via the
-// header checkbox, then delete them in one batch. Gated behind a
-// REAL password check (PasswordConfirm.js reauthenticates against
-// Firebase, not just a click-through dialog) since this is
-// permanent and irreversible — "strict validation" for a
-// destructive bulk action.
-// ====================================================================
 function updateBulkDeleteBar() {
   const bar = document.getElementById("bulk-delete-bar");
   const count = selectedProductIds.size;
@@ -2791,8 +2527,6 @@ async function handleBulkDelete() {
   }
 }
 
-// Removes EVERY product, not just the rows on screen (the table shows
-// them in batches, so "select all" only reaches what is loaded).
 let deleteAllRunning = false;
 
 // In-page message box (replaces the browser's pop-up alert).
@@ -2828,8 +2562,6 @@ function showNotice(message, title = "") {
   });
 }
 
-
-
 function showDeleteProgress(text) {
   let box = document.getElementById("delete-progress");
   if (!box) {
@@ -2848,9 +2580,6 @@ function hideDeleteProgress() {
   document.getElementById("delete-progress")?.remove();
 }
 
-// One-time (and safe to repeat) tool: adds the search helper fields to every
-// product that lacks them, then tells the Cashier it may look products up on
-// demand. Uses the product list already on screen, so it reads nothing extra.
 let indexRunning = false;
 
 async function handleIndexProducts() {
@@ -2901,8 +2630,6 @@ async function handleDeleteAllProducts() {
   btn.disabled = true;
 
   try {
-    // Products are already loaded in memory, so no extra database read
-    // (and no waiting) before the confirmation appears.
     const ids = allProducts.map((p) => p.id);
     if (ids.length === 0) {
       showNotice("There are no products to delete.");
@@ -2959,26 +2686,6 @@ async function handleDeleteAllProducts() {
   }
 }
 
-// ====================================================================
-// DISCOUNTS (admin only)
-// ----------------------------------------------------------------
-// HOW IT'S STORED: a product's `price` (and each variant's `price`)
-// ALWAYS stays the regular price. A discount is three extra fields on
-// the product:
-//   discountPercent — number, e.g. 10
-//   discountStart   — Timestamp, 12:00 AM on the first day (local time)
-//   discountEnd     — Timestamp, 11:59 PM on the last day; absent = no end
-// Whoever shows or charges a price (this page, the mobile app) works
-// out the effective price from those fields and the current time.
-// That's deliberate: there's no server here to change prices when a
-// sale starts or ends, so the dates themselves decide. The mobile app
-// has to apply the same rule or it will keep showing the regular price.
-// Only retail prices are discounted — wholesale is left alone.
-//
-// LEGACY: an earlier version rewrote `price` and kept the old one in
-// `originalPrice`. Those products still display correctly, and
-// applying or removing a discount converts them to the format above.
-// ====================================================================
 const DISCOUNT_PERCENT_FIELD = "discountPercent";
 const DISCOUNT_START_FIELD   = "discountStart";
 const DISCOUNT_END_FIELD     = "discountEnd";
@@ -2987,8 +2694,6 @@ const DISCOUNT_BATCH_LIMIT   = 450;
 let discountPickedIds = new Map();     // product id -> its own % ("" = use the main Discount box)
 let discountCategoryPicks = new Map(); // category -> its own % ("" = use the main Discount box)
 
-// Handles a real Timestamp, and the {seconds, nanoseconds} plain object
-// a Timestamp turns into after a trip through the sessionStorage cache.
 function timeValueToMillis(value) {
   if (value === null || value === undefined) return null;
   if (typeof value.toMillis === "function") return value.toMillis();
@@ -3032,8 +2737,6 @@ function discountedPrice(baseValue, percent) {
   return formatPrice(Math.round(base * (100 - percent)) / 100);
 }
 
-// The price a customer pays right now for an item whose regular price
-// is `regularPrice` (a "₱45.00" string).
 function effectivePriceString(regularPrice, product) {
   if (isLegacyDiscounted(product)) return regularPrice; // already rewritten by the old version
   if (getDiscountState(product) !== "active") return regularPrice;
@@ -3105,8 +2808,6 @@ function hasUsablePrice(value) {
   return parsePriceNumber(value) > 0;
 }
 
-// The regular price of the first priced item (variant or product), or
-// null if there is nothing to discount.
 function firstRegularPrice(product) {
   const variants = getVariants(product);
   if (variants.length > 0) {
@@ -3144,8 +2845,6 @@ function legacyRestoreUpdate(product) {
   return {};
 }
 
-// Firestore update for applying the discount, or null if the product
-// has no retail price to discount.
 function buildApplyUpdate(product, percent, startTimestamp, endTimestamp) {
   if (firstRegularPrice(product) === null) return null;
   return {
@@ -3173,8 +2872,6 @@ function getDiscountScope() {
   return document.querySelector('input[name="discount-scope"]:checked').value;
 }
 
-// The top "Discount (%)" box: the default used wherever a category or
-// product row doesn't have its own %. null when empty or out of range.
 function parseDiscountPercent(raw) {
   const text = String(raw ?? "").trim();
   if (text === "") return null;
@@ -3186,10 +2883,6 @@ function readDefaultPercent() {
   return parseDiscountPercent(document.getElementById("discount-percent").value);
 }
 
-// Who the action applies to, and each one's percentage.
-// Returns { entries: [{ product, percent }], problem } — `problem` is a
-// message about the first row that has no usable percentage (only
-// checked when needPercent is true, i.e. for Apply, not Remove).
 function getDiscountPlan(needPercent) {
   const scope = getDiscountScope();
   const defaultPercent = readDefaultPercent();
@@ -3240,8 +2933,6 @@ function describePercents(percents) {
     : { label: `${formatPercent(min)}%–${formatPercent(max)}%`, varies: true };
 }
 
-// Date inputs give "YYYY-MM-DD"; build local-time Dates from the parts
-// (Date.parse on that string would read it as UTC and shift the day).
 function dateFromInput(value, endOfDay) {
   if (!value) return null;
   const [year, month, day] = value.split("-").map(Number);
@@ -3318,9 +3009,6 @@ function updateDiscountSummary() {
     return;
   }
 
-  // Three short lines instead of one run-on sentence:
-  //   1) what: "15% off · 8 products"
-  //   2) when: "Starts today · No end date (stays on until you remove it)"
   const lines = [{ cls: "discount-summary__main", text: `${label} off · ${count}${varies ? " (varies by row)" : ""}` }];
 
   const dates = readDiscountDates();
@@ -3353,8 +3041,6 @@ function refreshOverridePlaceholders() {
   document.querySelectorAll(".discount-override").forEach((input) => { input.placeholder = placeholder; });
 }
 
-// The small per-row % box. Only visible while the row is ticked; empty
-// means "use the main Discount (%)".
 function createOverrideInput(value, hidden, onChange) {
   const input = document.createElement("input");
   input.type = "number";
@@ -3520,8 +3206,6 @@ function quotedList(names) {
   return quoted.length <= 1 ? quoted.join("") : `${quoted.slice(0, -1).join(", ")} and ${quoted[quoted.length - 1]}`;
 }
 
-// "all products" | 'the "Paper" category' | '"Paper" and "Snacks" categories'
-// | "3 selected products"
 function describeDiscountScope() {
   const scope = getDiscountScope();
   if (scope === "category") {
@@ -3582,16 +3266,6 @@ function showDiscountResultOverlay({ action, scopeLabel, percentLabel, varies, d
   overlay.addEventListener("click", (event) => { if (event.target === overlay) dismiss(); });
 }
 
-// ====================================================================
-// PROMOTION PUSH — discount went live
-// ----------------------------------------------------------------
-// Only products whose discount is ACTIVE right now (start date reached,
-// not already ended) and that are actually in stock trigger a push. A
-// discount scheduled for a later start date sends nothing — there is no
-// server here to fire it on that day.
-// One product → "<Name>" is now on sale!; two or more in the same action →
-// a single generic push, so a multi-product discount is never a burst.
-// ====================================================================
 function isProductInStock(product) {
   const variants = getVariants(product);
   if (variants.length > 0) {
@@ -3619,8 +3293,6 @@ async function notifyDiscountLive(updates, entries, dates) {
 
   if (live.length === 0) return { note: "" };
 
-  // Exactly one product → name it. Two or more discounted in the same
-  // action → ONE generic push, never one per product.
   const result = await sendPromotionPushes(live, {
     maxIndividual: 1,
     one: ({ product }) => `"${product[PRODUCT_NAME_FIELD] || "A product"}" is now on sale!`,
@@ -3717,9 +3389,6 @@ async function runDiscountAction(action) {
     await reloadAfterWrite();
     closeDiscountModal();
 
-    // Tell customers (promotions-enabled devices only) about discounts that
-    // are live right now. Runs after the save succeeded; a failed push never
-    // undoes the discount.
     let pushNote = "";
     if (isApply) {
       const pushResult = await notifyDiscountLive(updates, entries, dates);

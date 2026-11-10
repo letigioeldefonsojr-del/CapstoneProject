@@ -1,3 +1,5 @@
+// accounts — Admin page: approve, reject, suspend, terminate staff accounts and send the account emails.
+
 import { db, auth, app } from "./firebase-config.js";
 import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
 import {
@@ -11,35 +13,10 @@ import { listLocks, unlockAccount } from "./LoginAttempts.js?v=20261030d";
 import { guardCall } from "./LoginGuard.js?v=20261030d";
 import { generateUniqueUsername, isUsernameTaken } from "./UsernameGenerator.js?v=20261030d";
 
-// ====================================================================
-// ACCOUNT CONTROL (admin-only)
-// ----------------------------------------------------------------
-// HONEST LIMITATION, worth knowing exactly what this does and doesn't
-// do: there's no backend here, so neither action can reach into
-// Firebase Authentication itself to disable someone's actual login
-// credentials (that's an Admin SDK / Cloud Function capability this
-// app doesn't have).
-//
-//   SUSPEND — writes a suspendedUntil timestamp to their Firestore
-//   profile. Enforced at the app level: both login handlers in
-//   AdminLogin.js/EmployeeLogin.js check this field and block sign-in with a clear message
-//   until it passes. Doesn't stop someone from installing lower-level
-//   Firebase access another way, but does correctly stop them from
-//   using this app for the chosen duration.
-//
-//   TERMINATE — permanently deletes their Firestore profile document.
-//   Combined with the fix in Sidebar.js (no matching profile = signed
-//   out immediately, even mid-session), this makes the account fully
-//   unusable in this app going forward — the underlying Firebase Auth
-//   login technically still exists, but there's nothing left it can
-//   actually do here.
-// ====================================================================
 let allAccounts = [];
 let currentAdminUid = null;
 let roleFilter = "all"; // "all" | "admin" | "employee" | "customer"
 
-// Customers are NOT downloaded in bulk (that costs one read per customer, on
-// every visit). They are found by searching, and only the matches are kept.
 let customerDocs = [];       // customers matched by the current search
 let customerQuery = "";      // what the admin typed in the search box
 let customerTotal = null;    // how many customers exist (one cheap count)
@@ -48,9 +25,6 @@ let customerTimer = null;
 let refreshMerge = () => {};
 
 document.addEventListener("sidebar:ready", (event) => {
-  // Admin-only page. The nav link is already hidden for employees
-  // (see Sidebar.js), but that alone doesn't stop someone from typing
-  // the URL directly — this is the actual enforcement.
   if (event.detail.role !== "admin") {
     window.location.replace("Dashboard.html");
     return;
@@ -124,9 +98,6 @@ function loadAccounts() {
     }
   );
 
-  // Customers (the mobile app's "users" collection: fullName, email,
-  // mobileNumber) are not loaded here. Only a cheap count is fetched; the
-  // list itself comes from the search box.
   getCountFromServer(collection(db, "users"))
     .then((snap) => { customerTotal = snap.data().count; mergeAndRender(); })
     .catch((error) => console.error("Couldn't count customers:", error));
@@ -162,8 +133,6 @@ async function customerPrefixQuery(field, prefix) {
   return snap.docs.map(toCustomerAccount);
 }
 
-// The 25 most recently registered customers (about 25 reads each time it is clicked).
-// Customers saved without a registration date don't show here; search finds them.
 async function loadLatestCustomers() {
   customerQuery = "";
   roleFilter = "customer";
@@ -207,8 +176,6 @@ async function runCustomerSearch() {
 }
 
 function rerenderKeepingSearchFocus() {
-  // The table (including the search box) is redrawn from scratch, so note
-  // whether the admin is typing in the box right now and put the cursor back.
   const before = document.activeElement;
   const wasTyping = before && before.id === "accounts-customer-search";
   const caret = wasTyping ? before.selectionStart : null;
@@ -314,9 +281,6 @@ function applyFilterAndRender() {
   let visibleAccounts = roleFilter === "all"
     ? allAccounts
     : allAccounts.filter((a) => a.role === roleFilter);
-  // While something is typed in the search box, narrow the table to people
-  // who match it (staff by name, email, username or phone; customers are
-  // already the ones the search found).
   const searchText = customerQuery.trim().toLowerCase();
   if (searchText) {
     visibleAccounts = visibleAccounts.filter((a) =>
@@ -418,18 +382,12 @@ function buildAccountRow(account) {
       actionsCell.appendChild(buildActionButton("Terminate", "btn-danger-outline", () => handleTerminate(account)));
     }
 
-    // Checked separately from the main render (progressive
-    // enhancement) — doesn't block the whole table on N sequential
-    // lockout lookups just to show a button most accounts won't need.
     checkAndApplyLockStatus(account, statusCell, actionsCell);
   }
 
   return row;
 }
 
-// Login lockouts are tracked by whatever the person actually TYPED to
-// log in (email or username — see LoginAttempts.js), not by account
-// ID, so this checks both possible identifiers for this account.
 async function checkAndApplyLockStatus(account, statusCell, actionsCell) {
   const identifiers = [account.email, account.username].filter(Boolean);
   if (identifiers.length === 0) return;
@@ -468,9 +426,6 @@ async function checkAndApplyLockStatus(account, statusCell, actionsCell) {
   }
 }
 
-// New employee sign-ups start as approved:false and can't log in or touch
-// any data (the Firestore rules treat them as non-staff) until an admin
-// approves them here.
 async function handleApprove(account, btn, asDriver = false) {
   const originalLabel = btn.textContent;
   btn.disabled = true;
@@ -479,8 +434,6 @@ async function handleApprove(account, btn, asDriver = false) {
     const approval = asDriver ? { approved: true, isDriver: true } : { approved: true };
     // If this sign-up had been rejected earlier, clear that now.
     await updateDoc(doc(db, "employees", account.id), { ...approval, rejected: deleteField(), rejectionReason: deleteField(), rejectedAt: deleteField() });
-    // Tell the employee by email that they can log in now. A failure here
-    // (e.g. email not set up yet) never affects the approval itself.
     sendAccountActionEmail({ ...account, isDriver: asDriver || account.isDriver }, "approved", "", null);
     // The live listener re-renders the row — nothing else to do.
   } catch (error) {
@@ -490,10 +443,6 @@ async function handleApprove(account, btn, asDriver = false) {
   }
 }
 
-// A Driver is an employee who can only see and update orders (delivery
-// steps). Only an admin can change this — the Firestore rules stop
-// employees from editing their own isDriver flag. Takes effect on the
-// person's next page load.
 async function handleToggleDriver(account, btn) {
   const makeDriver = !account.isDriver;
   const confirmed = await confirmDialog(
@@ -576,38 +525,13 @@ function getSelectedReason(overlay, idPrefix) {
   return value;
 }
 
-// ====================================================================
-// ADD NEW ADMIN
-// ----------------------------------------------------------------
-// Admin accounts can no longer be self-registered (the public signup
-// form was removed) — this is now the only way a new admin account
-// gets created, and only an already-logged-in admin can do it.
-//
-// TECHNICAL NOTE: creating a Firebase Auth user via the normal client
-// SDK automatically signs in AS that new user on whatever auth
-// instance you call it on — which would immediately log the CURRENT
-// admin out and replace their session with the brand new account.
-// This uses a SEPARATE, temporary secondary Firebase App instance
-// specifically for the creation step, so the primary app (and the
-// current admin's actual session) is never touched. The temporary
-// instance is torn down immediately after, win or lose.
-// ====================================================================
 function generateTempPassword() {
   const letters = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz";
   const digits = "23456789";
-  // Firebase's own auth service enforces a password policy on this
-  // project requiring at least one non-alphanumeric character —
-  // discovered directly from a real signup attempt failing with
-  // auth/password-does-not-meet-requirements. Excluding ambiguous
-  // symbols (quotes, backslash) that could cause confusion if
-  // hand-typed from a screen.
   const symbols = "!@#$%^&*-_=+";
   const allChars = letters + digits + symbols;
 
   let result = "";
-  // Guarantee at least one of each category, rather than leaving it
-  // to chance — a long random string drawn from a mixed set can
-  // still occasionally miss a category entirely by pure chance.
   result += letters[Math.floor(Math.random() * letters.length)];
   result += digits[Math.floor(Math.random() * digits.length)];
   result += symbols[Math.floor(Math.random() * symbols.length)];
@@ -616,8 +540,6 @@ function generateTempPassword() {
     result += allChars[Math.floor(Math.random() * allChars.length)];
   }
 
-  // Shuffle so the guaranteed characters aren't predictably at the
-  // start of every generated password.
   return result.split("").sort(() => Math.random() - 0.5).join("");
 }
 
@@ -702,8 +624,6 @@ function handleAddNewAdmin() {
     btn.disabled = true;
     btn.textContent = "Creating...";
 
-    // A uniquely-named secondary app each time, so overlapping usage
-    // (unlikely, but possible) never collides with a leftover instance.
     const secondaryApp = initializeApp(app.options, `AddAdmin-${Date.now()}`);
     const secondaryAuth = getAuth(secondaryApp);
 
@@ -718,10 +638,6 @@ function handleAddNewAdmin() {
       const result = await createUserWithEmailAndPassword(secondaryAuth, email, password);
       const newUid = result.user.uid;
 
-      // Firebase Auth's own displayName is what the sidebar's avatar
-      // and greeting actually read from for admin accounts (unlike
-      // employees, which have a Firestore fallback) — without this,
-      // it falls back to "?" and "there" instead of their real name.
       await updateProfile(result.user, { displayName: name });
 
       await setDoc(doc(db, "admins", newUid), {
@@ -729,17 +645,10 @@ function handleAddNewAdmin() {
         email,
         username,
         role: "admin",
-        // Verified only once THEY log in and successfully enter an
-        // OTP sent to this email — proves whoever's actually logging
-        // in controls this inbox, not just that the person creating
-        // the account typed a real-looking address.
         emailVerified: false,
         createdAt: serverTimestamp()
       });
 
-      // The temporary instance signed itself in as the new admin the
-      // moment it was created — sign that out before tearing the
-      // instance down, so there's no lingering active session for it.
       await signOut(secondaryAuth);
 
       close();
@@ -755,8 +664,6 @@ function handleAddNewAdmin() {
       btn.disabled = false;
       btn.textContent = "Create Admin Account";
     } finally {
-      // Always torn down, whether creation succeeded or failed —
-      // never leaves an orphaned secondary app instance behind.
       await deleteApp(secondaryApp);
     }
   });
@@ -861,10 +768,6 @@ async function handleLiftSuspension(account) {
   }
 }
 
-// An admin declines a pending employee sign-up. The profile is kept (marked
-// rejected, with the reason) so the person sees "not approved" when they try
-// to log in, instead of an unexplained "no account found". The admin can
-// still approve it later, or Terminate it to delete it for good.
 const REJECT_REASONS = [
   "Not an employee of the store",
   "Incomplete or incorrect details",
@@ -980,8 +883,6 @@ function handleTerminate(account) {
     btn.textContent = "Terminating...";
 
     try {
-      // Send the email BEFORE deleting — once the profile doc is gone,
-      // we no longer have their email address to send anything to.
       await sendAccountActionEmail(account, "terminated", reason, null);
       await deleteDoc(doc(db, collectionForRole(account.role), account.id));
       await refreshCustomers(account, true);
@@ -997,14 +898,6 @@ function handleTerminate(account) {
   });
 }
 
-// ====================================================================
-// ACCOUNT ACTION EMAIL (suspend/terminate notification)
-// ----------------------------------------------------------------
-// Uses a dedicated EmailJS template (confirmed set up, not the OTP
-// one — that one is built specifically around a {{passcode}}/{{time}}
-// verification code, wrong shape for an account-status notice).
-// Variables sent: to_email, email, to_name, name, action, message, detail_label, detail_value, reason, login_url, until_date.
-// ====================================================================
 const ACCOUNT_EMAIL_TEMPLATE_ID = "template_mu3ud2r";
 const EMAILJS_SERVICE_ID = "service_mmg4ncm"; // same service as the OTP emails — only the template differs
 
@@ -1046,11 +939,6 @@ async function sendAccountActionEmail(account, action, reason, untilDate) {
     });
     console.info(`Account email (${label}) sent to ${account.email}`);
   } catch (error) {
-    // Deliberately doesn't block or fail the actual suspend/terminate
-    // action — the account status change already succeeded in
-    // Firestore by the time this runs. A failed notification email
-    // shouldn't undo that or confuse the admin with an error for
-    // something that actually worked.
     console.error("Couldn't send account action email:", error?.status, error?.text || error);
   }
 }

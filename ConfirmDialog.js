@@ -1,18 +1,4 @@
-// ====================================================================
-// IN-APP CONFIRMATION DIALOG
-// ----------------------------------------------------------------
-// Replaces window.confirm() everywhere — that native dialog shows the
-// page's URL ("127.0.0.1:5500 says...") and can't be styled at all.
-// This builds a real modal instead, reusing the app's existing
-// .modal / .modal-overlay classes, and resolves a Promise<boolean>
-// the same way confirm() returns a boolean, so call sites just need
-// `await confirmDialog(...)` in place of `window.confirm(...)`.
-//
-// Built and torn down dynamically (appended to <body>, removed after
-// the user answers) rather than toggling a `hidden` attribute on a
-// pre-existing element — this sidesteps the whole [hidden] vs
-// explicit-display CSS conflict category of bug entirely.
-// ====================================================================
+// confirm — In-app confirmation dialog replacing window.confirm.
 
 let activeResolve = null;
 
@@ -25,8 +11,6 @@ export function confirmDialog(message, options = {}) {
   } = options;
 
   return new Promise((resolve) => {
-    // Safety: if somehow a dialog is already open, resolve it as
-    // cancelled before opening a new one, rather than leaking it.
     if (activeResolve) activeResolve(false);
     activeResolve = resolve;
 

@@ -1,3 +1,5 @@
+// stock-monitoring — Demand trend and restock recommendations page.
+
 import { db } from "./firebase-config.js";
 import {
   collection, getDocs, query, where, Timestamp, writeBatch, doc, deleteField, serverTimestamp
@@ -10,46 +12,9 @@ import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
 import * as SB from "./SupabaseStore.js?v=20261106a";
 import { getWorstAlertDetail } from "./StockAlerts.js";
 
-// ====================================================================
-// STOCK MONITORING — demand trend & restock recommendations
-// ----------------------------------------------------------------
-// NOT traditional sales-history forecasting — this store has no
-// dedicated point-of-sale transaction log. What it uses instead is
-// real data already collected, from TWO sources, merged together:
-//
-//   1. Stock Movement Log — every "sale" entry, written when a
-//      barcode scan records a real in-store sale (see
-//      performScanAction() in Inventory.js).
-//   2. Online Orders — every item inside an order with
-//      status === "delivered" (not pending/cancelled/rejected —
-//      only orders that actually resulted in stock leaving the
-//      store count as a real completed sale).
-//
-// Both are genuine, timestamped depletion events, just from two
-// different parts of the business (in-store vs. online). Combining
-// them gives a truer picture of real demand than either alone would.
-//
-// From that, this computes a real per-product SELLING VELOCITY
-// (units/day) and feeds it into K-MEANS CLUSTERING (see KMeans.js) —
-// genuine unsupervised machine learning — which automatically groups
-// products into Fast-Moving / Moderate / Slow-Moving, discovering the
-// natural breakpoints from the actual data rather than a hardcoded
-// "fast = 5/day" rule. This improves automatically as more real sales
-// data (from either source) accumulates — no retraining step needed.
-//
-// HONEST LIMITATION: a product with zero recorded sales from EITHER
-// source has no velocity to compute — it's shown separately as
-// "No Sales Data Yet," not guessed at or hidden.
-//
-// HONEST APPROXIMATION: online order timestamps use the order's
-// createdAt (creation time), not a separate delivery-confirmation
-// timestamp — the schema doesn't currently track the latter
-// separately, so creation time is used as a reasonable stand-in.
-// ====================================================================
 const STOCK_MOVEMENTS_COLLECTION = "stockMovements";
 const ORDERS_COLLECTION = "orders";
 const CLUSTER_COUNT = 3; // Fast-Moving / Moderate / Slow-Moving
-
 
 let allProducts = [];
 let velocityByProductId = new Map();
@@ -61,35 +26,11 @@ document.addEventListener("sidebar:ready", (event) => {
   loadForecast();
 });
 
-// ====================================================================
-// PUBLISHING SALES TIERS TO PRODUCTS (for the mobile app)
-// ----------------------------------------------------------------
-// The mobile app can't work out best sellers itself: customers can only
-// read their own orders (see firestore.rules), and the stock movement
-// log is staff-only. So whenever an ADMIN opens this page, the result
-// of the clustering below is saved onto each product:
-//   salesTier          "fast" | "moderate" | "slow"   (removed if no sales data)
-//   bestSeller         true for the Fast-Moving group, otherwise false
-//   salesTierUpdatedAt when it last changed
-// Only products whose tier actually changed are written. Employees
-// can't write products (rules), so for them this is skipped.
-//
-// HONEST LIMITS: there's no server, so this only refreshes when an
-// admin opens Forecast — the app can show a slightly stale tier. And
-// "fast" is relative (k-means groups), so with fewer than
-// MIN_PRODUCTS_FOR_BEST_SELLER products that have sales data, nothing is
-// flagged as a best seller, otherwise everything would be.
-// ====================================================================
 const MIN_PRODUCTS_FOR_BEST_SELLER = 3;
 const PRODUCT_WRITE_BATCH_LIMIT = 450;
 
-// A product that flips to Best Seller triggers a promotion push, but at
-// most once per this many days — tiers can flap between runs and customers
-// shouldn't be told the same thing repeatedly.
 const BEST_SELLER_PUSH_COOLDOWN_DAYS = 30;
 
-// Firestore Timestamps arrive either as Timestamp objects or, after the
-// sessionStorage product cache, as { seconds, nanoseconds }.
 function timeValueToMillis(value) {
   if (!value) return null;
   if (typeof value.toMillis === "function") return value.toMillis();
@@ -147,9 +88,6 @@ async function syncSalesTiersToProducts(productsWithData, productsWithoutData) {
       invalidateProductsCache();
     }
 
-    // Promotion push — only after the flags were saved. One push each for a
-    // few products, a single summary when many flip at once (e.g. the very
-    // first run, when every fast mover gets flagged together).
     await sendPromotionPushes(newlyBestSelling, {
       maxIndividual: 3,
       one: (product) => `⭐ ${product.name || "A product"} is now a Best Seller!`,
@@ -195,8 +133,6 @@ async function loadForecast() {
 
     const clustered = clusterByVelocity(productsWithData);
 
-    // Background — doesn't delay rendering. clusterByVelocity() just
-    // tagged each productsWithData entry with its velocityTier.
     if (isAdminUser) syncSalesTiersToProducts(productsWithData, productsWithoutData);
 
     renderResults(clustered, productsWithoutData);
@@ -206,24 +142,12 @@ async function loadForecast() {
   }
 }
 
-// ---- Data fetching ---------------------------------------------------
-// Rolling window instead of full history: a sale from 8 months ago
-// shouldn't weigh the same as one from last week when the whole point
-// is "how fast is this selling right now" — so this is both faster
-// (less data fetched) AND a more honest calculation, not just a
-// performance compromise.
 const VELOCITY_WINDOW_DAYS = 60;
 
 function windowCutoffTimestamp() {
   return Timestamp.fromDate(new Date(Date.now() - VELOCITY_WINDOW_DAYS * 24 * 60 * 60 * 1000));
 }
 
-// Sales come from two places:
-//   1. The daily tally (salesDaily): one small document per day, so at
-//      most ~60 reads for the whole window, however many sales were made.
-//   2. The individual sale lines in stockMovements, but ONLY for days
-//      before the tally existed. This part shrinks to nothing as the
-//      60-day window moves past the day the tally started.
 async function fetchSaleMovementsSupabase() {
   const cutoffDate = new Date(Date.now() - VELOCITY_WINDOW_DAYS * 24 * 60 * 60 * 1000);
   const events = [];
@@ -311,10 +235,6 @@ async function fetchSaleMovements() {
   return events;
 }
 
-// Only "delivered" orders count — pending/approved/on_the_way haven't
-// actually resulted in stock leaving yet, and cancelled/rejected/
-// undelivered explicitly didn't. Flattens each order's items[] array
-// into individual depletion events, one per line item.
 async function fetchDeliveredOrderItems() {
   const q = query(
     collection(db, ORDERS_COLLECTION),
@@ -340,20 +260,6 @@ async function fetchDeliveredOrderItems() {
   return events;
 }
 
-// ---- Velocity computation ---------------------------------------------
-// Aggregates all "sale" movements per product into a single velocity
-// figure (units sold per day). Variant sales are combined into their
-// parent product's total — a deliberate simplification; a future
-// version could track per-variant velocity separately if that level
-// of detail becomes worth the added complexity.
-// A 14-day window for the primary "moving average" velocity — this
-// is what actually moved the needle on the honesty gap: sales from
-// 80 days ago no longer count equally with sales from yesterday.
-// Falls back to the full 60-day baseline only when a product had
-// literally zero sales in the last 14 days (but did sell earlier in
-// the 60-day window) — otherwise a product that's just had a quiet
-// couple of weeks would incorrectly look like it has zero velocity,
-// rather than genuinely slowed down.
 const RECENT_WINDOW_DAYS = 14;
 
 function computeVelocities(depletionEvents) {
@@ -389,10 +295,6 @@ function computeVelocities(depletionEvents) {
       .reduce((sum, e) => sum + e.unitsSold, 0);
     const recentVelocity = recentUnitsSold / RECENT_WINDOW_DAYS;
 
-    // Use the recent moving average whenever there's actually recent
-    // activity to base it on; otherwise the 60-day baseline is a more
-    // honest number than "0" for a product that's simply had a quiet
-    // stretch but is still a real, ongoing seller.
     const velocity = recentUnitsSold > 0 ? recentVelocity : baselineVelocity;
     const usedRecentWindow = recentUnitsSold > 0;
 
@@ -426,10 +328,6 @@ function clusterByVelocity(productsWithData) {
   const normalized = normalizeFeatures(rawFeatures);
   const { assignments, centroids } = kMeansCluster(normalized, Math.min(CLUSTER_COUNT, productsWithData.length));
 
-  // Label clusters by their ACTUAL (non-normalized) average velocity —
-  // k-means itself only produces anonymous group numbers; this maps
-  // "highest average velocity" to "Fast-Moving", etc., so the labels
-  // mean something to a person looking at them.
   const clusterVelocitySums = new Map();
   const clusterCounts = new Map();
   productsWithData.forEach((p, i) => {
@@ -504,11 +402,6 @@ function renderResults(clustered, productsWithoutData) {
   const bestSellersAlmostOut = allTracked.filter((p) =>
     p.velocityTier === "fast" && p.currentStock > 0 && isLowOrOut(p.currentStock)
   );
-  // Restocking is decided by the STOCK COUNT in Inventory (the same rule as
-  // the Dashboard banner and the sidebar alerts: 99 or fewer = low, 49 or
-  // fewer = critical, 0 = out; for a variant product, one variant running low
-  // is enough). It no longer depends on a product having sales history. A
-  // product that also has sales data keeps its selling-pace details.
   const trackedById = new Map(allTracked.map((e) => [e.product.id, e]));
   const restockRecommended = [];
   allProducts.forEach((product) => {
@@ -525,11 +418,6 @@ function renderResults(clustered, productsWithoutData) {
   restockRecommended.sort((a, b) =>
     (a.currentStock - b.currentStock) || ((a.daysUntilStockout ?? Infinity) - (b.daysUntilStockout ?? Infinity)));
 
-  // Same daysUntilStockout number as restockRecommended above — just
-  // looking at the opposite end. A very HIGH number here means the
-  // product has far more supply than its current selling pace could
-  // work through in a reasonable time, tying up shelf space and
-  // capital rather than being at risk of running out.
   const possibleOverstock = allTracked
     .filter((p) => p.currentStock > 0 && p.daysUntilStockout != null && p.daysUntilStockout > OVERSTOCK_THRESHOLD_DAYS)
     .sort((a, b) => (b.daysUntilStockout ?? 0) - (a.daysUntilStockout ?? 0));
@@ -601,12 +489,6 @@ function renderResults(clustered, productsWithoutData) {
   }
 }
 
-// 60 days (~2 months) of supply at current selling pace is flagged as
-// possible overstock. Like the 99/49/0 stock-level thresholds
-// elsewhere in this app, this is a reasonable default judgment call
-// for a grocery store, not a universally "correct" number — it can
-// be adjusted here if a different threshold fits your actual
-// inventory turnover expectations better.
 const OVERSTOCK_THRESHOLD_DAYS = 60;
 
 function isLowOrOut(stock) {
@@ -678,9 +560,6 @@ function buildEntryRow(entry, mode) {
   const velocityLabel = entry.velocity >= 1
     ? `~${entry.velocity.toFixed(1)} units/day`
     : `~${(entry.velocity * 7).toFixed(1)} units/week`;
-  // Makes the actual output transparent — this product's number came
-  // from real sales in the last 14 days, or (rarer) fell back to the
-  // 60-day baseline because there were none.
   const windowLabel = entry.usedRecentWindow ? "last 14 days" : "60-day avg, no recent sales";
 
   const stockoutLabel = entry.currentStock === 0

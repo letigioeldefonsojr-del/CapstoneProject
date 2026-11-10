@@ -1,11 +1,5 @@
-// ====================================================================
-// ONE-TIME IMPORT: old Firebase sales history -> Supabase
-// ----------------------------------------------------------------
-// Reads posSales, posRefunds, stockMovements and salesDaily from Firestore
-// (the signed-in admin's own access) and sends them in batches to the
-// store function, which adds only what is not already there.
-// Nothing is changed or deleted in Firebase.
-// ====================================================================
+// import-history — One-time import of old Firebase sales history into Supabase.
+
 import { auth, db } from "./firebase-config.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import {

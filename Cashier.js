@@ -1,3 +1,5 @@
+// cashier — Counter POS page: cart, checkout, receipts, refunds.
+
 import { db } from "./firebase-config.js";
 import {
   collection, doc, getDoc, runTransaction, serverTimestamp, getDocs, query, where, orderBy, limit, Timestamp, updateDoc, arrayUnion, writeBatch
@@ -16,15 +18,6 @@ import {
   applyNumpadKey, quickCashAmounts
 } from "./CashierLogic.js?v=20261110b";
 
-// ====================================================================
-// CASHIER (face-to-face counter POS)
-// ----------------------------------------------------------------
-// All the money/stock decisions are in CashierLogic.js (tested on its
-// own). This file is the screen plus the one Firestore transaction that
-// completes a sale: it re-reads every product, re-checks stock and
-// prices, then deducts stock, writes a posSales record and writes the
-// stockMovements entries — all or nothing.
-// ====================================================================
 const STORE_NAME = "Almares 328";
 
 let products = [];         // the working set: everything looked up or loaded so far
@@ -47,8 +40,6 @@ function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-// The cashier's name for receipts and sales ("Maria Santos"), not their email. Read once from their
-// employee profile and remembered for the session; the email is only a fallback.
 let cashierName = "";
 async function loadCashierName() {
   const user = currentUser;
@@ -88,14 +79,6 @@ document.addEventListener("sidebar:ready", async (event) => {
   focusScanInput();
 });
 
-// ----------------------------- SCANNER READY --------------------------
-// The barcode scanner types like a keyboard, so the scan box must be the
-// place keystrokes land without the cashier clicking it first. Three
-// things make that work: focus it when the page opens (and when the window
-// regains focus), and — as a safety net — send any typed character to it
-// when focus is on the blank page or a button instead of a text field.
-// On touch screens the box is not focused automatically (that would pop up
-// the on-screen keyboard); a hardware scanner still works via the safety net.
 function focusScanInput() {
   const input = $("pos-input");
   if (!input || IS_TOUCH) return;
@@ -125,12 +108,6 @@ document.addEventListener("keydown", (event) => {
 window.addEventListener("focus", () => { if (!anyModalOpen()) focusScanInput(); });
 window.addEventListener("pageshow", () => focusScanInput());
 
-// ------------------------- ON-DEMAND PRODUCT LOOKUP -------------------
-// Once an admin has run "Prepare Cashier Search" in Inventory (it sets
-// settings/productIndex), the Cashier no longer downloads the whole
-// catalogue (one database read per product). It asks the database for just
-// the product that was scanned or typed, which costs a few reads. Until
-// that setup is done it keeps working the old way, so nothing breaks.
 const FRESH_MS = 10 * 60000; // a looked-up product is re-fetched after 10 minutes
 const SEARCH_LIMIT = 60;
 
@@ -201,8 +178,6 @@ async function lookupBarcode(code) {
   return findCandidateByBarcode(products, code);
 }
 
-// Asks the database for products with a word starting like the typed text,
-// then the usual fuzzy matching narrows it down on screen.
 const searchedTokens = new Map(); // token -> when it was last searched
 async function remoteSearch(term) {
   if (!indexed) return;
@@ -232,9 +207,6 @@ async function remoteSearch(term) {
   }
 }
 
-// Keeps the shared saved copy of the catalog in step with this register's
-// own sales and refunds, so coming back to this page (or opening another
-// page that needs the products) within a few minutes costs no reads.
 let primeTimer = null;
 function saveProductsCopy() {
   if (indexed) return; // the working set is only part of the catalogue; never share it as if it were all
@@ -254,9 +226,6 @@ async function loadProducts() {
   }
 }
 
-// After a sale or refund we already know exactly which products changed,
-// so the on-screen list is updated in place instead of re-downloading the
-// whole catalog (which costs one database read per product).
 function applyLocalUpdates(updates) {
   if (!updates) return;
   for (const [productId, update] of updates) {
@@ -266,8 +235,6 @@ function applyLocalUpdates(updates) {
   saveProductsCopy();
 }
 
-// Re-reads ONLY the products currently in the cart (a few reads), so a
-// price or stock change on those still shows up.
 async function refreshCartProducts() {
   const ids = [...new Set(cart.map((l) => l.productId))];
   if (SUPABASE_ENABLED) {
@@ -310,8 +277,6 @@ function wireUi() {
 
   input.addEventListener("input", () => {
     const value = input.value.trim();
-    // A scanner types the whole code instantly; an exact barcode match
-    // adds the item without needing Enter.
     if (value.length >= 4) {
       const hit = findCandidateByBarcode(products, value);
       if (hit) {
@@ -324,8 +289,6 @@ function wireUi() {
     clearTimeout(searchTimer);
     renderResults();
     if (indexed) {
-      // Ask the database only after the typing pauses (a scanner types in an
-      // instant, and may or may not press Enter at the end).
       searchTimer = setTimeout(async () => {
         const term = input.value.trim();
         if (!term) return;
@@ -356,8 +319,6 @@ function wireUi() {
     }
   });
 
-  // Some scanners end every scan with Tab instead of Enter. Tab would jump to the next
-  // box (Customer), so a scan's Tab counts as Enter and the cursor stays here.
   input.addEventListener("keydown", async (event) => {
     if (event.key === "Tab" && !event.shiftKey) {
       if (!input.value.trim() && Date.now() - lastScanAt > 600) return; // a real Tab by hand still moves on
@@ -449,8 +410,6 @@ function wireUi() {
     renderPayment();
   });
 
-  // Cash received: typed on a keyboard, or tapped on the on-screen number
-  // pad. inputmode="none" keeps the tablet's own keyboard from popping up.
   $("pos-tendered").addEventListener("input", () => {
     setTendered(sanitizeAmount(getTendered()));
   });
@@ -486,14 +445,9 @@ function wireUi() {
   window.addEventListener("beforeunload", (event) => {
     if (cart.length > 0 && !busy) { event.preventDefault(); event.returnValue = ""; }
   });
-  // Stock/prices may change from other devices while the page sits open.
-  // Only the cart's items are re-read; a full reload happens only after
-  // the catalog is several hours old.
   window.addEventListener("focus", async () => {
     if (busy) return;
     const idleMs = Date.now() - lastLoadedAt;
-    // Whole catalog costs one read per product, so it is re-downloaded
-    // only rarely (e.g. a register left open since the day before).
     if (!indexed && Date.now() - lastFullLoadAt > 3 * 60 * 60000) {
       await loadProducts();
       refreshCartFromProducts();
@@ -510,11 +464,6 @@ function allCandidates() {
   return products.flatMap((p) => candidatesForProduct(p));
 }
 
-// ----------------------------- SCAN AND LINK --------------------------
-// Many imported barcodes are damaged (the spreadsheet turned them into
-// numbers like 4.80019E+12). When a real barcode isn't found, the cashier
-// searches the product by name and taps Link: the real code is saved to
-// that product (or variant) and works on every scan from then on.
 function enterLinkMode(code) {
   pendingCode = code;
   $("pos-input").value = "";
@@ -625,8 +574,6 @@ function renderAll() {
 function renderResults() {
   const box = $("pos-results");
   const term = $("pos-input").value.trim();
-  // Nothing typed: show the whole catalogue (A–Z) so the cashier can tap items
-  // instead of leaving this panel empty.
   const browsing = !term;
   const linking = pendingCode != null;
   const linkBanner = linking ? `
@@ -836,12 +783,8 @@ function renderPayment() {
 // ----------------------------- COMPLETING A SALE ----------------------
 class SaleError extends Error {}
 
-// If a sale's stock deduction goes out but the answer is lost, the next try
-// must reuse the same sale id so the database ignores the repeat.
 let lastSaleAttempt = null; // { id, sig }
 
-// Sale against the Supabase product database: check prices, deduct stock in
-// one all-or-nothing step, then save the sale record and stock log in Supabase too.
 async function commitSaleSupabase(ctx) {
   const { lines, productIds, saleRef, movementRefs, receiptNo, total, units, pay, cashierEmail } = ctx;
 
@@ -915,8 +858,6 @@ async function commitSaleSupabase(ctx) {
   };
 
   try {
-    // Save the sale record, the stock log and today's tally in Supabase. Repeating
-    // it with the same sale id changes nothing, so a dropped connection can be retried.
     const payload = { id: saleRef.id, sale: saleData, movements: plan.movements, day: dayKey() };
     let saved = false, lastError = null;
     for (let attempt = 0; attempt < 3 && !saved; attempt++) {
@@ -1073,13 +1014,6 @@ async function completeSale() {
   });
 }
 
-
-// ----------------------------- CUSTOMER (optional) --------------------
-// The cashier can attach the sale to a registered customer (same account
-// they use for online orders) or just type a name for a regular who isn't
-// registered. This is what lets the admin's "Top Customers" list count a
-// person's online and in-store purchases together. Leaving it empty is
-// normal: the sale is simply anonymous, as before.
 function customerFields(customer) {
   if (!customer) return {};
   return {
@@ -1106,9 +1040,6 @@ function setSaleCustomer(customer) {
   }
 }
 
-// Finds registered customers by asking the database for names or mobile
-// numbers that START with what was typed (a few reads per search), instead
-// of downloading every customer.
 const customerSearchCache = new Map(); // typed text -> { at, list }
 const CUSTOMER_LIMIT = 6;
 
@@ -1116,9 +1047,6 @@ function nameVariants(text) {
   const t = text.trim();
   const title = t.toLowerCase().replace(/(^|[\s\-.'])([a-z])/g, (m, sep, ch) => sep + ch.toUpperCase());
   const first = t.charAt(0).toUpperCase() + t.slice(1);
-  // Names are usually saved with capitals ("Juan Dela Cruz"), but some accounts were typed in all
-  // lower case ("serg"), and the database match is case-sensitive, so the lower-case spelling is
-  // searched too. (Each extra spelling is another database query, billed even when it finds nothing.)
   return [...new Set([title, first, t.toLowerCase()])].filter(Boolean);
 }
 
@@ -1144,8 +1072,6 @@ async function searchCustomers(text) {
   const cached = customerSearchCache.get(key);
   if (cached && Date.now() - cached.at < 60000) return cached.list;
 
-  // Typing "juan" after "jua": if the shorter search already returned every match (fewer
-  // than the limit), the longer one is just a subset, so filter it here for 0 reads.
   const isNameSearch = !/^\+?\d{3,}$/.test(text.replace(/[\s\-()]/g, "")) && text.length >= 3;
   if (isNameSearch) {
     for (const [k, entry] of customerSearchCache) {
@@ -1261,17 +1187,6 @@ async function newSale() {
   $("pos-input").focus({ preventScroll: true });
 }
 
-
-// ====================================================================
-// RECENT SALES + REFUND / VOID
-// ----------------------------------------------------------------
-// A refund never edits the original sale's items or total. It records
-// how much of each line has been refunded on the sale (refundedQtys /
-// refundedTotal), writes a posRefunds entry (who, why, how much), and —
-// unless "return to stock" is unticked — puts the units back and logs
-// them in the stock log as "return". Everything happens in one
-// transaction, so the same item can't be refunded twice by two devices.
-// ====================================================================
 let historySales = [];
 let refundSale = null;
 let refundQtys = [];
@@ -1333,8 +1248,6 @@ function wireHistory() {
   $("pos-refund-confirm").addEventListener("click", confirmRefund);
 }
 
-// Adds a just-completed sale to today's list on screen. Re-reading the whole
-// day after every sale would cost more reads with each sale made.
 function addSaleToHistory(sale) {
   if ($("pos-history-date").value !== dateInputValue(new Date())) return; // another day is shown
   if (historySales.some((x) => x.id === sale.id)) return;

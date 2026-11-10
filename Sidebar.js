@@ -1,3 +1,5 @@
+// sidebar — Shared sidebar: navigation, role, account menu, badges.
+
 import { auth, db } from "./firebase-config.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import { doc, getDoc, collection, query, where, orderBy, limit, onSnapshot, getCountFromServer, Timestamp, enableNetwork, disableNetwork } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
@@ -9,25 +11,12 @@ import { getReadSet, getClearedSet, loadReadStatus } from "./ReadStatus.js";
 import { promptDeleteAccount } from "./DeleteAccount.js?v=20261109b";
 import { confirmDialog } from "./ConfirmDialog.js";
 
-// ====================================================================
-// CHUNK 0 — CONFIG
-// Shared across every page that includes this file. Adjust here once
-// instead of in five separate places.
-// ====================================================================
 const LOGIN_PAGE_URL = "/";
 
-// Latest live data from Sidebar.js's own listeners, shared with other
-// pages via getLatestProducts()/getLatestNotifications() below and the
-// "products:live"/"notifications:live" events, so they don't need to
-// open their own duplicate Firestore listeners on the same data.
 let latestProducts = null;
 let latestProductTotal = null;
 let latestNotifications = null;
 
-
-// The Cashier (counter POS) link is added from here rather than pasted
-// into every page's HTML, so all pages get it from this one place. It
-// goes right before the Orders link and is visible to every role.
 function injectCashierNav() {
   const nav = document.querySelector(".sidebar__nav");
   if (!nav || nav.querySelector('a[href="Cashier"]')) return;
@@ -50,12 +39,6 @@ const EMPLOYEE_COLLECTION = "employees";
 const EMPLOYEE_NAME_FIELD = "firstName";
 const ADMIN_COLLECTION = "admins";
 
-// ====================================================================
-// CHUNK 1 — ROUTE GUARD
-// ----------------------------------------------------------------
-// Runs on every page that includes Sidebar.js. Nobody without an
-// active Firebase Auth session sees any of these pages.
-// ====================================================================
 onAuthStateChanged(auth, (user) => {
   if (!user) {
     window.location.href = LOGIN_PAGE_URL;
@@ -64,26 +47,6 @@ onAuthStateChanged(auth, (user) => {
   initSidebar(user);
 });
 
-// ====================================================================
-// STALE CONNECTION RECOVERY
-// ----------------------------------------------------------------
-// Firestore's real-time listeners (onSnapshot) rely on a persistent
-// connection — after a PC sleeps, or a browser tab sits backgrounded
-// for a while, that connection can go stale without automatically
-// recovering on its own. Every live listener across the app (this
-// badge, plus whatever each individual page has open — Orders,
-// Accounts, Feedback, etc.) can end up silently frozen, showing old
-// data with no indication anything's wrong, until a manual reload.
-//
-// This runs on every page (Sidebar.js is loaded everywhere) and
-// watches for the tab becoming visible again after being hidden for
-// a while — the exact moment this problem would show up. When that
-// happens, it forces Firestore to fully tear down and re-establish
-// its connection (disableNetwork then enableNetwork — Firestore's own
-// documented way to recover from this), which automatically resumes
-// every active listener on the page cleanly, without needing an
-// actual page reload.
-// ====================================================================
 const STALE_THRESHOLD_MS = 60 * 1000; // only bother reconnecting if hidden for at least a minute — no need for brief tab-switches
 let hiddenSinceMillis = null;
 
@@ -113,8 +76,6 @@ async function initSidebar(user) {
   const role = await resolveRole(user.uid);
   if (!role) return; // resolveRole already signed out and is redirecting — nothing more to do here
 
-  // Drivers are employees an admin marked isDriver:true. They only get the
-  // Orders page — anywhere else sends them straight back to it.
   const isDriver = role === "employee" ? await resolveDriverFlag(user.uid) : false;
   document.documentElement.classList.remove("driver-check");
   document.documentElement.classList.toggle("is-driver", isDriver);
@@ -123,9 +84,6 @@ async function initSidebar(user) {
     return;
   }
 
-  // Notification settings are remembered for the session, so the page doesn't
-  // wait on a database round trip before it can be used. They're refreshed in
-  // the background, so a change made on another device shows up on the next page.
   const PREFS_KEY = "almares_prefs";
   let preferences = null;
   try {
@@ -158,22 +116,10 @@ async function initSidebar(user) {
   wireDeleteAccount(user, role);
   applyRoleRestrictedNavItems(role);
 
-  // Let the page's own script (Dashboard.js, Inventory.js, etc.) know
-  // the sidebar is ready and what role is logged in, in case it needs
-  // to adjust its own content (e.g. hiding an admin-only button).
   watchAccountLive(user.uid, role);
   document.dispatchEvent(new CustomEvent("sidebar:ready", { detail: { role, user, preferences, isDriver } }));
 }
 
-// ====================================================================
-// DRIVER ROLE
-// ----------------------------------------------------------------
-// A driver is an employees/{uid} document with isDriver:true (only an
-// admin can set it — the Firestore rules block self-editing). The flag
-// is cached per-user in sessionStorage so pages open instantly, and
-// re-checked in the background on every page load; if an admin has
-// changed it since, the page reloads once and picks up the new access.
-// ====================================================================
 const DRIVER_CACHE_KEY = "almares_driver";
 
 function onOrdersPage() {
@@ -215,10 +161,6 @@ function applyDriverNav() {
   });
 }
 
-// Feedback and Accounts are admin-only — hidden by default directly
-// in the HTML (not just hidden via JS after the fact) so there's no
-// flash of them being visible before role resolution finishes. This
-// just reveals them once confirmed admin.
 function applyRoleRestrictedNavItems(role) {
   if (role !== "admin") return;
   const feedbackLink = document.getElementById("feedback-nav-link");
@@ -229,32 +171,10 @@ function applyRoleRestrictedNavItems(role) {
   if (salesLink) salesLink.hidden = false;
 }
 
-// ====================================================================
-// CHUNK 1B — RESOLVE ROLE (sessionStorage cache, Firestore as fallback)
-// ----------------------------------------------------------------
-// sessionStorage is only set by AdminLogin.js/EmployeeLogin.js's login/signup handlers — and
-// it clears when the tab/browser closes. Firebase Auth's own session
-// survives much longer than that, so someone can still be genuinely
-// signed in with sessionStorage empty (e.g. reopening the browser
-// later). The old code defaulted to "employee" whenever the cache was
-// missing, which silently mis-labeled admin accounts. This checks the
-// real source of truth instead — the same admins/employees docs your
-// Firestore rules themselves check — and caches the result so normal
-// in-app navigation still hits the fast sessionStorage path afterward.
-// ====================================================================
 async function resolveRole(uid) {
   const cached = sessionStorage.getItem("almares_role");
 
   if (cached) {
-    // Don't make every page load wait on a network round-trip just to
-    // recheck something that's true the overwhelming majority of the
-    // time (not suspended). Return the cached role immediately so the
-    // UI (nav links, identity, etc.) appears instantly — and check
-    // suspension/termination in the BACKGROUND at the same time. If
-    // that background check finds a real problem, it signs out and
-    // redirects at that point, same as before — this only changes
-    // when the check happens relative to the UI, not whether it
-    // happens.
     checkAccountStillValid(uid, cached);
     return cached;
   }
@@ -286,22 +206,12 @@ async function resolveRole(uid) {
     return "employee";
   }
 
-  // Signed in via Firebase Auth, but no matching Firestore document —
-  // this is exactly the state of someone who authenticated via
-  // Google/started signup but never actually finished (e.g. abandoned
-  // the "Complete Your Profile" step, or pressed back mid-flow).
-  // Previously this defaulted to "employee" and let them straight
-  // into the app — a real gap, since it completely bypassed the
-  // Staff Code check. Sign them out and send them back instead.
   console.warn(`Signed-in user ${uid} has no matching admins or employees document — signing out.`);
   await signOut(auth);
   window.location.href = LOGIN_PAGE_URL;
   return null;
 }
 
-// Re-checked on every page load once role is already cached — catches
-// both suspension and termination happening mid-session, not just at
-// the next fresh login.
 async function checkAccountStillValid(uid, role) {
   const collectionName = role === "admin" ? ADMIN_COLLECTION : EMPLOYEE_COLLECTION;
 
@@ -328,16 +238,11 @@ async function checkAccountStillValid(uid, role) {
 
     return true;
   } catch (error) {
-    // Fail open — a network blip checking this shouldn't lock out a
-    // legitimate, currently-valid session.
     console.error("Couldn't verify account status:", error);
     return true;
   }
 }
 
-// New employee sign-ups have approved:false until an admin approves them
-// on the Accounts page. Accounts without the field (created before this
-// existed) count as approved.
 function isPendingApproval(data) {
   return data?.approved === false;
 }
@@ -349,8 +254,6 @@ async function signOutPending() {
   window.location.href = "EmployeeLogin.html?pending=1";
 }
 
-// Watches the person's own account record while the page is open, so a suspension,
-// removal or un-approval by the admin takes effect at once instead of at the next reload.
 let accountWatchOn = false;
 function watchAccountLive(uid, role) {
   if (accountWatchOn) return;
@@ -393,9 +296,6 @@ async function signOutSuspended(data, role) {
   window.location.href = `${targetPage}?suspended=${encodeURIComponent(untilDate)}&reason=${encodeURIComponent(reason)}`;
 }
 
-// ====================================================================
-// CHUNK 2 — IDENTITY / GREETING
-// ====================================================================
 async function renderIdentity(role, user) {
   const roleBadge = document.getElementById("role-badge");
   const greeting = document.getElementById("greeting");
@@ -443,9 +343,6 @@ function timeOfDayGreeting() {
   return "Good Evening";
 }
 
-// ====================================================================
-// CHUNK 3 — LIVE DATE / TIME
-// ====================================================================
 function startClock() {
   const dateEl = document.getElementById("topbar-date");
   const timeEl = document.getElementById("topbar-time");
@@ -465,13 +362,6 @@ function startClock() {
   setInterval(tick, 1000);
 }
 
-// ====================================================================
-// CHUNK 4 — ACTIVE NAV HIGHLIGHTING
-// ----------------------------------------------------------------
-// Each nav link's href is the real filename it points to (e.g.
-// "Inventory.html"). Whichever one matches the current page gets
-// the active state — no manual "which page am I on" flags needed.
-// ====================================================================
 function highlightActiveNav() {
   const currentPage = (window.location.pathname.split("/").pop() || "Dashboard.html").replace(/\.html$/i, "");
 
@@ -481,14 +371,6 @@ function highlightActiveNav() {
   });
 }
 
-// ====================================================================
-// ORDERS BADGE
-// ----------------------------------------------------------------
-// Live count on the "Orders" nav item, same style as Notifications.
-// It counts Pending orders only (status "pending"), for every role.
-// The badge element is created here so every page gets it
-// without editing each page's HTML.
-// ====================================================================
 function loadOrdersBadge() {
   const link = document.querySelector('.sidebar__nav a[href="Orders"]');
   if (!link) return;
@@ -505,9 +387,6 @@ function loadOrdersBadge() {
   // Everyone (staff and drivers) sees the same count: Pending orders only.
   badge.title = "Pending orders";
 
-  // One COUNT instead of downloading every pending order: about 1 read per refresh, however
-  // many orders are pending. It matches the Orders page window (the last 7 days). It refreshes
-  // when the page is shown, every 2 minutes while it is open, and when the Orders page changes.
   const WINDOW_DAYS = 7;
   let useWindow = true; // falls back to "all pending" if the date filter needs an index that is missing
   let lastRun = 0;
@@ -548,17 +427,6 @@ function loadOrdersBadge() {
   document.addEventListener("orders:changed", () => refreshBadge());
 }
 
-// ====================================================================
-// CHUNK 5 — NOTIFICATIONS BADGE (unread count, shown on every page)
-// ----------------------------------------------------------------
-// Combines synthesized stock alerts (any product not fully "In
-// Stock") and real order notifications from employeeNotifications —
-// both roles can read both sources now. Each item gets a stable ID
-// ("stock-<productId>" or the real doc ID); read/cleared state is
-// tracked per-UID (see ReadStatus.js) so Admin and Employee never
-// share badge state. Cleared items never count, read-but-not-cleared
-// items don't count either — only unread AND not-cleared does.
-// ====================================================================
 async function loadNotifBadge(uid, preferences) {
   const badge = document.getElementById("notif-badge");
   if (!badge) return;
@@ -583,15 +451,6 @@ async function loadNotifBadge(uid, preferences) {
     }
   }
 
-  // Recomputes using whatever data is already cached — no Firestore
-  // re-fetch needed, since only the read/cleared status changed, not
-  // the underlying products/notifications themselves. Called from the
-  // two onSnapshot callbacks below (when the underlying DATA changes)
-  // and from the "readstatus:changed" listener further down (when
-  // something gets marked read/cleared elsewhere — e.g. Notifications.js's
-  // "Mark All Read" — which those onSnapshot listeners would otherwise
-  // never notice, since marking something read doesn't touch the
-  // products or employeeNotifications collections at all).
   function recomputeUnreadCounts() {
     const freshReadSet = getReadSet(uid);
     const freshClearedSet = getClearedSet(uid);
@@ -613,39 +472,6 @@ async function loadNotifBadge(uid, preferences) {
 
   document.addEventListener("readstatus:changed", recomputeUnreadCounts);
 
-  // Real-time: recomputes the moment ANY product's stock changes, not
-  // just on page load / after a cache expires. Uses the shared,
-  // variant-aware check — a variant-only product's stock going to 0
-  // now correctly triggers this, which the old per-page duplicated
-  // logic (checking only the flat parent stock field) silently missed.
-  //
-  // SCALABILITY FIX: previously fetched the ENTIRE products
-  // collection just to check stock levels — on a catalog of
-  // thousands of products, that's thousands of documents downloaded
-  // and processed on every single page load, everywhere, just for a
-  // badge count. This query only pulls products whose stockCount is
-  // already ≤99 (the low-stock threshold) — an indexed range query,
-  // not a full scan — so the amount of data fetched stays small and
-  // proportional to how many products actually need attention, not
-  // how large the whole catalog is.
-  //
-  // HONEST LIMITATION: this specific query can't see INTO a variant
-  // product's nested flavors array (Firestore can't efficiently query
-  // that), so a variant-only product (parent stockCount left null,
-  // stock tracked per-variant instead) won't be caught by this query
-  // even if a specific variant is critically low. A fully complete
-  // fix would need a computed status field written at product-update
-  // time in Inventory.js (every Add/Edit/CSV-import/Scan/Stock-Count
-  // path) — a real, doable follow-up, just larger in scope than this
-  // pass. For a catalog that's mostly non-variant products, this
-  // still closes the overwhelming majority of the actual scale
-  // problem today.
-  //
-  // Also dispatches this same data as a shared event ("products:live")
-  // so other pages (Dashboard.js, etc.) can reuse it instead of
-  // opening their OWN separate live listener on the same collection —
-  // Sidebar.js runs on every page already, so this was genuinely
-  // duplicated work slowing down every single page load.
   const publishProducts = (products, total) => {
     latestProducts = products;
     if (typeof total === "number") latestProductTotal = total;
@@ -654,9 +480,6 @@ async function loadNotifBadge(uid, preferences) {
   };
 
   if (SUPABASE_ENABLED) {
-    // Products live in Supabase now: no Firebase reads at all. Refreshes
-    // when the page opens, every 2 minutes while visible, and when the
-    // tab is shown again.
     let busy = false;
     const refreshLowStock = async () => {
       if (busy || document.hidden) return;
@@ -681,9 +504,6 @@ async function loadNotifBadge(uid, preferences) {
   );
   }
 
-  // Same idea — shared with Dashboard.js/Notifications.js via
-  // "notifications:live" instead of each maintaining its own
-  // duplicate listener on this same collection.
   const publishNotifications = (list) => {
     latestNotifications = list;
     recomputeUnreadCounts();
@@ -691,8 +511,6 @@ async function loadNotifBadge(uid, preferences) {
   };
 
   if (SUPABASE_ENABLED) {
-    // Staff notifications live in Supabase now: no Firebase reads. Checked when the
-    // page opens, every 20 seconds while visible, and when the tab is shown again.
     let notifBusy = false;
     const refreshNotifications = async () => {
       if (notifBusy || document.hidden) return;
@@ -716,10 +534,6 @@ async function loadNotifBadge(uid, preferences) {
   }
 }
 
-// Exposed so a page whose own script runs AFTER Sidebar.js's first
-// snapshot already arrived can grab the current data immediately,
-// instead of only being able to react to the NEXT change (closes a
-// small timing gap the events alone wouldn't cover).
 export function getLatestProductTotal() { return latestProductTotal; }
 export function getLatestProducts() {
   return latestProducts;
@@ -729,13 +543,6 @@ export function getLatestNotifications() {
   return latestNotifications;
 }
 
-// ====================================================================
-// CHUNK 6 — SIDEBAR COLLAPSE
-// ====================================================================
-// Shared across every page that includes the button in its HTML
-// (Notifications, Orders, and any page added going forward) — a
-// no-op if that page doesn't have the button at all, so it's safe
-// to call unconditionally from every page's shared sidebar init.
 function wireScrollToTop() {
   const btn = document.getElementById("scroll-to-top-btn");
   if (!btn) return;
@@ -765,10 +572,6 @@ function wireCollapse() {
     }
   });
 
-  // Mobile only: tapping anywhere outside the sidebar closes the
-  // account menu, so Logout/Delete Account are never sitting exposed
-  // during normal scrolling/tapping — they only ever show up right
-  // after a deliberate tap on the menu button.
   document.addEventListener("click", (event) => {
     if (!isMobile()) return;
     if (!sidebar.classList.contains("is-account-menu-open")) return;
@@ -777,9 +580,6 @@ function wireCollapse() {
   });
 }
 
-// ====================================================================
-// CHUNK 7 — LOGOUT
-// ====================================================================
 function wireLogout() {
   const logoutBtn = document.getElementById("logout-btn");
   if (!logoutBtn) return;
@@ -802,12 +602,6 @@ function wireLogout() {
   });
 }
 
-// ====================================================================
-// CHUNK 8 — DELETE ACCOUNT
-// ----------------------------------------------------------------
-// The actual password-reentry + deletion flow lives in
-// DeleteAccount.js — this just wires the sidebar button to it.
-// ====================================================================
 function wireDeleteAccount(user, role) {
   const deleteBtn = document.getElementById("delete-account-btn");
   if (!deleteBtn) return;

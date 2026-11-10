@@ -1,3 +1,5 @@
+// employee-login — Employee sign-in and sign-up logic (email or Google, staff code, OTP).
+
 import { auth, db } from "./firebase-config.js";
 import { guardAutofill } from "./AutofillGuard.js";
 import { promptForgotPassword } from "./ForgotPassword.js?v=20261030d";
@@ -24,11 +26,6 @@ const EMPLOYEE_ACTIVE_FIELD   = "activated";
 const EMPLOYEE_REDIRECT_URL   = "Dashboard.html";
 const LOGIN_PAGE_URL = "EmployeeLogin.html";
 
-// If already signed in (and genuinely a valid, activated employee),
-// skip straight past the login form instead of making them log in
-// again.
-// True while a new employee is being registered on this page. The sign-up signs the
-// new login in for a moment, and this watcher must not send them to the Dashboard then.
 let signupInProgress = false;
 
 onAuthStateChanged(auth, async (user) => {
@@ -50,12 +47,6 @@ document.addEventListener("DOMContentLoaded", () => {
   guardAutofill(["employee-username", "employee-password"]);
 
   const SIGNUP_PASSWORD_FIELD_IDS = ["signup-password", "signup-confirm-password"];
-  // The browser may auto-fill a SAVED password into these boxes by
-  // itself (on reload, or while the form is hidden). That must never
-  // show up. A password the person chose on purpose — "Use strong
-  // password" from Google Password Manager — only appears AFTER they
-  // click into the box, so: anything that appears while they haven't
-  // touched the box yet is cleared; anything after they touch it stays.
   const touchedPasswordFields = new Set();
   function clearIfUntouched(input) {
     if (!touchedPasswordFields.has(input) && input.value) input.value = "";
@@ -64,8 +55,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const input = document.getElementById(id);
     if (!input) return;
     input.value = "";
-    // Touching either box counts for both: picking "Use strong
-    // password" in the first box fills the confirm box too.
     ["pointerdown", "focus", "keydown"].forEach((evt) =>
       input.addEventListener(evt, () => {
         SIGNUP_PASSWORD_FIELD_IDS.forEach((otherId) => {
@@ -77,8 +66,6 @@ document.addEventListener("DOMContentLoaded", () => {
       if (event.animationName === "onAutofillDetected") clearIfUntouched(input);
     });
   });
-  // Autofill can land a moment after load, and not every browser fires
-  // the event above, so sweep a few times as well.
   window.clearUntouchedSignupPasswords = () => {
     SIGNUP_PASSWORD_FIELD_IDS.forEach((id) => {
       const input = document.getElementById(id);
@@ -313,9 +300,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // The employee records can't be read from the browser before sign-in any
-  // more: the server looks the person up (by username or email) and returns
-  // only what this page needs, shaped like the document it used to read.
   async function findEmployeeRecordByIdentifier(identifier) {
     const r = await guardCall("resolve_login", { kind: "employee", id: identifier });
     if (!r.found) return null;
@@ -343,9 +327,6 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    // Start the account lookup at the same time as the lockout check
-    // (they don't depend on each other) so sign-in waits for one
-    // round trip here instead of two.
     const employeeLookup = findEmployeeRecordByIdentifier(rawInput);
     employeeLookup.catch(() => {}); // handled below; avoids an unhandled-rejection warning if we return early
     const lockStatus = await checkLoginAllowed(rawInput);
@@ -540,9 +521,6 @@ document.addEventListener("DOMContentLoaded", () => {
       credential = await createUserWithEmailAndPassword(auth, email, password);
     } catch (error) {
       if (error.code !== "auth/email-already-in-use") throw error;
-      // A sign-up that stopped half way (the login was created but the profile
-      // was never saved) leaves the email "in use" with no account to show.
-      // If this is that case and the password matches, finish the sign-up now.
       createdNow = false;
       try {
         credential = await signInWithEmailAndPassword(auth, email, password);
@@ -630,9 +608,6 @@ document.addEventListener("DOMContentLoaded", () => {
       const existingDoc = await getDoc(doc(db, EMPLOYEE_COLLECTION, user.uid));
 
       if (existingDoc.exists()) {
-        // Someone clicked "Continue with Google" on the Register form, but
-        // this Google account is already an employee — don't let it
-        // silently re-login or duplicate anything, send them to Login.
         if (mode === "register") {
           await signOut(auth);
           showStatus(`That Google account is already registered. Please use "Log in with Google" instead.`, "error");
@@ -672,8 +647,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // No employee record for this Google account yet.
       if (mode === "login") {
-        // Someone clicked "Log in with Google" but there's no account —
-        // don't auto-create one here, send them to Register instead.
         await signOut(auth);
         showStatus(`No account found for that Google account. Please use "Register here" to create one.`, "error");
         return;
@@ -852,12 +825,6 @@ function escapeHtmlSuspension(text) {
   return div.innerHTML;
 }
 
-// Permanent lockout (15+ failed attempts — see LoginAttempts.js) gets
-// this glass overlay instead of an inline form error, matching the
-// suspension overlay's treatment: this isn't a "try again shortly"
-// state, it needs an admin to actually clear it.
-// Shown once a new employee finishes registering: the account exists but an
-// admin has to approve it before anyone can log in.
 function showPendingApprovalOverlay(username = "", email = "") {
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay lock-overlay";
@@ -891,8 +858,6 @@ function showPendingApprovalOverlay(username = "", email = "") {
   });
 }
 
-// An admin looked at the sign-up and declined it. Shown instead of the
-// "pending" card so the person isn't left waiting for nothing.
 function showRejectedOverlay(reason = "") {
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay lock-overlay";

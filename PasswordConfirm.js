@@ -1,19 +1,10 @@
+// password-confirm — Modal asking the user to re-enter their password.
+
 import { auth } from "./firebase-config.js";
 import {
   EmailAuthProvider, reauthenticateWithCredential
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 
-// ====================================================================
-// PASSWORD CONFIRMATION MODAL
-// ----------------------------------------------------------------
-// Unlike ConfirmDialog.js (a plain yes/no), this actually verifies
-// the current password against Firebase Auth via
-// reauthenticateWithCredential — the same mechanism DeleteAccount.js
-// uses. A wrong password is rejected with an inline error and the
-// modal stays open for retry; only a genuinely correct password
-// resolves true. Built/torn down dynamically, same pattern as
-// ConfirmDialog.js.
-// ====================================================================
 export function promptPasswordConfirm(message, options = {}) {
   const { title = "Confirm your password", confirmLabel = "Confirm" } = options;
 

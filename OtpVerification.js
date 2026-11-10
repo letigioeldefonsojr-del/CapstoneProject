@@ -1,13 +1,7 @@
+// otp — Send and verify six-digit email OTP codes.
+
 import { guardCall } from "./LoginGuard.js?v=20261030d";
 
-// ====================================================================
-// OTP EMAIL VERIFICATION (server side)
-// ----------------------------------------------------------------
-// The six-digit code is made, emailed (through EmailJS) and checked by the
-// "login-guard" function. Only a hash is stored, in Supabase, so nothing
-// here - or in the browser - can read a code. Codes last 15 minutes, work
-// once, and allow 5 wrong tries. Same two functions as before.
-// ====================================================================
 export async function sendOtpCode(email, name) {
   try {
     await guardCall("otp_send", { email, name: name || "" });

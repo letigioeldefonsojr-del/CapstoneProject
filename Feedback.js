@@ -1,19 +1,10 @@
+// feedback — Customer feedback and ratings page.
+
 import { db } from "./firebase-config.js";
 import {
   collection, query, where, onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 
-// ====================================================================
-// FEEDBACK & RATINGS
-// ----------------------------------------------------------------
-// Ratings and feedback are NOT a separate collection — they're stored
-// directly on the order document itself. Confirmed from the mobile
-// app's order_details_screen.dart: after a delivery is confirmed, the
-// customer can optionally rate 1-5 stars and leave a comment, written
-// as {rating, feedback, ratedAt} directly onto that orders/{orderId}
-// document. A rating is fully optional — the customer can dismiss the
-// dialog with nothing written at all.
-// ====================================================================
 const ORDERS_COLLECTION = "orders";
 
 let allRatedOrders = [];
@@ -21,9 +12,6 @@ let currentView = "month"; // "month" | "all"
 let sortOrder = "newest"; // "newest" | "oldest"
 
 document.addEventListener("sidebar:ready", (event) => {
-  // Admin-only page. The nav link is already hidden for employees
-  // (see Sidebar.js), but that alone doesn't stop someone from typing
-  // the URL directly — this is the actual enforcement.
   if (event.detail.role !== "admin") {
     window.location.replace("Dashboard.html");
     return;
@@ -37,9 +25,6 @@ function loadFeedback() {
 
   const q = query(collection(db, ORDERS_COLLECTION), where("rating", ">=", 1));
 
-  // Real-time: fires immediately with current data, then again
-  // automatically whenever a customer submits a new rating — no
-  // manual reload needed on this end.
   onSnapshot(
     q,
     (snap) => {
@@ -126,13 +111,6 @@ function buildSummary(monthOrders, allOrders, monthLabel) {
   return wrap;
 }
 
-// Proportional-fill star row: the filled portion's WIDTH reflects the
-// decimal average exactly (e.g. 4.3/5 fills 86% of the 5th star, not
-// just rounding to 4 whole stars) — built as two overlapping SVG star
-// rows: a gray "track" row underneath, and a colored "fill" row on
-// top, clipped to the exact percentage via a wrapping div with
-// overflow:hidden. SVG (not text characters) so the clipping edge is
-// crisp and consistent regardless of font/browser rendering.
 function buildAverageStarsHtml(average) {
   const fillPercent = Math.max(0, Math.min(100, (average / 5) * 100));
   const tierClass = average >= 4 ? "rating-stars--high" : average >= 2.5 ? "rating-stars--mid" : "rating-stars--low";

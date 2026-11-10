@@ -1,3 +1,5 @@
+// admin-login — Admin sign-in page logic with lockout and OTP.
+
 import { auth, db } from "./firebase-config.js";
 import { guardAutofill } from "./AutofillGuard.js";
 import { promptForgotPassword } from "./ForgotPassword.js?v=20261030d";
@@ -139,8 +141,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function resolveLoginEmail(identifier) {
     if (looksLikeEmail(identifier)) return identifier;
-    // The admins records can't be read from the browser any more, so the
-    // server looks the username up and hands back just the email.
     const result = await guardCall("resolve_login", { kind: "admin", id: identifier });
     return result.found ? (result.email || null) : null;
   }
@@ -205,8 +205,6 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
-      // Always session-only: the admin must sign in again every time they
-      // land on this page, even within the same browser.
       await setPersistence(auth, browserSessionPersistence);
 
       await signInWithEmailAndPassword(auth, email, password);
@@ -220,12 +218,6 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
-      // New admin accounts (created via Accounts.js's "Add New Admin")
-      // start unverified — this proves whoever's actually logging in
-      // controls the email, not just that it was typed correctly when
-      // the account was created. Existing accounts never have this
-      // field at all, so it's undefined there, not false — meaning
-      // this only ever applies to genuinely new accounts.
       if (adminData?.emailVerified === false) {
         pendingVerification = { uid: auth.currentUser.uid, email, rawInput, name: adminData.name || "there" };
         try {
@@ -320,9 +312,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // Abandoning this step leaves a signed-in Firebase Auth user with an
-  // unverified account — sign them back out so they're not left in
-  // that half-finished state.
   async function handleOtpCancel() {
     pendingVerification = null;
     clearOtpDigitInputs();
@@ -334,7 +323,6 @@ document.addEventListener("DOMContentLoaded", () => {
     hideOtpStep();
   }
 
-
   formAdmin.addEventListener("submit", handleAdminLogin);
   formOtpVerify.addEventListener("submit", handleOtpVerifySubmit);
   document.getElementById("otp-resend-btn").addEventListener("click", handleOtpResend);
@@ -343,9 +331,6 @@ document.addEventListener("DOMContentLoaded", () => {
     btn.addEventListener("click", () => promptForgotPassword());
   });
 
-  // If Sidebar.js just signed someone out mid-session because their
-  // account got suspended while they were actively using the app,
-  // show them why instead of silently dropping them on a blank form.
   const urlParams = new URLSearchParams(window.location.search);
   const suspendedUntil = urlParams.get("suspended");
   if (suspendedUntil) {
@@ -390,10 +375,6 @@ function escapeHtmlSuspension(text) {
   return div.innerHTML;
 }
 
-// Permanent lockout (15+ failed attempts — see LoginAttempts.js) gets
-// this glass overlay instead of an inline form error, matching the
-// suspension overlay's treatment: this isn't a "try again shortly"
-// state, it needs an admin to actually clear it.
 function showLockedOverlay() {
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay lock-overlay";

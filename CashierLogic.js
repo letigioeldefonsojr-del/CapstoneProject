@@ -1,21 +1,5 @@
-// ====================================================================
-// CASHIER LOGIC (pure functions — no Firebase, no DOM)
-// ----------------------------------------------------------------
-// Everything the counter POS decides lives here so it can be tested on
-// its own: what price an item sells at right now (retail, discounted,
-// or wholesale), how the cart adds up, and exactly how stock changes
-// when a sale is completed.
-//
-// PRICING RULES (match the rest of the system):
-//   - Prices are stored as text like "₱45.00" — parsed to numbers here.
-//   - Retail price: the discount (discountPercent + start/end dates) is
-//     applied when it is active right now. Same rule as the customer app.
-//   - Wholesale price: the product's/variant's own wholesalePrice per
-//     unit. Discounts never apply to wholesale.
-//   - Legacy discounted products (an old version rewrote `price` and
-//     kept `originalPrice`) already hold the discounted price — used
-//     as is.
-// ====================================================================
+// pos-logic — Pure POS rules: pricing, wholesale per 6 pieces, sale items.
+
 import { fuzzyMatch } from "./FuzzySearch.js";
 
 export const F = {
@@ -51,8 +35,6 @@ export function formatMoney(n) {
   return `₱${Number(n || 0).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-// Real Timestamp, or the {seconds} object a Timestamp becomes after the
-// sessionStorage product cache.
 export function timeValueToMillis(value) {
   if (value === null || value === undefined) return null;
   if (typeof value.toMillis === "function") return value.toMillis();
@@ -176,16 +158,6 @@ export function searchProducts(products, term, limit = 30) {
     .slice(0, limit);
 }
 
-// ---------------------------- CART ----------------------------------
-// A cart is a plain array of lines. Every function returns a NEW array
-// (plus an optional error message) and never mutates its input.
-
-// Wholesale rule: the wholesale price is the price PER PIECE once you buy a
-// full group of 6. Every full group of 6 pieces is charged at the wholesale
-// price each, and the pieces left over (1-5) are charged the regular price.
-//   regular 15, wholesale 11:  5 pcs = 75,  6 pcs = 66,  7 pcs = 66 + 15 = 81,
-//                              11 pcs = 66 + 75 = 141,  12 pcs = 66 + 66 = 132
-// It applies by itself - the cashier doesn't pick a mode.
 export const WHOLESALE_GROUP_SIZE = 6;
 
 export function linePricing(line) {
@@ -299,11 +271,6 @@ export function computePayment(total, method, tendered) {
   return { ok: true, tendered: round2(received), change: round2(received - total) };
 }
 
-// ----------------------- STOCK / MOVEMENT PLAN -----------------------
-// Given each product's FRESH data (read inside the transaction) and the
-// cart lines, works out the new stock for every affected product and
-// the stock-log entries to write. Returns { error } if any line can no
-// longer be fulfilled.
 export function planStockUpdates(freshProductsById, lines) {
   const working = new Map();       // productId -> { stockCount?, flavors? } working copy
   const updates = new Map();       // productId -> update object
@@ -358,9 +325,6 @@ export function makeReceiptNo(date = new Date(), random = Math.random) {
   return `POS-${day}-${suffix}`;
 }
 
-// A line becomes one sale item per price: the pieces sold in full groups of 6
-// at the wholesale price, and the remaining pieces at the regular price. That
-// keeps every item a plain "qty x unit price", so refunds work piece by piece.
 export function buildSaleItems(cart) {
   return cart.flatMap((line) => {
     const p = linePricing(line);
@@ -396,11 +360,6 @@ export function buildSaleItems(cart) {
   });
 }
 
-// ------------------------- REFUNDS & VOIDS ---------------------------
-// A sale document keeps `refundedQtys` (one number per item, same order
-// as `items`) and `refundedTotal`. A "void" is simply a refund of every
-// remaining unit; the status becomes "full" when nothing is left.
-
 export function itemRefundedQty(sale, index) {
   const q = Array.isArray(sale.refundedQtys) ? sale.refundedQtys[index] : 0;
   return typeof q === "number" && q > 0 ? q : 0;
@@ -421,8 +380,6 @@ export function saleRefundStatus(sale) {
   return remaining === 0 ? "full" : "partial";
 }
 
-// requested: array of quantities to refund, one per item (same order).
-// -> { lines, total, refundedQtys, refundedTotal, status } or { error }
 export function planRefund(sale, requested) {
   const items = Array.isArray(sale.items) ? sale.items : [];
   if (!Array.isArray(requested) || requested.length !== items.length) return { error: "Invalid refund request." };
@@ -467,9 +424,6 @@ export function planRefund(sale, requested) {
   return { lines, total, refundedQtys, refundedTotal, status: saleRefundStatus(merged) };
 }
 
-// Puts refunded units back on the shelf. Lines whose product/variant no
-// longer exists are skipped and reported (the refund itself still goes
-// through — the customer is still owed the money).
 export function planRestock(freshProductsById, lines) {
   const working = new Map();
   const updates = new Map();
@@ -516,9 +470,6 @@ export function planRestock(freshProductsById, lines) {
   return { updates, movements, skipped };
 }
 
-// ------------------------ ON-SCREEN NUMBER PAD ------------------------
-// Pure rules for the touch number pad, so they can be tested alone.
-// keys: "0"-"9", "00", ".", "back", "clear"
 export function applyNumpadKey(current, key, { decimal = true, maxInt = 7 } = {}) {
   let value = String(current ?? "");
   if (key === "clear") return "";
@@ -547,8 +498,6 @@ export function applyNumpadKey(current, key, { decimal = true, maxInt = 7 } = {}
   return next;
 }
 
-// Cash buttons shown next to "Exact": the next round amounts a customer
-// is likely to hand over (always more than the total, at most 4).
 export function quickCashAmounts(total) {
   const t = round2(total);
   if (!(t > 0)) return [];

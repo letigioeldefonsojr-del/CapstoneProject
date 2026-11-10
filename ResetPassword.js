@@ -1,22 +1,11 @@
+// reset-password — Custom password reset page logic.
+
 import { auth } from "./firebase-config.js";
 import {
   verifyPasswordResetCode, confirmPasswordReset
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import { validatePasswordStrength } from "./PasswordStrength.js";
 
-// ====================================================================
-// CUSTOM PASSWORD RESET PAGE
-// ----------------------------------------------------------------
-// The link in the reset email points here (?mode=resetPassword&
-// oobCode=...) instead of Firebase's default hosted reset page — see
-// the setup note at the bottom of this file for the one manual step
-// required in Firebase Console for that redirect to actually happen.
-//
-// verifyPasswordResetCode() confirms the code is real/unexpired and
-// returns the associated email (for display only — it doesn't sign
-// anyone in). confirmPasswordReset() is what actually changes the
-// password once our own validatePasswordStrength() check has passed.
-// ====================================================================
 let oobCode = null;
 
 document.addEventListener("DOMContentLoaded", init);
@@ -115,15 +104,3 @@ function showStatus(el, message, kind) {
   el.hidden = false;
 }
 
-// ====================================================================
-// REQUIRED ONE-TIME SETUP (Firebase Console — can't be done from code)
-// ----------------------------------------------------------------
-// For the emailed reset link to actually open THIS page instead of
-// Firebase's default hosted one:
-//   Firebase Console → Authentication → Templates → Password reset
-//   → (pencil/edit icon) → Customize action URL
-//   → set it to: https://<your-domain>/ResetPassword.html
-// Without this step, ForgotPassword.js still works (it sends the
-// email fine), but the link inside it will keep opening Firebase's
-// own default page instead of this one.
-// ====================================================================

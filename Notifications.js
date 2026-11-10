@@ -1,20 +1,10 @@
+// notifications — Notifications page for admin and employees.
+
 import { getWorstAlertDetail } from "./StockAlerts.js";
 import { getReadSet, markRead, markAllRead, getClearedSet, markAllCleared, loadReadStatus } from "./ReadStatus.js";
 import { confirmDialog } from "./ConfirmDialog.js";
 import { getLatestProducts, getLatestNotifications } from "./Sidebar.js";
 
-// ====================================================================
-// CHUNK 0 — CONFIG
-// ----------------------------------------------------------------
-// Two sources feed this page, both readable by Admin AND Employee
-// now (per the updated Firestore rules — see firestore.rules):
-// real order notifications from employeeNotifications, and
-// synthesized stock alerts computed live from products.
-//
-// Read/cleared state is tracked per-UID (ReadStatus.js), not per
-// browser — so clearing as one account never affects what another
-// account sees, even when testing both in the same browser.
-// ====================================================================
 const PRODUCT_NAME_FIELD = "name";
 
 let currentUid = null;
@@ -23,9 +13,6 @@ let orderItems = [];  // [{ id, type:"order", message, timeLabel }]
 let stockItems = [];  // [{ id, type:"stock", message, filterValue }]
 let activeTab = "all";
 
-// ====================================================================
-// CHUNK 1 — WAIT FOR THE SHARED SIDEBAR (auth guard lives there)
-// ====================================================================
 document.addEventListener("sidebar:ready", async (event) => {
   currentUid = event.detail.user.uid;
   currentPreferences = event.detail.preferences || currentPreferences;
@@ -36,21 +23,6 @@ document.addEventListener("sidebar:ready", async (event) => {
   loadEverything();
 });
 
-// Shows once you've scrolled down a meaningful amount, hides again
-// near the top — no point offering "back to top" when you're already
-// basically there.
-// ====================================================================
-// CHUNK 2 — LOAD BOTH SOURCES (real-time)
-// ----------------------------------------------------------------
-// Cleared items are filtered out right here, at load time — once
-// cleared, they're just gone for this account until the underlying
-// thing changes (a new order notification is a new doc ID; a stock
-// alert only reappears if it goes back to "in" and then drops again).
-//
-// Both listeners are set up once and stay live for the rest of the
-// page's life — a stock level or new order notification changing
-// anywhere re-renders this page immediately, no reload needed.
-// ====================================================================
 function loadEverything() {
   function renderStockItems(products) {
     if (!currentPreferences.stockAlerts) {
@@ -108,10 +80,6 @@ function loadEverything() {
     render();
   }
 
-  // Sidebar.js (loaded on every page already) maintains its own live
-  // listeners on these exact collections for the notification badge —
-  // reusing that data here instead of opening two MORE duplicate
-  // listeners, which was genuinely slowing down every page load.
   const existingProducts = getLatestProducts();
   if (existingProducts) renderStockItems(existingProducts);
   document.addEventListener("products:live", (event) => renderStockItems(event.detail.products));
@@ -130,9 +98,6 @@ function buildStockMessage(product, detail) {
   return `${label} is running low — ${detail.stock} left.`;
 }
 
-// ====================================================================
-// CHUNK 3 — TABS
-// ====================================================================
 function wireTabs() {
   document.querySelectorAll(".tab-row__btn").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -143,13 +108,6 @@ function wireTabs() {
   });
 }
 
-// ====================================================================
-// CHUNK 4 — RENDER
-// ----------------------------------------------------------------
-// "All" shows both groups with section headers. "Orders" / "Stock
-// Alerts" show just that one list. Clear All acts on whatever's
-// currently visible in the active tab.
-// ====================================================================
 function render() {
   const list = document.getElementById("full-notif-list");
   const clearBtn = document.getElementById("clear-all-btn");
@@ -164,9 +122,6 @@ function render() {
 
   list.innerHTML = "";
 
-  // Quick jump-links so both sections (and how many items are in each)
-  // are visible immediately at the top, instead of only discoverable
-  // by scrolling all the way down.
   if (activeTab === "all" && stockItems.length > 0 && orderItems.length > 0) {
     list.appendChild(buildJumpLinksRow());
   }
@@ -225,11 +180,6 @@ function buildStockListItem(item, alreadyRead) {
 
   el.addEventListener("click", async (event) => {
     event.preventDefault();
-    // Actually wait for this to finish before navigating — a fixed
-    // delay was a guess at "probably enough time," not a real
-    // guarantee, and it wasn't reliable. Properly awaiting the write
-    // guarantees it completes before the page unloads, at the cost
-    // of a normal network-speed wait instead of feeling instant.
     try {
       await markRead(currentUid, item.id);
     } catch (error) {
@@ -270,9 +220,6 @@ function buildOrderListItem(item, alreadyRead) {
   return el;
 }
 
-// ====================================================================
-// CHUNK 5 — MARK ALL AS READ (per-uid, cosmetic — items stay visible)
-// ====================================================================
 function wireMarkAllRead() {
   document.getElementById("mark-all-read-btn").addEventListener("click", () => {
     const allIds = [...stockItems, ...orderItems].map((item) => item.id);
@@ -282,16 +229,6 @@ function wireMarkAllRead() {
   });
 }
 
-// ====================================================================
-// CHUNK 6 — CLEAR ALL
-// ----------------------------------------------------------------
-// This is the fix for "clearing employee's notifications shouldn't
-// touch admin's (or another employee's)": nothing is deleted from
-// Firestore. It marks whatever's visible in the CURRENT tab as
-// cleared for THIS account only (ReadStatus.js, keyed by uid), then
-// re-renders with those items filtered out. Every other account's
-// view of the same underlying data is completely unaffected.
-// ====================================================================
 function wireClearAll() {
   document.getElementById("clear-all-btn").addEventListener("click", async () => {
     const showStock = activeTab === "all" || activeTab === "stock";

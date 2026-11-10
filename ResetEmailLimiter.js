@@ -1,16 +1,10 @@
+// reset-limit — Rate limit for password reset emails.
+
 import { db } from "./firebase-config.js";
 import {
   doc, getDoc, setDoc, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 
-// ====================================================================
-// RESET EMAIL RATE LIMITING
-// ----------------------------------------------------------------
-// Max 5 reset emails per address, per rolling 1-hour window. Once the
-// 5th is sent, further requests are blocked until a full hour has
-// passed since the window started — at which point the count resets
-// and a fresh 5 become available.
-// ====================================================================
 const COLLECTION = "resetEmailAttempts";
 const MAX_REQUESTS = 5;
 const WINDOW_MS = 60 * 60 * 1000; // 1 hour

@@ -1,20 +1,4 @@
-// ====================================================================
-// PRODUCT SEARCH FIELDS
-// ----------------------------------------------------------------
-// Two small helper fields are stored on every product so the Cashier can
-// find an item with a database query (a few reads) instead of
-// downloading the whole catalogue (one read per product):
-//
-//   barcodes      every code that identifies the product or one of its
-//                 variants (barcode and sku), as plain strings.
-//   searchTokens  lower-case word beginnings from the product name and its
-//                 variant names ("emperador" -> "em", "emp", "empe", ...),
-//                 so typing the start of ANY word finds the product.
-//
-// These are derived from the product's own data. Whatever saves a product
-// (Add/Edit form, CSV import, the "prepare products" tool) calls
-// buildSearchFields() so they never drift out of date.
-// ====================================================================
+// product-index — Search fields stored on products for fast Cashier search.
 
 const MIN_TOKEN = 2;     // shortest beginning that is stored / searched
 const MAX_TOKEN = 15;    // longest beginning that is stored / searched
@@ -81,8 +65,6 @@ export function needsIndexUpdate(product) {
   return !sameList(product?.barcodes, wanted.barcodes) || !sameList(product?.searchTokens, wanted.searchTokens);
 }
 
-// The single word the database is asked about when the cashier types a
-// search: the longest word typed, cut to the stored length. null = too short.
 export function queryToken(term) {
   const list = words(term).filter((w) => w.length >= MIN_TOKEN);
   if (list.length === 0) return null;
