@@ -123,7 +123,24 @@ async function initSidebar(user) {
     return;
   }
 
-  const preferences = await getPreferences(user.uid, role);
+  // Notification settings are remembered for the session, so the page doesn't
+  // wait on a database round trip before it can be used. They're refreshed in
+  // the background, so a change made on another device shows up on the next page.
+  const PREFS_KEY = "almares_prefs";
+  let preferences = null;
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(PREFS_KEY) || "null");
+    if (saved && saved.uid === user.uid && saved.prefs) preferences = saved.prefs;
+  } catch (e) { /* no saved copy */ }
+  const savePrefs = (prefs) => {
+    try { sessionStorage.setItem(PREFS_KEY, JSON.stringify({ uid: user.uid, prefs })); } catch (e) { /* fine */ }
+  };
+  if (preferences) {
+    getPreferences(user.uid, role).then(savePrefs).catch(() => {});
+  } else {
+    preferences = await getPreferences(user.uid, role);
+    savePrefs(preferences);
+  }
 
   renderIdentity(role, user);
   if (isDriver) {

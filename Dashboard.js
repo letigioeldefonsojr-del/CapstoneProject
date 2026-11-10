@@ -136,6 +136,7 @@ function wireNotificationSettings(uid, role, preferences) {
         stockAlerts: stockToggle.checked,
         orderNotifications: orderToggle.checked
       });
+      try { sessionStorage.removeItem("almares_prefs"); } catch (e) { /* fine */ } // other pages re-read the saved settings
     } catch (error) {
       console.error("Couldn't save notification settings:", error);
     }
