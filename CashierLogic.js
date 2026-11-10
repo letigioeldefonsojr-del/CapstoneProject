@@ -180,16 +180,36 @@ export function searchProducts(products, term, limit = 30) {
 // A cart is a plain array of lines. Every function returns a NEW array
 // (plus an optional error message) and never mutates its input.
 
+// Wholesale rule: a product's wholesale price is the price of a GROUP of
+// 6 pieces. Every full group of 6 is charged the wholesale price and any
+// pieces left over (1-5) are charged the regular price each.
+//   regular 9, wholesale 87:  5 pcs = 45,  6 pcs = 87,  7 pcs = 87 + 9 = 96,
+//                             12 pcs = 174, 13 pcs = 174 + 9 = 183
+// It applies by itself - the cashier doesn't pick a mode.
+export const WHOLESALE_GROUP_SIZE = 6;
+
+export function linePricing(line) {
+  const qty = Math.max(0, Math.floor(Number(line.qty) || 0));
+  const hasWholesale = line.wholesaleUnit !== null && line.wholesaleUnit !== undefined && Number.isFinite(line.wholesaleUnit);
+  const groups = hasWholesale ? Math.floor(qty / WHOLESALE_GROUP_SIZE) : 0;
+  const wholesaleQty = groups * WHOLESALE_GROUP_SIZE;
+  const retailQty = qty - wholesaleQty;
+  const retail = line.retailUnit ?? 0;
+  const wholesaleTotal = hasWholesale ? round2(groups * line.wholesaleUnit) : 0;
+  const retailTotal = round2(retailQty * retail);
+  return { groups, wholesaleQty, retailQty, wholesaleTotal, retailTotal, total: round2(wholesaleTotal + retailTotal) };
+}
+
+// Average price per piece for the whole line (used for the stock log).
 export function lineUnitPrice(line) {
-  if (line.mode === "wholesale" && line.wholesaleUnit !== null && line.wholesaleUnit !== undefined) {
-    return line.wholesaleUnit;
-  }
-  return line.retailUnit;
+  if (line.retailUnit === null || line.retailUnit === undefined) return line.retailUnit;
+  const qty = Number(line.qty) || 0;
+  return qty > 0 ? Math.round((linePricing(line).total / qty) * 10000) / 10000 : line.retailUnit;
 }
 
 export function lineTotal(line) {
-  const unit = lineUnitPrice(line);
-  return unit === null || unit === undefined ? 0 : round2(unit * line.qty);
+  if (line.retailUnit === null || line.retailUnit === undefined) return 0;
+  return linePricing(line).total;
 }
 
 export function cartTotal(cart) {
@@ -338,19 +358,42 @@ export function makeReceiptNo(date = new Date(), random = Math.random) {
   return `POS-${day}-${suffix}`;
 }
 
+// A line becomes one sale item per price: the pieces sold in full groups of 6
+// at the wholesale price, and the remaining pieces at the regular price. That
+// keeps every item a plain "qty x unit price", so refunds work piece by piece.
 export function buildSaleItems(cart) {
-  return cart.map((line) => ({
-    productId: line.productId,
-    productName: line.productName,
-    variantName: line.variantName,
-    barcode: line.barcode || null,
-    qty: line.qty,
-    priceMode: line.mode,
-    unitPrice: lineUnitPrice(line),
-    regularUnitPrice: line.regularUnit ?? null,
-    discountPercent: line.mode === "retail" ? (line.discountPercent ?? null) : null,
-    lineTotal: lineTotal(line)
-  }));
+  return cart.flatMap((line) => {
+    const p = linePricing(line);
+    const base = {
+      productId: line.productId,
+      productName: line.productName,
+      variantName: line.variantName,
+      barcode: line.barcode || null,
+      regularUnitPrice: line.regularUnit ?? null
+    };
+    const items = [];
+    if (p.wholesaleQty > 0) {
+      items.push({
+        ...base,
+        qty: p.wholesaleQty,
+        priceMode: "wholesale",
+        unitPrice: line.wholesaleUnit / WHOLESALE_GROUP_SIZE,
+        discountPercent: null,
+        lineTotal: p.wholesaleTotal
+      });
+    }
+    if (p.retailQty > 0) {
+      items.push({
+        ...base,
+        qty: p.retailQty,
+        priceMode: "retail",
+        unitPrice: line.retailUnit,
+        discountPercent: line.discountPercent ?? null,
+        lineTotal: p.retailTotal
+      });
+    }
+    return items;
+  });
 }
 
 // ------------------------- REFUNDS & VOIDS ---------------------------

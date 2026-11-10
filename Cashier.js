@@ -10,11 +10,11 @@ import * as SB from "./SupabaseStore.js?v=20261029c";
 import {
   candidatesForProduct, findCandidateByBarcode, searchProducts,
   addToCart, setLineQty, setLineMode, removeLine,
-  lineUnitPrice, lineTotal, cartTotal, cartUnits,
+  lineUnitPrice, lineTotal, linePricing, cartTotal, cartUnits, WHOLESALE_GROUP_SIZE,
   computePayment, planStockUpdates, makeReceiptNo, buildSaleItems, formatMoney,
   itemRefundedQty, remainingQty, saleRefundStatus, planRefund, planRestock, round2,
   applyNumpadKey, quickCashAmounts
-} from "./CashierLogic.js?v=20261009a";
+} from "./CashierLogic.js?v=20261110a";
 
 // ====================================================================
 // CASHIER (face-to-face counter POS)
@@ -671,8 +671,10 @@ function renderCart() {
     box.innerHTML = `<p class="notif-list__empty">No items yet. Scan or search to add.</p>`;
   } else {
     box.innerHTML = cart.map((line) => {
-      const wholesaleOn = line.mode === "wholesale";
-      const canWholesale = line.wholesaleUnit != null;
+      const pr = linePricing(line);
+      const wsNote = line.wholesaleUnit != null
+        ? `Wholesale ${formatMoney(line.wholesaleUnit)} per ${WHOLESALE_GROUP_SIZE}${pr.groups > 0 ? ` · ${pr.groups} group${pr.groups === 1 ? "" : "s"} applied` : ` · buy ${WHOLESALE_GROUP_SIZE}+ to apply`}`
+        : "No wholesale price";
       return `
         <div class="pos-line">
           <div class="pos-line__top">
@@ -680,20 +682,17 @@ function renderCart() {
             <button type="button" class="pos-line__remove" data-action="remove" data-key="${esc(line.key)}" aria-label="Remove">✕</button>
           </div>
           <div class="pos-line__row">
-            <div class="pos-mode">
-              <button type="button" class="pos-mode__btn ${wholesaleOn ? "" : "is-active"}" data-action="mode" data-mode="retail" data-key="${esc(line.key)}">Retail</button>
-              <button type="button" class="pos-mode__btn ${wholesaleOn ? "is-active" : ""}" data-action="mode" data-mode="wholesale" data-key="${esc(line.key)}" ${canWholesale ? "" : "disabled title=\"No wholesale price set\""}>Wholesale</button>
-            </div>
             <div class="pos-qty">
               <button type="button" data-action="dec" data-key="${esc(line.key)}" aria-label="Less">−</button>
               <input type="number" min="1" max="${line.stock}" value="${line.qty}" inputmode="${IS_TOUCH ? "none" : "numeric"}" data-qty-input="${esc(line.key)}">
               <button type="button" data-action="inc" data-key="${esc(line.key)}" aria-label="More">+</button>
             </div>
             <div class="pos-line__money">
-              <span class="pos-line__unit">${formatMoney(lineUnitPrice(line))} each${!wholesaleOn && line.discountPercent ? ` (−${line.discountPercent}%)` : ""}</span>
+              <span class="pos-line__unit">${pr.groups > 0 ? `${pr.wholesaleQty} × wholesale ${formatMoney(pr.wholesaleTotal)}${pr.retailQty > 0 ? ` + ${pr.retailQty} × ${formatMoney(line.retailUnit)}` : ""}` : `${formatMoney(line.retailUnit)} each${line.discountPercent ? ` (−${line.discountPercent}%)` : ""}`}</span>
               <strong>${formatMoney(lineTotal(line))}</strong>
             </div>
           </div>
+          <div class="pos-hint" style="margin-top:4px;font-size:12px;">${wsNote}</div>
         </div>`;
     }).join("");
   }
@@ -855,9 +854,10 @@ async function commitSaleSupabase(ctx) {
     if (!data) throw new SaleError(`"${line.name}" no longer exists.`);
     const cand = candidatesForProduct(data).find((c) => c.key === line.key);
     if (!cand) throw new SaleError(`"${line.name}" is no longer available.`);
-    const expected = lineUnitPrice(line);
-    const actual = line.mode === "wholesale" ? cand.wholesaleUnit : cand.retailUnit;
-    if (actual === null || actual === undefined || Math.abs(actual - expected) > 0.001) {
+    const sameRetail = cand.retailUnit != null && Math.abs(cand.retailUnit - line.retailUnit) <= 0.001;
+    const sameWholesale = (cand.wholesaleUnit ?? null) === (line.wholesaleUnit ?? null)
+      || (cand.wholesaleUnit != null && line.wholesaleUnit != null && Math.abs(cand.wholesaleUnit - line.wholesaleUnit) <= 0.001);
+    if (!sameRetail || !sameWholesale) {
       throw new SaleError(`The price of "${line.name}" changed. Totals were updated — please check and complete again.`);
     }
   }
@@ -991,9 +991,10 @@ async function completeSale() {
         if (!data) throw new SaleError(`"${line.name}" no longer exists.`);
         const cand = candidatesForProduct({ id: line.productId, ...data }).find((c) => c.key === line.key);
         if (!cand) throw new SaleError(`"${line.name}" is no longer available.`);
-        const expected = lineUnitPrice(line);
-        const actual = line.mode === "wholesale" ? cand.wholesaleUnit : cand.retailUnit;
-        if (actual === null || actual === undefined || Math.abs(actual - expected) > 0.001) {
+        const sameRetail = cand.retailUnit != null && Math.abs(cand.retailUnit - line.retailUnit) <= 0.001;
+        const sameWholesale = (cand.wholesaleUnit ?? null) === (line.wholesaleUnit ?? null)
+          || (cand.wholesaleUnit != null && line.wholesaleUnit != null && Math.abs(cand.wholesaleUnit - line.wholesaleUnit) <= 0.001);
+        if (!sameRetail || !sameWholesale) {
           throw new SaleError(`The price of "${line.name}" changed. Totals were updated — please check and complete again.`);
         }
       }
@@ -1224,7 +1225,7 @@ function wireCustomerPicker() {
 function showReceipt(sale) {
   const rows = sale.lines.map((l) => `
     <tr>
-      <td>${esc(l.name)}${l.mode === "wholesale" ? " <em>(wholesale)</em>" : ""}<br><small>${l.qty} × ${formatMoney(lineUnitPrice(l))}</small></td>
+      <td>${esc(l.name)}${linePricing(l).groups > 0 ? " <em>(wholesale)</em>" : ""}<br><small>${linePricing(l).groups > 0 ? `${linePricing(l).wholesaleQty} pcs × ${formatMoney(l.wholesaleUnit)} per ${WHOLESALE_GROUP_SIZE}${linePricing(l).retailQty > 0 ? ` + ${linePricing(l).retailQty} × ${formatMoney(l.retailUnit)}` : ""}` : `${l.qty} × ${formatMoney(l.retailUnit)}`}</small></td>
       <td class="r">${formatMoney(lineTotal(l))}</td>
     </tr>`).join("");
 
@@ -1439,7 +1440,7 @@ function renderRefund() {
       <div class="pos-refund-row">
         <div class="pos-refund-row__info">
           <strong>${esc(name)}</strong>
-          <small>${item.qty} × ${formatMoney(item.unitPrice)}${item.priceMode === "wholesale" ? " (wholesale)" : ""}${done ? ` · ${done} already refunded` : ""}</small>
+          <small>${item.priceMode === "wholesale" ? `${item.qty} pcs · wholesale ${formatMoney((item.unitPrice || 0) * WHOLESALE_GROUP_SIZE)} per ${WHOLESALE_GROUP_SIZE}` : `${item.qty} × ${formatMoney(item.unitPrice)}`}${done ? ` · ${done} already refunded` : ""}</small>
         </div>
         <input type="number" min="0" max="${left}" value="${refundQtys[i]}" inputmode="numeric" data-refund-index="${i}" ${left === 0 ? "disabled" : ""} aria-label="Quantity to refund">
         <span class="pos-refund-row__of">of ${left}</span>
