@@ -14,7 +14,7 @@ import {
   computePayment, planStockUpdates, makeReceiptNo, buildSaleItems, formatMoney,
   itemRefundedQty, remainingQty, saleRefundStatus, planRefund, planRestock, round2,
   applyNumpadKey, quickCashAmounts
-} from "./CashierLogic.js?v=20261110a";
+} from "./CashierLogic.js?v=20261110b";
 
 // ====================================================================
 // CASHIER (face-to-face counter POS)
@@ -673,7 +673,7 @@ function renderCart() {
     box.innerHTML = cart.map((line) => {
       const pr = linePricing(line);
       const wsNote = line.wholesaleUnit != null
-        ? `Wholesale ${formatMoney(line.wholesaleUnit)} per ${WHOLESALE_GROUP_SIZE}${pr.groups > 0 ? ` · ${pr.groups} group${pr.groups === 1 ? "" : "s"} applied` : ` · buy ${WHOLESALE_GROUP_SIZE}+ to apply`}`
+        ? `Wholesale ${formatMoney(line.wholesaleUnit)} each for every ${WHOLESALE_GROUP_SIZE}${pr.groups > 0 ? ` · ${pr.groups} group${pr.groups === 1 ? "" : "s"} applied` : ` · buy ${WHOLESALE_GROUP_SIZE}+ to apply`}`
         : "No wholesale price";
       return `
         <div class="pos-line">
@@ -688,7 +688,7 @@ function renderCart() {
               <button type="button" data-action="inc" data-key="${esc(line.key)}" aria-label="More">+</button>
             </div>
             <div class="pos-line__money">
-              <span class="pos-line__unit">${pr.groups > 0 ? `${pr.wholesaleQty} × wholesale ${formatMoney(pr.wholesaleTotal)}${pr.retailQty > 0 ? ` + ${pr.retailQty} × ${formatMoney(line.retailUnit)}` : ""}` : `${formatMoney(line.retailUnit)} each${line.discountPercent ? ` (−${line.discountPercent}%)` : ""}`}</span>
+              <span class="pos-line__unit">${pr.groups > 0 ? `${pr.wholesaleQty} × wholesale ${formatMoney(line.wholesaleUnit)}${pr.retailQty > 0 ? ` + ${pr.retailQty} × ${formatMoney(line.retailUnit)}` : ""}` : `${formatMoney(line.retailUnit)} each${line.discountPercent ? ` (−${line.discountPercent}%)` : ""}`}</span>
               <strong>${formatMoney(lineTotal(line))}</strong>
             </div>
           </div>
@@ -1225,7 +1225,7 @@ function wireCustomerPicker() {
 function showReceipt(sale) {
   const rows = sale.lines.map((l) => `
     <tr>
-      <td>${esc(l.name)}${linePricing(l).groups > 0 ? " <em>(wholesale)</em>" : ""}<br><small>${linePricing(l).groups > 0 ? `${linePricing(l).wholesaleQty} pcs × ${formatMoney(l.wholesaleUnit)} per ${WHOLESALE_GROUP_SIZE}${linePricing(l).retailQty > 0 ? ` + ${linePricing(l).retailQty} × ${formatMoney(l.retailUnit)}` : ""}` : `${l.qty} × ${formatMoney(l.retailUnit)}`}</small></td>
+      <td>${esc(l.name)}${linePricing(l).groups > 0 ? " <em>(wholesale)</em>" : ""}<br><small>${linePricing(l).groups > 0 ? `${linePricing(l).wholesaleQty} × ${formatMoney(l.wholesaleUnit)}${linePricing(l).retailQty > 0 ? ` + ${linePricing(l).retailQty} × ${formatMoney(l.retailUnit)}` : ""}` : `${l.qty} × ${formatMoney(l.retailUnit)}`}</small></td>
       <td class="r">${formatMoney(lineTotal(l))}</td>
     </tr>`).join("");
 
@@ -1440,7 +1440,7 @@ function renderRefund() {
       <div class="pos-refund-row">
         <div class="pos-refund-row__info">
           <strong>${esc(name)}</strong>
-          <small>${item.priceMode === "wholesale" ? `${item.qty} pcs · wholesale ${formatMoney((item.unitPrice || 0) * WHOLESALE_GROUP_SIZE)} per ${WHOLESALE_GROUP_SIZE}` : `${item.qty} × ${formatMoney(item.unitPrice)}`}${done ? ` · ${done} already refunded` : ""}</small>
+          <small>${item.priceMode === "wholesale" ? `${item.qty} × ${formatMoney(item.unitPrice)} (wholesale)` : `${item.qty} × ${formatMoney(item.unitPrice)}`}${done ? ` · ${done} already refunded` : ""}</small>
         </div>
         <input type="number" min="0" max="${left}" value="${refundQtys[i]}" inputmode="numeric" data-refund-index="${i}" ${left === 0 ? "disabled" : ""} aria-label="Quantity to refund">
         <span class="pos-refund-row__of">of ${left}</span>

@@ -180,11 +180,11 @@ export function searchProducts(products, term, limit = 30) {
 // A cart is a plain array of lines. Every function returns a NEW array
 // (plus an optional error message) and never mutates its input.
 
-// Wholesale rule: a product's wholesale price is the price of a GROUP of
-// 6 pieces. Every full group of 6 is charged the wholesale price and any
-// pieces left over (1-5) are charged the regular price each.
-//   regular 9, wholesale 87:  5 pcs = 45,  6 pcs = 87,  7 pcs = 87 + 9 = 96,
-//                             12 pcs = 174, 13 pcs = 174 + 9 = 183
+// Wholesale rule: the wholesale price is the price PER PIECE once you buy a
+// full group of 6. Every full group of 6 pieces is charged at the wholesale
+// price each, and the pieces left over (1-5) are charged the regular price.
+//   regular 15, wholesale 11:  5 pcs = 75,  6 pcs = 66,  7 pcs = 66 + 15 = 81,
+//                              11 pcs = 66 + 75 = 141,  12 pcs = 66 + 66 = 132
 // It applies by itself - the cashier doesn't pick a mode.
 export const WHOLESALE_GROUP_SIZE = 6;
 
@@ -195,7 +195,7 @@ export function linePricing(line) {
   const wholesaleQty = groups * WHOLESALE_GROUP_SIZE;
   const retailQty = qty - wholesaleQty;
   const retail = line.retailUnit ?? 0;
-  const wholesaleTotal = hasWholesale ? round2(groups * line.wholesaleUnit) : 0;
+  const wholesaleTotal = hasWholesale ? round2(wholesaleQty * line.wholesaleUnit) : 0;
   const retailTotal = round2(retailQty * retail);
   return { groups, wholesaleQty, retailQty, wholesaleTotal, retailTotal, total: round2(wholesaleTotal + retailTotal) };
 }
@@ -377,7 +377,7 @@ export function buildSaleItems(cart) {
         ...base,
         qty: p.wholesaleQty,
         priceMode: "wholesale",
-        unitPrice: line.wholesaleUnit / WHOLESALE_GROUP_SIZE,
+        unitPrice: line.wholesaleUnit,
         discountPercent: null,
         lineTotal: p.wholesaleTotal
       });
