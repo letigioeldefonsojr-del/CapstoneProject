@@ -99,8 +99,72 @@ async function syncSalesTiersToProducts(productsWithData, productsWithoutData) {
   }
 }
 
+const FORECAST_CACHE_KEY = "almares_forecast_cache_v1";
+const FORECAST_CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+
+function readForecastCache() {
+  try {
+    const raw = localStorage.getItem(FORECAST_CACHE_KEY);
+    if (!raw) return null;
+    const cached = JSON.parse(raw);
+    if (!cached || Date.now() - cached.savedAt > FORECAST_CACHE_MAX_AGE_MS) return null;
+    if (!Array.isArray(cached.products) || !Array.isArray(cached.saleMovements) || !Array.isArray(cached.deliveredOrderItems)) return null;
+    return cached;
+  } catch {
+    return null;
+  }
+}
+
+function writeForecastCache(products, saleMovements, deliveredOrderItems) {
+  try {
+    localStorage.setItem(FORECAST_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), products, saleMovements, deliveredOrderItems }));
+  } catch {
+    try { localStorage.removeItem(FORECAST_CACHE_KEY); } catch { /* storage unavailable */ }
+  }
+}
+
+function renderForecast(products, saleMovements, deliveredOrderItems, syncTiers) {
+  allProducts = products;
+  velocityByProductId = computeVelocities([...saleMovements, ...deliveredOrderItems]);
+
+  const productsWithData = [];
+  const productsWithoutData = [];
+
+  products.forEach((product) => {
+    const velocityInfo = velocityByProductId.get(product.id);
+    const currentStock = getProductCurrentStock(product);
+
+    if (velocityInfo) {
+      productsWithData.push({
+        product,
+        currentStock,
+        ...velocityInfo,
+        daysUntilStockout: velocityInfo.velocity > 0 ? currentStock / velocityInfo.velocity : null
+      });
+    } else {
+      productsWithoutData.push({ product, currentStock });
+    }
+  });
+
+  const clustered = clusterByVelocity(productsWithData);
+
+  if (syncTiers && isAdminUser) syncSalesTiersToProducts(productsWithData, productsWithoutData);
+
+  renderResults(clustered, productsWithoutData);
+}
+
 async function loadForecast() {
-  showLoadingState();
+  const cached = readForecastCache();
+  if (cached) {
+    try {
+      renderForecast(cached.products, cached.saleMovements, cached.deliveredOrderItems, false);
+    } catch (error) {
+      console.error("Couldn't show the saved forecast:", error);
+      showLoadingState();
+    }
+  } else {
+    showLoadingState();
+  }
 
   try {
     const [products, saleMovements, deliveredOrderItems] = await Promise.all([
@@ -109,36 +173,11 @@ async function loadForecast() {
       fetchDeliveredOrderItems()
     ]);
 
-    allProducts = products;
-    velocityByProductId = computeVelocities([...saleMovements, ...deliveredOrderItems]);
-
-    const productsWithData = [];
-    const productsWithoutData = [];
-
-    products.forEach((product) => {
-      const velocityInfo = velocityByProductId.get(product.id);
-      const currentStock = getProductCurrentStock(product);
-
-      if (velocityInfo) {
-        productsWithData.push({
-          product,
-          currentStock,
-          ...velocityInfo,
-          daysUntilStockout: velocityInfo.velocity > 0 ? currentStock / velocityInfo.velocity : null
-        });
-      } else {
-        productsWithoutData.push({ product, currentStock });
-      }
-    });
-
-    const clustered = clusterByVelocity(productsWithData);
-
-    if (isAdminUser) syncSalesTiersToProducts(productsWithData, productsWithoutData);
-
-    renderResults(clustered, productsWithoutData);
+    writeForecastCache(products, saleMovements, deliveredOrderItems);
+    renderForecast(products, saleMovements, deliveredOrderItems, true);
   } catch (error) {
     console.error("Couldn't load forecast:", error);
-    showErrorState();
+    if (!cached) showErrorState();
   }
 }
 
