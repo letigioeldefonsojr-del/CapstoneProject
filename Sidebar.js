@@ -9,7 +9,7 @@ import { stockSummary, listNotifications } from "./SupabaseStore.js?v=20261029c"
 import { getPreferences } from "./NotificationPreferences.js";
 import { getReadSet, getClearedSet, loadReadStatus } from "./ReadStatus.js";
 import { promptDeleteAccount } from "./DeleteAccount.js?v=20261109b";
-import { promptChangePassword } from "./ChangePassword.js?v=20261111a";
+import { promptChangePassword } from "./ChangePassword.js?v=20261111b";
 import { confirmDialog } from "./ConfirmDialog.js";
 
 const LOGIN_PAGE_URL = "/";

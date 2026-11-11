@@ -9,10 +9,18 @@ export function promptChangePassword(user) {
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
 
+  const EYE = '<path d="M2 12C4 7.5 7.8 5 12 5C16.2 5 20 7.5 22 12C20 16.5 16.2 19 12 19C7.8 19 4 16.5 2 12Z" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/>';
+  const EYE_OFF = EYE + '<line x1="3.5" y1="20.5" x2="20.5" y2="3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>';
+
   const field = (id, label, auto) => `
     <div class="form-field" style="margin-top: 12px;">
       <label for="${id}">${label}</label>
-      <input type="password" id="${id}" autocomplete="${auto}">
+      <div class="password-field-wrapper">
+        <input type="password" id="${id}" autocomplete="${auto}" class="password-field-input">
+        <button type="button" class="password-field-toggle" aria-label="Show password">
+          <svg class="toggle-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">${EYE_OFF}</svg>
+        </button>
+      </div>
     </div>`;
 
   overlay.innerHTML = `
@@ -46,6 +54,16 @@ export function promptChangePassword(user) {
   overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
   overlay.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
   if (!hasPassword) return;
+
+  overlay.querySelectorAll(".password-field-toggle").forEach((toggle) => {
+    const input = toggle.parentElement.querySelector("input");
+    toggle.addEventListener("click", () => {
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
+      toggle.setAttribute("aria-label", show ? "Hide password" : "Show password");
+      toggle.querySelector(".toggle-icon").innerHTML = show ? EYE : EYE_OFF;
+    });
+  });
 
   const status = overlay.querySelector("#cp-status");
   const saveBtn = overlay.querySelector('[data-action="save"]');
