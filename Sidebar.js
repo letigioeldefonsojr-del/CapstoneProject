@@ -9,6 +9,7 @@ import { stockSummary, listNotifications } from "./SupabaseStore.js?v=20261029c"
 import { getPreferences } from "./NotificationPreferences.js";
 import { getReadSet, getClearedSet, loadReadStatus } from "./ReadStatus.js";
 import { promptDeleteAccount } from "./DeleteAccount.js?v=20261109b";
+import { promptChangePassword } from "./ChangePassword.js?v=20261111a";
 import { confirmDialog } from "./ConfirmDialog.js";
 
 const LOGIN_PAGE_URL = "/";
@@ -113,6 +114,7 @@ async function initSidebar(user) {
   wireCollapse();
   wireLogout();
   wireScrollToTop();
+  wireChangePassword(user);
   wireDeleteAccount(user, role);
   applyRoleRestrictedNavItems(role);
 
@@ -609,4 +611,20 @@ function wireDeleteAccount(user, role) {
   deleteBtn.addEventListener("click", () => {
     promptDeleteAccount(user, role);
   });
+}
+
+function wireChangePassword(user) {
+  const deleteBtn = document.getElementById("delete-account-btn");
+  if (!deleteBtn || document.getElementById("change-password-btn")) return;
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.id = "change-password-btn";
+  btn.className = "delete-account-link";
+  btn.textContent = "Change Password";
+  btn.style.paddingBottom = "6px";
+  btn.addEventListener("mouseenter", () => { btn.style.color = "inherit"; });
+  btn.addEventListener("mouseleave", () => { btn.style.color = ""; });
+  btn.addEventListener("click", () => promptChangePassword(user));
+  deleteBtn.before(btn);
 }
