@@ -232,7 +232,6 @@ function applyFilterAndRender() {
       <input type="search" id="accounts-customer-search" class="feedback-sort-select" style="min-width:230px;" placeholder="Find a customer: name or mobile" autocomplete="off">
       <button type="button" class="btn-outline" id="show-latest-customers-btn">Show latest 25 customers</button>
       <button type="button" class="btn-primary" id="add-admin-btn">+ Add New Admin</button>
-      <button type="button" class="btn-outline" id="staff-code-btn">Generate staff code</button>
       <select id="accounts-role-filter" class="feedback-sort-select">
         <option value="all">All roles</option>
         <option value="admin">Admin</option>
@@ -266,7 +265,6 @@ function applyFilterAndRender() {
   });
 
   panel.querySelector("#add-admin-btn").addEventListener("click", handleAddNewAdmin);
-  panel.querySelector("#staff-code-btn").addEventListener("click", (event) => handleGenerateStaffCode(event.currentTarget));
   panel.querySelector("#show-latest-customers-btn").addEventListener("click", loadLatestCustomers);
 
   const searchBox = panel.querySelector("#accounts-customer-search");
