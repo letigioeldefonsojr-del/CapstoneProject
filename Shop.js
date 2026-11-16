@@ -138,13 +138,23 @@ function itemStatus(p, flavorName) {
   return "available";
 }
 
-function calcTable(parts) {
+function calcTable(parts, opts = {}) {
   const rows = [];
   if (parts.wsQty > 0) rows.push(`<div class="calc__row"><span>${parts.wsQty}</span><span><em>Wholesale</em></span><span>${peso(parts.ws)}</span><span>${peso(parts.wsTotal)}</span></div>`);
   if (parts.retailQty > 0 || parts.wsQty === 0) rows.push(`<div class="calc__row"><span>${parts.retailQty}</span><span>Regular</span><span>${peso(parts.unit)}</span><span>${peso(parts.retailTotal)}</span></div>`);
   const save = round2(parts.regularTotal - parts.total);
   let why;
-  if (parts.ws == null) why = "This item has no wholesale price, so every piece is at the regular price.";
+  const placed = opts.placed === true; // an order already placed: describe what happened, don't suggest adding more
+  if (placed) {
+    if (parts.ws == null) why = "Every piece was charged at the regular price (this item has no wholesale price).";
+    else if (parts.wsQty === 0) why = `Wholesale (${peso(parts.ws)} each) applies to every full set of ${WHOLESALE_MIN}. This order had fewer than ${WHOLESALE_MIN} pcs, so every piece was at the regular ${peso(parts.unit)}.`;
+    else {
+      const sets = parts.wsQty / WHOLESALE_MIN;
+      why = `${sets} full set${sets === 1 ? "" : "s"} of ${WHOLESALE_MIN} (${parts.wsQty} pcs) at the wholesale price of ${peso(parts.ws)} each.`
+        + (parts.retailQty > 0 ? ` The other ${parts.retailQty} pc${parts.retailQty === 1 ? "" : "s"} ${parts.retailQty === 1 ? "was" : "were"} at the regular ${peso(parts.unit)}.` : "");
+    }
+  }
+  else if (parts.ws == null) why = "This item has no wholesale price, so every piece is at the regular price.";
   else if (parts.wsQty === 0) why = `Wholesale (${peso(parts.ws)} each) applies to every full set of ${WHOLESALE_MIN}. Add ${WHOLESALE_MIN - parts.retailQty} more to get it.`;
   else {
     const sets = parts.wsQty / WHOLESALE_MIN;
@@ -156,7 +166,34 @@ function calcTable(parts) {
     ${rows.join("")}
     <div class="calc__foot"><span>Line total</span><strong>${peso(parts.total)}</strong></div>
   </div>
-  <p class="calc__why">${esc(why)}${save > 0.004 ? ` <b class="calc__save">You save ${peso(save)} (regular price would be ${peso(parts.regularTotal)}).</b>` : ""}</p>`;
+  <p class="calc__why">${esc(why)}${save > 0.004 ? ` <b class="calc__save">${placed ? "You saved" : "You save"} ${peso(save)} (regular price would be ${peso(parts.regularTotal)}).</b>` : ""}</p>`;
+}
+
+// The price breakdown of one item of a placed order. New orders carry it; older ones are worked out
+// from the current regular price (only trusted when the numbers add up), else null.
+function orderItemParts(i) {
+  const qty = Number(i.amount) || 0;
+  const total = round2(Number(i.subtotal) || (Number(i.unitPrice) || 0) * qty);
+  const build = (unit, ws, wsQty) => {
+    const retailQty = qty - wsQty;
+    const wsTotal = round2(wsQty * (ws ?? 0)), retailTotal = round2(retailQty * unit);
+    return { unit, ws, wsQty, retailQty, wsTotal, retailTotal, total: round2(wsTotal + retailTotal), regularTotal: round2(qty * unit) };
+  };
+  if (i.regularUnit != null && Number.isFinite(Number(i.regularUnit))) {
+    const ws = i.wholesaleUnit != null ? num(i.wholesaleUnit) : null;
+    return build(num(i.regularUnit), ws, ws != null ? Math.min(qty, Number(i.wholesaleQty) || 0) : 0);
+  }
+  const p = state.productsById.get(i.productId);
+  const unit = p ? regularUnit(p, i.flavor ? findVariant(p, i.flavor) : null) : null;
+  if (unit != null) {
+    if (Math.abs(unit * qty - total) < 0.01) return build(unit, null, 0);
+    if (qty >= WHOLESALE_MIN) {
+      const wsQty = Math.floor(qty / WHOLESALE_MIN) * WHOLESALE_MIN;
+      const ws = round2((total - (qty - wsQty) * unit) / wsQty);
+      if (ws > 0 && ws < unit) return build(unit, ws, wsQty);
+    }
+  }
+  return null;
 }
 
 // ----------------------------- DELIVERY (same rules as the app) -----------------------------
@@ -1007,7 +1044,9 @@ async function placeOrder(lines, { isPickup, addr, quote, fee }) {
       const unitPrice = l.qty > 0 ? parts.total / l.qty : 0;
       return {
         productId: l.c.productId, productName: l.c.productName, imageUrl: l.c.imageUrl || null, flavor: l.c.flavor || null,
-        amount: l.qty, unitPrice, subtotal: round2(unitPrice * l.qty)
+        amount: l.qty, unitPrice, subtotal: round2(unitPrice * l.qty),
+        // how the price was made, so the order page can explain it later
+        regularUnit: parts.unit, wholesaleUnit: parts.ws != null ? parts.ws : null, wholesaleQty: parts.wsQty
       };
     });
     const itemsSubtotal = round2(orderItems.reduce((s, i) => s + i.subtotal, 0));
@@ -1089,6 +1128,9 @@ async function renderOrderDetails(id) {
     if (route().name !== "order") return;
   }
   if (!o) { app.innerHTML = `<section class="card center"><h1>Order not found</h1><a class="btn btn--primary" href="#/orders">Back to orders</a></section>`; return; }
+  // Older orders have no saved breakdown: fetch the items' current prices so it can be worked out.
+  const needIds = (o.items || []).filter((i) => i.regularUnit == null && Number(i.amount) >= WHOLESALE_MIN && !state.productsById.has(i.productId)).map((i) => i.productId);
+  if (needIds.length) { try { await ensureProducts(needIds); } catch (e) { console.error(e); } if (route().name !== "order") return; }
   const pickup = o.fulfillmentType === "pickup";
   const steps = pickup ? STEPS_PICKUP : STEPS_DELIVERY;
   const off = ["cancelled", "rejected", "undelivered"].includes(o.status);
@@ -1107,7 +1149,13 @@ async function renderOrderDetails(id) {
       </div>
       <div class="card">
         <h2 class="section">Items</h2>
-        ${(o.items || []).map((i) => `<div class="coline"><div><strong>${esc(i.productName)}</strong>${i.flavor ? ` <span class="muted">· ${esc(i.flavor)}</span>` : ""}<p class="muted small">${Number(i.amount)} × ${peso(i.unitPrice)}</p></div><strong>${peso(i.subtotal)}</strong></div>`).join("")}
+        ${(o.items || []).map((i) => {
+          const parts = orderItemParts(i);
+          const head = `<strong>${esc(i.productName)}</strong>${i.flavor ? ` <span class="muted">· ${esc(i.flavor)}</span>` : ""}`;
+          return parts
+            ? `<div class="oitem"><div class="oitem__name">${head}</div>${calcTable(parts, { placed: true })}</div>`
+            : `<div class="oitem"><div class="oitem__name">${head}</div><div class="calc"><div class="calc__head"><span>Qty</span><span>Price</span><span>Rate</span><span>Amount</span></div><div class="calc__row"><span>${Number(i.amount)}</span><span>Per piece</span><span>${peso(i.unitPrice)}</span><span>${peso(i.subtotal)}</span></div><div class="calc__foot"><span>Line total</span><strong>${peso(i.subtotal)}</strong></div></div><p class="calc__why">Average price per piece for this item.</p></div>`;
+        }).join("")}
         <div class="summary__row"><span>Subtotal</span><span>${peso(o.itemsSubtotal)}</span></div>
         <div class="summary__row"><span>${pickup ? "Pick-up" : "Delivery fee"}</span><span>${pickup ? "Free" : o.deliveryFeeUnresolved ? "To be confirmed" : peso(o.deliveryFee)}</span></div>
         <div class="summary__row summary__row--total"><span>Total</span><span>${peso(o.total)}</span></div>

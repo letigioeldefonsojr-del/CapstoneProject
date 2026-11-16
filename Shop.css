@@ -187,3 +187,6 @@ input[type=checkbox],input[type=radio]{accent-color:var(--brand)}
 .orderdetail .steps li.is-current::before{content:counter(step);box-shadow:0 0 0 4px var(--brand-l)}
 .orderdetail .steps li.is-current{color:var(--brand)}
 @media(max-width:520px){.orderdetail .steps li{font-size:.72rem}.orderdetail .order__top h1{font-size:1.3rem}}
+.oitem{padding:12px 0;border-bottom:1px solid var(--line)}
+.oitem:last-of-type{border-bottom:0}
+.oitem__name{margin-bottom:8px}
