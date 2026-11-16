@@ -280,7 +280,10 @@ Deno.serve(async (req) => {
       if (wait) return json({ error: "slow_down", secondsLeft: wait }, 429);
 
       if (kind === "admin") {
-        const d = await fsEqual("admins", "username", id);
+        // Admins can sign in with a username or with their email.
+        const d = id.includes("@")
+          ? (await fsEqual("admins", "email", id)) ?? (id.toLowerCase() !== id ? await fsEqual("admins", "email", id.toLowerCase()) : null)
+          : await fsEqual("admins", "username", id);
         return json({ found: !!d, email: d ? fStr(d, "email") || null : null });
       }
       const d = id.includes("@") ? await fsEqual("employees", "email", id) : await fsEqual("employees", "username", id);
