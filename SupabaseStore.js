@@ -78,7 +78,7 @@ export async function getProductsByIds(ids) {
 }
 
 // lines: [{ productId, variantName|null, qty }]
-const toItems = (lines) => lines.map((l) => ({ id: l.productId, variant: l.variantName ?? null, qty: l.qty }));
+const toItems = (lines) => lines.map((l) => ({ id: l.productId, variant: l.variantName ?? null, qty: l.saleUnit ? l.qty * Math.max(1, Math.floor(Number(l.saleUnit.pieces) || 1)) : l.qty }));
 
 export async function applySale(lines, ref) {
   const data = await call("apply_sale", { items: toItems(lines), ref: ref || null });

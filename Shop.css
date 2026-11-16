@@ -67,10 +67,10 @@ input:focus,select:focus,textarea:focus{outline:2px solid #9fcfb0;border-color:v
 .qty button{width:34px;height:36px;border:0;background:#eef3ee;font-size:1.1rem;cursor:pointer}
 .qty input{width:56px;border:0;border-radius:0;text-align:center;padding:8px 4px}
 .calc{border:1px solid var(--line);border-radius:8px;overflow:hidden;font-size:.88rem;margin-top:8px}
-.calc__head,.calc__row{display:grid;grid-template-columns:48px 1fr auto;gap:8px;padding:6px 10px}
+.calc__head,.calc__row{display:grid;grid-template-columns:44px 1fr auto auto;gap:6px 12px;padding:7px 12px;align-items:center}
 .calc__head{background:#eef3ee;font-weight:600;color:var(--muted)}
 .calc__row+.calc__row{border-top:1px solid var(--line)}
-.calc em{font-style:normal;font-size:.72rem;background:var(--brand-l);color:var(--good);padding:1px 6px;border-radius:8px;margin-left:4px}
+.calc em{font-style:normal;font-size:.78rem;font-weight:700;background:var(--brand-l);color:var(--brand);padding:2px 8px;border-radius:8px}
 /* cart + checkout */
 .cart,.checkout__grid{display:grid;grid-template-columns:1fr 320px;gap:18px;align-items:start}
 .cart h1{grid-column:1/-1;margin:0}
@@ -125,7 +125,7 @@ a.order:hover{border-color:var(--brand)}
  .cart,.checkout__grid{grid-template-columns:1fr}.summary{position:static}
  .grid--3,.grid--2{grid-template-columns:1fr}
  .grid-products{grid-template-columns:repeat(2,1fr)}
- .cartline{grid-template-columns:auto 56px 1fr}.cartline__img{width:56px;height:56px}.cartline__side{grid-column:1/-1;flex-direction:row;justify-content:space-between;align-items:center}
+ .cartline{grid-template-columns:auto 1fr}.cartline__img{display:none}.cartline__side{grid-column:1/-1;flex-direction:row;justify-content:space-between;align-items:center}
  .header__name{display:none}.nav{order:3;width:100%;margin:0}
  .shop__bar{flex-direction:column}.shop__bar select{width:100%}
 }
@@ -162,3 +162,10 @@ input[type=checkbox],input[type=radio]{accent-color:var(--brand)}
 .chat__typing span:nth-child(2){animation-delay:.2s}.chat__typing span:nth-child(3){animation-delay:.4s}
 @keyframes blink{0%,60%,100%{opacity:.3}30%{opacity:1}}
 @media(max-width:760px){.chat{right:8px;bottom:80px;height:70vh}.chat__fab{right:12px;bottom:12px}}
+
+.calc__head span:nth-child(n+3),.calc__row span:nth-child(n+3){text-align:right;white-space:nowrap}
+.calc__foot{display:flex;justify-content:space-between;padding:8px 12px;border-top:2px solid var(--line);background:#f7faf7}
+.calc__why{margin:8px 0 0;padding:8px 10px;border-radius:8px;background:var(--brand-l);color:#244b33;font-size:.84rem;line-height:1.4}
+.calc__save{display:block;color:var(--brand);margin-top:2px}
+.cartline__main{min-width:0}.calc{width:100%}
+@media(max-width:760px){.calc__head,.calc__row{grid-template-columns:36px 1fr auto auto;gap:4px 8px;padding:6px 8px;font-size:.82rem}}

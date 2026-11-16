@@ -160,7 +160,18 @@ export function searchProducts(products, term, limit = 30) {
 
 export const WHOLESALE_GROUP_SIZE = 6;
 
+// Pieces taken out of stock for a line (a line sold by the case/ream/etc. holds N pieces per unit).
+export function stockQty(line) {
+  const pieces = line.saleUnit ? Math.max(1, Math.floor(Number(line.saleUnit.pieces) || 1)) : 1;
+  return Math.max(0, Math.floor(Number(line.qty) || 0)) * pieces;
+}
+
 export function linePricing(line) {
+  if (line.saleUnit) {
+    const units = Math.max(0, Math.floor(Number(line.qty) || 0));
+    const total = round2(units * (Number(line.saleUnit.price) || 0));
+    return { groups: 0, wholesaleQty: 0, retailQty: units, wholesaleTotal: 0, retailTotal: total, total };
+  }
   const qty = Math.max(0, Math.floor(Number(line.qty) || 0));
   const hasWholesale = line.wholesaleUnit !== null && line.wholesaleUnit !== undefined && Number.isFinite(line.wholesaleUnit);
   const groups = hasWholesale ? Math.floor(qty / WHOLESALE_GROUP_SIZE) : 0;
@@ -175,20 +186,21 @@ export function linePricing(line) {
 // Average price per piece for the whole line (used for the stock log).
 export function lineUnitPrice(line) {
   if (line.retailUnit === null || line.retailUnit === undefined) return line.retailUnit;
-  const qty = Number(line.qty) || 0;
+  const qty = line.saleUnit ? stockQty(line) : Number(line.qty) || 0;
   return qty > 0 ? Math.round((linePricing(line).total / qty) * 10000) / 10000 : line.retailUnit;
 }
 
 export function lineTotal(line) {
-  if (line.retailUnit === null || line.retailUnit === undefined) return 0;
+  if (!line.saleUnit && (line.retailUnit === null || line.retailUnit === undefined)) return 0;
   return linePricing(line).total;
 }
 
 // What the cart would cost with no wholesale price: every piece at the regular rate.
 export function cartRegularSubtotal(cart) {
-  return round2(cart.reduce((sum, line) => (
-    line.retailUnit === null || line.retailUnit === undefined ? sum : sum + (Number(line.qty) || 0) * line.retailUnit
-  ), 0));
+  return round2(cart.reduce((sum, line) => {
+    if (line.saleUnit) return sum + lineTotal(line);
+    return line.retailUnit === null || line.retailUnit === undefined ? sum : sum + (Number(line.qty) || 0) * line.retailUnit;
+  }, 0));
 }
 
 // How much wholesale pricing took off the regular subtotal.
@@ -201,7 +213,7 @@ export function cartTotal(cart) {
 }
 
 export function cartUnits(cart) {
-  return cart.reduce((sum, line) => sum + line.qty, 0);
+  return cart.reduce((sum, line) => sum + stockQty(line), 0);
 }
 
 export function addToCart(cart, candidate, qty = 1) {
@@ -242,13 +254,47 @@ export function addToCart(cart, candidate, qty = 1) {
   };
 }
 
+// A sale by the unit (piece, pack, ream, 1/2 case, case...) with a price the cashier sets.
+export function addUnitToCart(cart, candidate, unit, units) {
+  if (!candidate.inStock) return { cart, error: `"${candidate.name}" is out of stock.` };
+  const pieces = Math.floor(Number(unit.pieces));
+  const price = round2(Number(unit.price));
+  const count = Math.floor(Number(units));
+  if (!(pieces >= 1)) return { cart, error: "Enter how many pieces are in one " + unit.label + "." };
+  if (!(price > 0)) return { cart, error: "Enter a price greater than 0." };
+  if (!(count >= 1)) return { cart, error: "Quantity must be at least 1." };
+
+  const key = `${candidate.key}#${unit.label}|${pieces}|${price}`;
+  const inCartPieces = cart.filter((l) => (l.baseKey || l.key) === candidate.key && l.key !== key).reduce((s, l) => s + stockQty(l), 0);
+  const existing = cart.find((l) => l.key === key);
+  const wantPieces = ((existing ? existing.qty : 0) + count) * pieces;
+  if (candidate.stock !== null && inCartPieces + wantPieces > candidate.stock) {
+    return { cart, error: `Only ${candidate.stock} piece(s) of "${candidate.name}" in stock (${inCartPieces + wantPieces} requested).` };
+  }
+  if (existing) return { cart: cart.map((l) => (l.key === key ? { ...l, qty: l.qty + count } : l)) };
+  if (cart.length >= MAX_CART_LINES) return { cart, error: `A sale can have at most ${MAX_CART_LINES} different items.` };
+  return {
+    cart: [...cart, {
+      key, baseKey: candidate.key,
+      productId: candidate.productId, variantName: candidate.variantName, barcode: candidate.barcode,
+      name: `${candidate.name} (by ${unit.label})`, productName: candidate.productName, imageUrl: candidate.imageUrl,
+      stock: candidate.stock, retailUnit: candidate.retailUnit, regularUnit: candidate.regularUnit,
+      discountPercent: null, wholesaleUnit: null, mode: "retail",
+      saleUnit: { label: unit.label, pieces, price },
+      qty: count
+    }]
+  };
+}
+
 export function setLineQty(cart, key, qty) {
   const n = Math.floor(Number(qty));
   if (!Number.isFinite(n) || n < 1) return { cart, error: "Quantity must be at least 1." };
   const line = cart.find((l) => l.key === key);
   if (!line) return { cart };
-  if (n > line.stock) {
-    return { cart: cart.map((l) => (l.key === key ? { ...l, qty: line.stock } : l)), error: `Only ${line.stock} of "${line.name}" in stock.` };
+  const per = line.saleUnit ? Math.max(1, Math.floor(Number(line.saleUnit.pieces) || 1)) : 1;
+  const maxUnits = Math.floor(line.stock / per);
+  if (n > maxUnits) {
+    return { cart: cart.map((l) => (l.key === key ? { ...l, qty: Math.max(1, maxUnits) } : l)), error: `Only ${line.stock} piece(s) of "${line.productName || line.name}" in stock${per > 1 ? ` (${maxUnits} ${line.saleUnit.label})` : ""}.` };
   }
   return { cart: cart.map((l) => (l.key === key ? { ...l, qty: n } : l)) };
 }
@@ -289,6 +335,7 @@ export function planStockUpdates(freshProductsById, lines) {
   const movements = [];
 
   for (const line of lines) {
+    const need = stockQty(line);
     const data = freshProductsById.get(line.productId);
     if (!data) return { error: `"${line.name}" no longer exists.` };
 
@@ -300,8 +347,8 @@ export function planStockUpdates(freshProductsById, lines) {
 
     if (line.variantName === null) {
       const current = typeof state.stockCount === "number" ? state.stockCount : 0;
-      if (current < line.qty) return { error: `Only ${current} left of "${line.name}" — can't sell ${line.qty}.` };
-      const next = current - line.qty;
+      if (current < need) return { error: `Only ${current} left of "${line.name}" — can't sell ${need}.` };
+      const next = current - need;
       state.stockCount = next;
       updates.set(line.productId, { ...(updates.get(line.productId) || {}), [F.stock]: next, [F.available]: next > 0 });
       movements.push({ productId: line.productId, productName: line.productName, variantName: null, previousStock: current, newStock: next, unitPrice: lineUnitPrice(line) });
@@ -319,8 +366,8 @@ export function planStockUpdates(freshProductsById, lines) {
 
     const variant = state.flavors[idx];
     const current = typeof variant[F.variantStock] === "number" ? variant[F.variantStock] : 0;
-    if (current < line.qty) return { error: `Only ${current} left of "${line.name}" — can't sell ${line.qty}.` };
-    const next = current - line.qty;
+    if (current < need) return { error: `Only ${current} left of "${line.name}" — can't sell ${need}.` };
+    const next = current - need;
     state.flavors[idx] = { ...variant, [F.variantStock]: next, [F.available]: next > 0 };
     updates.set(line.productId, { ...(updates.get(line.productId) || {}), [F.variants]: state.flavors });
     movements.push({ productId: line.productId, productName: line.productName, variantName: line.variantName, previousStock: current, newStock: next, unitPrice: lineUnitPrice(line) });
@@ -340,6 +387,16 @@ export function makeReceiptNo(date = new Date(), random = Math.random) {
 export function buildSaleItems(cart) {
   return cart.flatMap((line) => {
     const p = linePricing(line);
+    if (line.saleUnit) {
+      const pieces = stockQty(line);
+      return [{
+        productId: line.productId, productName: line.productName, variantName: line.variantName,
+        barcode: line.barcode || null, regularUnitPrice: line.regularUnit ?? null,
+        qty: pieces, priceMode: "unit", unitPrice: pieces > 0 ? Math.round((p.total / pieces) * 10000) / 10000 : 0,
+        discountPercent: null, lineTotal: p.total,
+        saleUnit: line.saleUnit.label, saleUnitCount: line.qty, saleUnitPieces: line.saleUnit.pieces, saleUnitPrice: line.saleUnit.price
+      }];
+    }
     const base = {
       productId: line.productId,
       productName: line.productName,

@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="Dashboard.css?v=20261116a">
+    <link rel="stylesheet" href="Dashboard.css?v=20261116b">
 </head>
 <body class="page-cashier">
 
@@ -166,6 +166,7 @@
                     <input type="text" id="pos-input" placeholder="Scan a barcode, or type a product name..." autocomplete="off" autofocus>
                 </div>
                 <p class="pos-hint">Scanner: click here and scan — an exact barcode adds the item straight away. Press Enter to add the first match.</p>
+                <label class="pos-ask"><input type="checkbox" id="pos-ask-unit" checked> Ask how it's sold (piece, ream, case...) when adding an item</label>
                 <p class="form-status" id="pos-message" hidden></p>
                 <div class="pos-results" id="pos-results"></div>
             </section>
@@ -269,6 +270,29 @@
 <!-- ================================================================
      QUANTITY NUMBER PAD (touch screens)
      ================================================================ -->
+<div class="modal-overlay" id="pos-unit-overlay" hidden>
+    <div class="modal pos-unit-modal">
+        <div class="modal__header">
+            <h3>How is this sold?</h3>
+            <button type="button" class="modal__close" id="pos-unit-close" aria-label="Close">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path d="M6 6L18 18M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                </svg>
+            </button>
+        </div>
+        <div class="modal__body">
+            <p class="pos-unit-product" id="pos-unit-name"></p>
+            <div class="pos-unit-options" id="pos-unit-options"></div>
+            <div id="pos-unit-fields"></div>
+            <p class="pos-unit-summary" id="pos-unit-summary"></p>
+        </div>
+        <div class="modal__footer">
+            <button type="button" class="btn-outline" id="pos-unit-cancel">Cancel</button>
+            <button type="button" class="btn-primary" id="pos-unit-ok">Add to sale</button>
+        </div>
+    </div>
+</div>
+
 <div class="modal-overlay" id="pos-qty-overlay" hidden>
     <div class="modal pos-qty-modal">
         <div class="modal__header">
@@ -326,6 +350,6 @@
 
 <script type="module" src="firebase-config.js"></script>
 <script type="module" src="Sidebar.js?v=20261116a"></script>
-<script type="module" src="Cashier.js?v=20261116a"></script>
+<script type="module" src="Cashier.js?v=20261116b"></script>
 </body>
 </html>

@@ -8,15 +8,15 @@ import { getProducts, primeProductsCache } from "./ProductCache.js?v=3";
 import { queryToken } from "./ProductIndex.js";
 import { recordSaleTally, dayKey } from "./SalesDaily.js?v=20261029b";
 import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
-import * as SB from "./SupabaseStore.js?v=20261029c";
+import * as SB from "./SupabaseStore.js?v=20261116b";
 import {
   candidatesForProduct, findCandidateByBarcode, searchProducts,
-  addToCart, setLineQty, setLineMode, removeLine,
+  addToCart, addUnitToCart, stockQty, setLineQty, setLineMode, removeLine,
   lineUnitPrice, lineTotal, linePricing, cartTotal, cartUnits, cartRegularSubtotal, cartWholesaleDiscount, WHOLESALE_GROUP_SIZE,
   computePayment, planStockUpdates, makeReceiptNo, buildSaleItems, formatMoney,
   itemRefundedQty, remainingQty, saleRefundStatus, planRefund, planRestock, round2,
   applyNumpadKey, quickCashAmounts
-} from "./CashierLogic.js?v=20261116a";
+} from "./CashierLogic.js?v=20261116b";
 
 const STORE_NAME = "Almares 328";
 
@@ -274,6 +274,7 @@ async function refreshCartProducts() {
 // ----------------------------- UI WIRING ------------------------------
 function wireUi() {
   const input = $("pos-input");
+  wireUnitPrompt();
 
   input.addEventListener("input", () => {
     const value = input.value.trim();
@@ -526,7 +527,159 @@ async function linkBarcodeTo(candidate) {
 }
 
 function add(candidate) {
-  applyCartResult(addToCart(cart, candidate, 1));
+  if (!askUnitEnabled() || !candidate.inStock || candidate.retailUnit == null) {
+    applyCartResult(addToCart(cart, candidate, 1));
+    return;
+  }
+  openUnitPrompt(candidate);
+}
+
+// ---------------- "How is this sold?" prompt: piece, pack, ream, 1/2 case, case or other ----------------
+const UNIT_MEMORY_KEY = "almares_pos_units_v1";
+const UNIT_OPTIONS = [
+  { id: "piece", label: "Piece" }, { id: "pack", label: "Pack" }, { id: "ream", label: "Ream" },
+  { id: "half", label: "1/2 case" }, { id: "case", label: "Case" }, { id: "other", label: "Other" }
+];
+let unitPrompt = null;
+
+function askUnitEnabled() {
+  try { return localStorage.getItem("almares_pos_ask_unit") !== "0"; } catch { return true; }
+}
+function readUnitMemory() {
+  try { return JSON.parse(localStorage.getItem(UNIT_MEMORY_KEY) || "{}"); } catch { return {}; }
+}
+function writeUnitMemory(memory) {
+  try { localStorage.setItem(UNIT_MEMORY_KEY, JSON.stringify(memory)); } catch { /* optional */ }
+}
+
+function openUnitPrompt(candidate) {
+  const memory = readUnitMemory()[candidate.key] || {};
+  unitPrompt = { candidate, unitId: memory.last && UNIT_OPTIONS.some((o) => o.id === memory.last) ? memory.last : "piece", memory };
+  $("pos-unit-name").textContent = candidate.name;
+  $("pos-unit-overlay").hidden = false;
+  renderUnitPrompt();
+}
+
+function closeUnitPrompt() {
+  $("pos-unit-overlay").hidden = true;
+  unitPrompt = null;
+  focusScanInput();
+}
+
+function unitDefaults(unitId) {
+  const { candidate, memory } = unitPrompt;
+  const saved = memory[unitId] || {};
+  let pieces = saved.pieces || "";
+  if (unitId === "half" && !pieces && memory.case?.pieces) pieces = Math.max(1, Math.floor(memory.case.pieces / 2));
+  const price = saved.price || (pieces && candidate.retailUnit != null ? round2(pieces * candidate.retailUnit) : "");
+  return { pieces, price };
+}
+
+function renderUnitPrompt() {
+  const { candidate, unitId } = unitPrompt;
+  const opt = UNIT_OPTIONS.find((o) => o.id === unitId);
+  const isPiece = unitId === "piece";
+  const d = unitDefaults(unitId);
+  $("pos-unit-options").innerHTML = UNIT_OPTIONS.map((o) =>
+    `<button type="button" class="pos-unit-opt ${o.id === unitId ? "is-on" : ""}" data-unit="${o.id}">${o.label}</button>`).join("");
+  const customLabel = unitId === "other"
+    ? `<label class="pos-unit-field"><span>What do you call it? (e.g. box, bundle, sack)</span><input type="text" id="pos-unit-label" maxlength="20" placeholder="Unit name"></label>` : "";
+  $("pos-unit-fields").innerHTML = isPiece ? `
+      <label class="pos-unit-field"><span>Quantity (pieces)</span><input type="number" id="pos-unit-count" min="1" value="1" inputmode="numeric"></label>
+      <p class="pos-hint">Regular price ${formatMoney(candidate.retailUnit)}${candidate.wholesaleUnit != null ? ` · wholesale ${formatMoney(candidate.wholesaleUnit)} applies on every ${WHOLESALE_GROUP_SIZE} pieces` : ""}.</p>`
+    : `${customLabel}
+      <label class="pos-unit-field"><span>Pieces in one <b class="pos-unit-name-label">${esc(opt.label.toLowerCase())}</b></span><input type="number" id="pos-unit-pieces" min="1" value="${d.pieces}" inputmode="numeric"></label>
+      <label class="pos-unit-field"><span>Price per <b class="pos-unit-name-label">${esc(opt.label.toLowerCase())}</b> (₱) — you can change this</span><input type="number" id="pos-unit-price" min="0" step="0.01" value="${d.price}" inputmode="decimal"></label>
+      <label class="pos-unit-field"><span>How many <b class="pos-unit-name-label">${esc(opt.label.toLowerCase())}</b></span><input type="number" id="pos-unit-count" min="1" value="1" inputmode="numeric"></label>`;
+  updateUnitSummary();
+  const first = $("pos-unit-fields").querySelector("input");
+  if (first) { first.focus(); first.select?.(); }
+}
+
+function readUnitInputs() {
+  const { unitId } = unitPrompt;
+  const opt = UNIT_OPTIONS.find((o) => o.id === unitId);
+  const label = unitId === "other" ? (($("pos-unit-label")?.value || "").trim() || "unit") : opt.label.toLowerCase();
+  return {
+    label,
+    pieces: Number($("pos-unit-pieces")?.value),
+    price: Number($("pos-unit-price")?.value),
+    count: Number($("pos-unit-count")?.value)
+  };
+}
+
+function updateUnitSummary() {
+  if (!unitPrompt) return;
+  const { candidate, unitId } = unitPrompt;
+  const el = $("pos-unit-summary");
+  const v = readUnitInputs();
+  if (unitId === "piece") {
+    el.textContent = Number.isFinite(v.count) && v.count >= 1 ? `${v.count} piece${v.count === 1 ? "" : "s"} · priced automatically.` : "";
+    return;
+  }
+  document.querySelectorAll(".pos-unit-name-label").forEach((n) => { n.textContent = v.label; });
+  if (!(v.pieces >= 1) || !(v.price > 0) || !(v.count >= 1)) { el.textContent = "Fill in the pieces, the price and how many."; return; }
+  const totalPieces = v.pieces * v.count;
+  const total = round2(v.price * v.count);
+  const normal = round2(totalPieces * (candidate.retailUnit ?? 0));
+  const over = candidate.stock !== null && totalPieces > candidate.stock;
+  el.innerHTML = `${v.count} ${esc(v.label)} × ${v.pieces} pcs = <b>${totalPieces} pcs</b> out of stock · Total <b>${formatMoney(total)}</b>`
+    + `<br><small>Piece price for ${totalPieces} pcs would be ${formatMoney(normal)} (${total < normal ? "you save the customer " + formatMoney(normal - total) : total > normal ? "set " + formatMoney(total - normal) + " higher" : "same"}).</small>`
+    + (over ? `<br><span class="pos-unit-warn">Only ${candidate.stock} pcs in stock.</span>` : "");
+}
+
+function confirmUnitPrompt() {
+  if (!unitPrompt) return;
+  const { candidate, unitId, memory } = unitPrompt;
+  const v = readUnitInputs();
+  let result;
+  if (unitId === "piece") {
+    if (!(v.count >= 1)) { $("pos-unit-summary").textContent = "Quantity must be at least 1."; return; }
+    result = addToCart(cart, candidate, Math.floor(v.count));
+  } else {
+    result = addUnitToCart(cart, candidate, { label: v.label, pieces: v.pieces, price: v.price }, v.count);
+    if (result.error) { $("pos-unit-summary").textContent = result.error; return; }
+    memory[unitId] = { pieces: Math.floor(v.pieces), price: round2(v.price) };
+  }
+  memory.last = unitId;
+  const all = readUnitMemory();
+  all[candidate.key] = memory;
+  writeUnitMemory(all);
+  closeUnitPrompt();
+  applyCartResult(result);
+}
+
+function wireUnitPrompt() {
+  $("pos-unit-options").addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-unit]");
+    if (!btn || !unitPrompt) return;
+    unitPrompt.unitId = btn.dataset.unit;
+    renderUnitPrompt();
+  });
+  $("pos-unit-fields").addEventListener("input", (event) => {
+    if (!unitPrompt) return;
+    if (event.target.id === "pos-unit-pieces") {
+      const pieces = Number(event.target.value);
+      const priceBox = $("pos-unit-price");
+      if (priceBox && pieces >= 1 && !unitPrompt.priceTouched && unitPrompt.candidate.retailUnit != null) {
+        priceBox.value = round2(pieces * unitPrompt.candidate.retailUnit);
+      }
+    }
+    if (event.target.id === "pos-unit-price") unitPrompt.priceTouched = true;
+    updateUnitSummary();
+  });
+  $("pos-unit-ok").addEventListener("click", confirmUnitPrompt);
+  $("pos-unit-cancel").addEventListener("click", closeUnitPrompt);
+  $("pos-unit-close").addEventListener("click", closeUnitPrompt);
+  $("pos-unit-overlay").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") { event.preventDefault(); confirmUnitPrompt(); }
+    if (event.key === "Escape") closeUnitPrompt();
+  });
+  const toggle = $("pos-ask-unit");
+  toggle.checked = askUnitEnabled();
+  toggle.addEventListener("change", () => {
+    try { localStorage.setItem("almares_pos_ask_unit", toggle.checked ? "1" : "0"); } catch { /* optional */ }
+  });
 }
 
 function applyCartResult(result) {
@@ -548,7 +701,7 @@ function refreshCartFromProducts() {
   const byKey = new Map(allCandidates().map((c) => [c.key, c]));
   cart = cart
     .map((line) => {
-      const fresh = byKey.get(line.key);
+      const fresh = byKey.get(line.baseKey || line.key);
       if (!fresh) return null;
       return {
         ...line,
@@ -558,7 +711,9 @@ function refreshCartFromProducts() {
         discountPercent: fresh.discountPercent,
         wholesaleUnit: fresh.wholesaleUnit,
         mode: line.mode === "wholesale" && fresh.wholesaleUnit == null ? "retail" : line.mode,
-        qty: Math.min(line.qty, Math.max(fresh.stock ?? 0, 0))
+        discountPercent: line.saleUnit ? null : fresh.discountPercent,
+        wholesaleUnit: line.saleUnit ? null : fresh.wholesaleUnit,
+        qty: Math.min(line.qty, Math.floor(Math.max(fresh.stock ?? 0, 0) / (line.saleUnit ? line.saleUnit.pieces : 1)))
       };
     })
     .filter((l) => l && l.qty > 0 && l.retailUnit != null);
@@ -615,6 +770,9 @@ function renderResults() {
 // Invoice-style rows for one line: quantity x rate = amount, wholesale group first.
 function calcRows(line) {
   const pr = linePricing(line);
+  if (line.saleUnit) {
+    return [{ qty: `${line.qty} ${line.saleUnit.label}`, rate: `${formatMoney(line.saleUnit.price)} / ${line.saleUnit.label} (${line.saleUnit.pieces} pcs)`, tag: "", amount: formatMoney(pr.total) }];
+  }
   const rows = [];
   if (pr.groups > 0) rows.push({ qty: pr.wholesaleQty, rate: formatMoney(line.wholesaleUnit), tag: "wholesale", amount: formatMoney(pr.wholesaleTotal) });
   if (pr.retailQty > 0 || pr.groups === 0) {
@@ -630,7 +788,9 @@ function renderCart() {
   } else {
     box.innerHTML = cart.map((line) => {
       const pr = linePricing(line);
-      const wsNote = line.wholesaleUnit != null
+      const wsNote = line.saleUnit
+        ? `Sold by the ${esc(line.saleUnit.label)} · ${line.saleUnit.pieces} pcs each · ${stockQty(line)} pcs out of stock · price set at the counter`
+        : line.wholesaleUnit != null
         ? `Wholesale ${formatMoney(line.wholesaleUnit)} each for every ${WHOLESALE_GROUP_SIZE}${pr.groups > 0 ? ` · ${pr.groups} group${pr.groups === 1 ? "" : "s"} applied` : ` · buy ${WHOLESALE_GROUP_SIZE}+ to apply`}`
         : "No wholesale price";
       return `
@@ -642,7 +802,7 @@ function renderCart() {
           <div class="pos-line__row">
             <div class="pos-qty">
               <button type="button" data-action="dec" data-key="${esc(line.key)}" aria-label="Less">−</button>
-              <input type="number" min="1" max="${line.stock}" value="${line.qty}" inputmode="${IS_TOUCH ? "none" : "numeric"}" data-qty-input="${esc(line.key)}">
+              <input type="number" min="1" max="${line.saleUnit ? Math.floor(line.stock / line.saleUnit.pieces) : line.stock}" value="${line.qty}" inputmode="${IS_TOUCH ? "none" : "numeric"}" data-qty-input="${esc(line.key)}">
               <button type="button" data-action="inc" data-key="${esc(line.key)}" aria-label="More">+</button>
             </div>
             <div class="pos-line__money">
@@ -813,8 +973,9 @@ async function commitSaleSupabase(ctx) {
   for (const line of lines) {
     const data = fresh.get(line.productId);
     if (!data) throw new SaleError(`"${line.name}" no longer exists.`);
-    const cand = candidatesForProduct(data).find((c) => c.key === line.key);
+    const cand = candidatesForProduct(data).find((c) => c.key === (line.baseKey || line.key));
     if (!cand) throw new SaleError(`"${line.name}" is no longer available.`);
+    if (line.saleUnit) continue; // price was set at the counter
     const sameRetail = cand.retailUnit != null && Math.abs(cand.retailUnit - line.retailUnit) <= 0.001;
     const sameWholesale = (cand.wholesaleUnit ?? null) === (line.wholesaleUnit ?? null)
       || (cand.wholesaleUnit != null && line.wholesaleUnit != null && Math.abs(cand.wholesaleUnit - line.wholesaleUnit) <= 0.001);
@@ -856,7 +1017,7 @@ async function commitSaleSupabase(ctx) {
       const v = (row.flavors || []).find((f) => (f.name || f.flavor || f.label) === m.variantName);
       now = v ? v.stock : null;
     }
-    if (typeof now === "number") { m.newStock = now; m.previousStock = now + lines[i].qty; }
+    if (typeof now === "number") { m.newStock = now; m.previousStock = now + stockQty(lines[i]); }
   });
 
   const saleData = {
@@ -1374,7 +1535,7 @@ function renderRefund() {
       <div class="pos-refund-row">
         <div class="pos-refund-row__info">
           <strong>${esc(name)}</strong>
-          <small>${item.priceMode === "wholesale" ? `${item.qty} × ${formatMoney(item.unitPrice)} (wholesale)` : `${item.qty} × ${formatMoney(item.unitPrice)}`}${done ? ` · ${done} already refunded` : ""}</small>
+          <small>${item.priceMode === "unit" ? `${item.saleUnitCount} ${esc(item.saleUnit)} × ${formatMoney(item.saleUnitPrice)} (${item.qty} pcs)` : item.priceMode === "wholesale" ? `${item.qty} × ${formatMoney(item.unitPrice)} (wholesale)` : `${item.qty} × ${formatMoney(item.unitPrice)}`}${done ? ` · ${done} already refunded` : ""}</small>
         </div>
         <input type="number" min="0" max="${left}" value="${refundQtys[i]}" inputmode="numeric" data-refund-index="${i}" ${left === 0 ? "disabled" : ""} aria-label="Quantity to refund">
         <span class="pos-refund-row__of">of ${left}</span>

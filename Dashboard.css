@@ -3468,7 +3468,7 @@ body.has-share-bar .scroll-to-top-btn { bottom: 84px; z-index: 85; }
 
 /* POS: invoice-style wholesale breakdown */
 .pos-calc { margin-top: 8px; border-top: 1px solid var(--border); font-size: 12.5px; }
-.pos-calc__head, .pos-calc__row { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; gap: 8px; padding: 3px 0; align-items: baseline; }
+.pos-calc__head, .pos-calc__row { display: grid; grid-template-columns: minmax(48px, max-content) minmax(0, 1fr) auto; gap: 8px; padding: 3px 0; align-items: baseline; }
 .pos-calc__head { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .pos-calc__head span:last-child, .pos-calc__row span:last-child { text-align: right; font-variant-numeric: tabular-nums; }
 .pos-calc__row { color: var(--ink); }
@@ -3476,3 +3476,17 @@ body.has-share-bar .scroll-to-top-btn { bottom: 84px; z-index: 85; }
 .pos-totals { margin-bottom: 14px; }
 .pos-totals__row--discount { color: #1b6b43; }
 .pos-receipt small { display: block; color: var(--muted); }
+
+/* POS: "How is this sold?" prompt */
+.pos-ask { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 8px 0; cursor: pointer; }
+.pos-unit-modal { max-width: 440px; }
+.pos-unit-product { font-weight: 700; margin: 0 0 12px; }
+.pos-unit-options { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.pos-unit-opt { padding: 8px 14px; border-radius: 999px; border: 1px solid var(--border, #d9d9d9); background: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+.pos-unit-opt.is-on { background: #1b6b3a; border-color: #1b6b3a; color: #fff; }
+.pos-unit-field { display: block; margin-bottom: 10px; }
+.pos-unit-field span { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.pos-unit-field input { width: 100%; padding: 10px 12px; border: 1px solid var(--border, #d9d9d9); border-radius: 8px; font: inherit; }
+.pos-unit-summary { margin: 10px 0 0; padding: 10px 12px; border-radius: 8px; background: #eef6f0; font-size: 14px; min-height: 20px; }
+.pos-unit-summary small { color: #5b6b60; }
+.pos-unit-warn { color: #c0392b; font-weight: 700; }

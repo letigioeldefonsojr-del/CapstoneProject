@@ -140,9 +140,23 @@ function itemStatus(p, flavorName) {
 
 function calcTable(parts) {
   const rows = [];
-  if (parts.wsQty > 0) rows.push(`<div class="calc__row"><span>${parts.wsQty}</span><span>${peso(parts.ws)} <em>wholesale</em></span><span>${peso(parts.wsTotal)}</span></div>`);
-  if (parts.retailQty > 0 || parts.wsQty === 0) rows.push(`<div class="calc__row"><span>${parts.retailQty}</span><span>${peso(parts.unit)}</span><span>${peso(parts.retailTotal)}</span></div>`);
-  return `<div class="calc"><div class="calc__head"><span>Qty</span><span>Rate</span><span>Amount</span></div>${rows.join("")}</div>`;
+  if (parts.wsQty > 0) rows.push(`<div class="calc__row"><span>${parts.wsQty}</span><span><em>Wholesale</em></span><span>${peso(parts.ws)}</span><span>${peso(parts.wsTotal)}</span></div>`);
+  if (parts.retailQty > 0 || parts.wsQty === 0) rows.push(`<div class="calc__row"><span>${parts.retailQty}</span><span>Regular</span><span>${peso(parts.unit)}</span><span>${peso(parts.retailTotal)}</span></div>`);
+  const save = round2(parts.regularTotal - parts.total);
+  let why;
+  if (parts.ws == null) why = "This item has no wholesale price, so every piece is at the regular price.";
+  else if (parts.wsQty === 0) why = `Wholesale (${peso(parts.ws)} each) applies to every full set of ${WHOLESALE_MIN}. Add ${WHOLESALE_MIN - parts.retailQty} more to get it.`;
+  else {
+    const sets = parts.wsQty / WHOLESALE_MIN;
+    why = `${sets} full set${sets === 1 ? "" : "s"} of ${WHOLESALE_MIN} (${parts.wsQty} pcs) at the wholesale price of ${peso(parts.ws)} each.`
+      + (parts.retailQty > 0 ? ` The other ${parts.retailQty} pc${parts.retailQty === 1 ? "" : "s"} ${parts.retailQty === 1 ? "is" : "are"} at the regular ${peso(parts.unit)}. Add ${WHOLESALE_MIN - parts.retailQty} more to make another wholesale set.` : "");
+  }
+  return `<div class="calc">
+    <div class="calc__head"><span>Qty</span><span>Price</span><span>Rate</span><span>Amount</span></div>
+    ${rows.join("")}
+    <div class="calc__foot"><span>Line total</span><strong>${peso(parts.total)}</strong></div>
+  </div>
+  <p class="calc__why">${esc(why)}${save > 0.004 ? ` <b class="calc__save">You save ${peso(save)} (regular price would be ${peso(parts.regularTotal)}).</b>` : ""}</p>`;
 }
 
 // ----------------------------- DELIVERY (same rules as the app) -----------------------------
@@ -771,7 +785,6 @@ function openProduct(id) {
           <span class="muted small">${stock != null ? `${stock} in stock` : "In stock"}</span>
         </div>
         ${calcTable(parts)}
-        ${parts.ws != null && parts.wsQty === 0 ? `<p class="muted small">Buy ${WHOLESALE_MIN}+ to get ${peso(parts.ws)} each on every full ${WHOLESALE_MIN}.</p>` : ""}
         <div class="po__total"><span>Total</span><strong>${peso(parts.total)}</strong></div>
       </div>
       <div class="modal__foot"><button class="btn btn--primary btn--block" id="po-add" ${status === "available" ? "" : "disabled"}>Add to cart</button></div>`;
