@@ -1137,9 +1137,15 @@ async function renderOrderDetails(id) {
   const idx = steps.indexOf(o.status);
   app.innerHTML = `
     <section class="orderdetail">
-      <a href="#/orders" class="link-btn">← My orders</a>
-      <div class="order__top"><h1>Order #${esc(o.id.slice(0, 6).toUpperCase())}</h1><span class="pill pill--${esc(o.status)}">${esc(statusLabel(o))}</span></div>
-      <p class="muted">${esc(dateOf(o.createdAt))}</p>
+      <a href="#/orders" class="backlink">← My orders</a>
+      <div class="ohead">
+        <div class="ohead__main">
+          <span class="ohead__label">Order</span>
+          <h1>#${esc(o.id.slice(0, 6).toUpperCase())}</h1>
+          <p class="ohead__date">Placed ${esc(dateOf(o.createdAt))}</p>
+        </div>
+        <span class="pill pill--${esc(o.status)} ohead__pill">${esc(statusLabel(o))}</span>
+      </div>
       ${off ? `<div class="card notice">${esc(STATUS_LABELS[o.status])}${o.cancelReason ? `: ${esc(o.cancelReason)}` : ""}${o.rejectReason ? `: ${esc(o.rejectReason)}` : ""}${o.deliveryIssueReason ? `: ${esc(o.deliveryIssueReason)}` : ""}</div>` :
         `<ol class="steps">${steps.map((s, i) => `<li class="${i < idx ? "is-done" : i === idx ? "is-done is-current" : ""}">${esc(s === "delivered" && pickup ? "Picked up" : STATUS_LABELS[s])}</li>`).join("")}</ol>`}
       <div class="card">

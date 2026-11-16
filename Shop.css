@@ -190,3 +190,14 @@ input[type=checkbox],input[type=radio]{accent-color:var(--brand)}
 .oitem{padding:12px 0;border-bottom:1px solid var(--line)}
 .oitem:last-of-type{border-bottom:0}
 .oitem__name{margin-bottom:8px}
+
+/* ---- Order details header (20261116j) ---- */
+.orderdetail .backlink{display:inline-flex;align-items:center;gap:6px;margin:4px 0 12px;padding:6px 12px;border-radius:999px;background:#fff;border:1px solid var(--line);color:var(--brand);font-size:.85rem;font-weight:600;text-decoration:none}
+.orderdetail .backlink:hover{background:var(--brand-l)}
+.ohead{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#fff;border:1px solid var(--line);border-left:5px solid var(--brand);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px 18px}
+.ohead__main{min-width:0}
+.ohead__label{display:block;font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.ohead h1{margin:2px 0 4px;font-size:1.7rem;line-height:1.15;letter-spacing:.01em}
+.ohead__date{margin:0;font-size:.88rem;color:var(--muted)}
+.ohead__pill{flex:none;font-size:.9rem;padding:8px 16px;border-radius:999px}
+@media(max-width:420px){.ohead{flex-wrap:wrap}.ohead h1{font-size:1.45rem}}
