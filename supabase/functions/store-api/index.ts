@@ -154,8 +154,18 @@ function applyFields(row: any, ws: any, fields: Record<string, any>) {
 // Attach wholesale prices (kept in a locked table) to product rows.
 async function withWholesale(rows: any[]) {
   if (rows.length === 0) return rows;
-  const { data } = await admin.from("product_wholesale").select("*").in("product_id", rows.map((r) => r.id));
-  const byId = new Map<string, any>((data ?? []).map((w: any) => [w.product_id, w] as [string, any]));
+  // Ask for the wholesale rows in small chunks: a single .in() with ~1000 ids makes the request URL too long,
+  // the lookup fails quietly and every product in that page would look like it has no wholesale price.
+  const ids = rows.map((r) => r.id);
+  const chunks: any[][] = [];
+  for (let i = 0; i < ids.length; i += 100) chunks.push(ids.slice(i, i + 100));
+  const parts = await Promise.all(chunks.map((c) => admin.from("product_wholesale").select("*").in("product_id", c)));
+  const data: any[] = [];
+  for (const r of parts) {
+    if (r.error) throw new Error("wholesale lookup failed: " + r.error.message);
+    data.push(...(r.data ?? []));
+  }
+  const byId = new Map<string, any>(data.map((w: any) => [w.product_id, w] as [string, any]));
   return rows.map((r) => ({
     ...r,
     wholesale_price: byId.get(r.id)?.wholesale_price ?? null,

@@ -200,11 +200,11 @@ const openDb = () => new Promise((res, rej) => {
 async function cacheGet() {
   try {
     const db = await openDb();
-    return await new Promise((res) => { const q = db.transaction(IDB_STORE).objectStore(IDB_STORE).get("rows"); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); });
+    return await new Promise((res) => { const q = db.transaction(IDB_STORE).objectStore(IDB_STORE).get("rows2"); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); });
   } catch { return null; }
 }
 async function cachePut(rows) {
-  try { const db = await openDb(); db.transaction(IDB_STORE, "readwrite").objectStore(IDB_STORE).put({ rows, at: Date.now() }, "rows"); } catch { /* cache is optional */ }
+  try { const db = await openDb(); db.transaction(IDB_STORE, "readwrite").objectStore(IDB_STORE).put({ rows, at: Date.now() }, "rows2"); } catch { /* cache is optional */ }
 }
 let drawShopGrid = null;
 function applyCatalog(list) {
