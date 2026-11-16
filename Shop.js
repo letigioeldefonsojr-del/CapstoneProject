@@ -354,6 +354,7 @@ function loadHistory() {
 function stopUserListeners() {
   state.cartUnsub?.(); state.ordersUnsub?.(); state.profileUnsub?.(); state.historyUnsub?.();
   state.cartUnsub = state.ordersUnsub = state.profileUnsub = state.historyUnsub = null;
+  state.bannerUnsub?.(); state.bannerUnsub = null; state.bannerList = [];
   newChat(); chat.open = false;
   Object.assign(state, { cart: [], orders: [], history: [], historyLoaded: false, profile: null, selected: new Set(), selectionTouched: false, address: null });
 }
@@ -751,9 +752,61 @@ function productCardHtml(p) {
     </article>`;
 }
 
+// ----------------------------- PROMOTION BANNER (same data as the app) -----------------------------
+// Live promotions from `storeBanners` (or the old single `settings/storeBanner`), shown as a swipeable,
+// auto-scrolling strip: only the ones whose schedule includes right now, in sortOrder.
+let promoTimer = null, promoClock = null;
+function livePromos() {
+  const now = new Date();
+  return (state.bannerList || [])
+    .filter((b) => {
+      const st = b.scheduleStart?.toDate?.(), en = b.scheduleEnd?.toDate?.();
+      return (!st || st <= now) && (!en || en >= now) && (String(b.offer || "").trim() || String(b.description || "").trim());
+    })
+    .sort((a, b) => (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0));
+}
+function drawBanner() {
+  clearInterval(promoTimer); promoTimer = null;
+  const box = document.getElementById("shop-promo");
+  if (!box) return;
+  const list = livePromos();
+  if (!list.length) { box.hidden = true; box.innerHTML = ""; return; }
+  box.hidden = false;
+  box.innerHTML = `<div class="promo__track">${list.map((b) => `
+      <article class="promo__slide">
+        ${b.imageUrl ? `<img class="promo__img" src="${esc(b.imageUrl)}" alt="" referrerpolicy="no-referrer">` : ""}
+        <div class="promo__text">${b.offer ? `<h3>${esc(b.offer)}</h3>` : ""}${b.description ? `<p>${esc(b.description)}</p>` : ""}</div>
+      </article>`).join("")}</div>
+    ${list.length > 1 ? `<div class="promo__dots">${list.map((_, i) => `<span class="${i === 0 ? "is-on" : ""}"></span>`).join("")}</div>` : ""}`;
+  if (list.length < 2) return;
+  const track = box.querySelector(".promo__track"), dots = [...box.querySelectorAll(".promo__dots span")];
+  const at = () => Math.round(track.scrollLeft / Math.max(1, track.clientWidth));
+  track.addEventListener("scroll", () => { const i = at(); dots.forEach((d, k) => d.classList.toggle("is-on", k === i)); }, { passive: true });
+  promoTimer = setInterval(() => {
+    if (!document.getElementById("shop-promo")) { clearInterval(promoTimer); return; }
+    if (box.matches(":hover")) return;
+    const next = (at() + 1) % list.length;
+    track.scrollTo({ left: next * track.clientWidth, behavior: "smooth" });
+  }, 4000);
+}
+function watchBanners() {
+  clearInterval(promoClock);
+  promoClock = setInterval(() => { if (document.getElementById("shop-promo")) drawBanner(); }, 60000); // promotions start/end on their own
+  if (state.bannerUnsub) { drawBanner(); return; }
+  state.bannerUnsub = onSnapshot(collection(db, "storeBanners"), async (snap) => {
+    let list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    if (!list.length) {
+      try { const old = await getDoc(doc(db, "settings", "storeBanner")); if (old.exists()) list = [{ id: "legacy", ...old.data(), sortOrder: 1 }]; } catch { /* no old banner */ }
+    }
+    state.bannerList = list;
+    drawBanner();
+  }, (e) => console.error("Promotions listener failed:", e));
+}
+
 function renderShop() {
   app.innerHTML = `
     <section class="hero"><div><h1>Fresh groceries, delivered</h1><p>Order from Almares 328 and pick up in store or get it delivered in Batangas City.</p></div></section>
+    <div id="shop-promo" class="promo" hidden></div>
     <section class="shop">
       <div class="shop__bar">
         <input id="shop-q" type="search" placeholder="Search products..." value="${esc(state.search)}" autocomplete="off">
@@ -784,6 +837,7 @@ function renderShop() {
     const b = e.target.closest("[data-add]");
     if (b) openProduct(b.dataset.add);
   });
+  watchBanners();
   if (state.catalogLoaded) draw();
   loadCatalog().then(() => { if (route().name === "shop") draw(); }).catch((e) => {
     console.error("Couldn't load products:", e);

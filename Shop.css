@@ -213,3 +213,17 @@ input[type=checkbox],input[type=radio]{accent-color:var(--brand)}
 .oitem__tag--reg{background:#eceeed;color:#5b6a60}
 .oitem__line{color:var(--ink)}
 .card > .section:first-child,.card > h2:first-child,.card > h3:first-child{margin-top:0}
+
+/* ---- Promotion banner (20261116n) ---- */
+.promo{margin-bottom:18px;position:relative}
+.promo__track{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;border-radius:18px;box-shadow:var(--shadow);-webkit-overflow-scrolling:touch}
+.promo__track::-webkit-scrollbar{display:none}
+.promo__slide{flex:0 0 100%;scroll-snap-align:start;display:flex;align-items:center;gap:16px;background:#fff;border:1px solid var(--line);border-radius:18px;padding:14px;min-height:110px;box-sizing:border-box}
+.promo__img{width:96px;height:96px;object-fit:cover;border-radius:12px;flex:none;background:var(--brand-l)}
+.promo__text{min-width:0}
+.promo__text h3{margin:0 0 4px;font-size:1.15rem;color:var(--brand)}
+.promo__text p{margin:0;color:var(--muted);font-size:.92rem;overflow-wrap:anywhere}
+.promo__dots{display:flex;justify-content:center;gap:6px;margin-top:8px}
+.promo__dots span{width:7px;height:7px;border-radius:50%;background:#cfd8d1;transition:.2s}
+.promo__dots span.is-on{background:var(--brand);width:18px;border-radius:4px}
+@media(max-width:520px){.promo__img{width:76px;height:76px}.promo__text h3{font-size:1.02rem}}
