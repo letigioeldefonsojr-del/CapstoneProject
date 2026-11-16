@@ -1099,7 +1099,7 @@ async function renderOrderDetails(id) {
       <div class="order__top"><h1>Order #${esc(o.id.slice(0, 6).toUpperCase())}</h1><span class="pill pill--${esc(o.status)}">${esc(statusLabel(o))}</span></div>
       <p class="muted">${esc(dateOf(o.createdAt))}</p>
       ${off ? `<div class="card notice">${esc(STATUS_LABELS[o.status])}${o.cancelReason ? `: ${esc(o.cancelReason)}` : ""}${o.rejectReason ? `: ${esc(o.rejectReason)}` : ""}${o.deliveryIssueReason ? `: ${esc(o.deliveryIssueReason)}` : ""}</div>` :
-        `<ol class="steps">${steps.map((s, i) => `<li class="${i <= idx ? "is-done" : ""}">${esc(s === "delivered" && pickup ? "Picked up" : STATUS_LABELS[s])}</li>`).join("")}</ol>`}
+        `<ol class="steps">${steps.map((s, i) => `<li class="${i < idx ? "is-done" : i === idx ? "is-done is-current" : ""}">${esc(s === "delivered" && pickup ? "Picked up" : STATUS_LABELS[s])}</li>`).join("")}</ol>`}
       <div class="card">
         <h2 class="section">${pickup ? "Pick-up" : "Delivery"}</h2>
         ${pickup ? `<p>${esc(o.pickupBranch || "Store")}</p>` : `<p>${esc(o.customerAddress || "")}</p>${o.deliveryMapUrl ? `<p><a href="${esc(o.deliveryMapUrl)}" target="_blank" rel="noopener">View on map</a></p>` : ""}${o.driverName ? `<p class="muted">Rider: ${esc(o.driverName)}</p>` : ""}`}
