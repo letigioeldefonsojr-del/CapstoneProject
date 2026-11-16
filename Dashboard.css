@@ -3498,3 +3498,56 @@ body.has-share-bar .scroll-to-top-btn { bottom: 84px; z-index: 85; }
 .staffcode-bar { height: 6px; border-radius: 3px; background: #e2e8e4; margin: 14px 0 8px; overflow: hidden; }
 .staffcode-bar span { display: block; height: 100%; width: 100%; background: #1b6b3a; transition: width 1s linear; }
 .staffcode-hint { margin: 0; font-size: 12.5px; color: #66756b; }
+
+/* ===========================
+   Polish: Accounts action buttons + sidebar footer links (20261116e)
+   =========================== */
+.accounts-table__actions { min-height: 40px; gap: 8px; }
+.accounts-table__actions > button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    height: 36px;
+    padding: 0 16px;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.accounts-table__actions > .btn-primary { border: 1px solid var(--brand-green); }
+.accounts-table__self-note {
+    display: inline-flex;
+    align-items: center;
+    height: 36px;
+    font-style: normal;
+    font-weight: 600;
+    color: var(--muted);
+}
+
+.sidebar__foot .delete-account-link {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    box-sizing: border-box;
+    text-align: left;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    padding: 9px 14px;
+    border-radius: 10px;
+    transition: background var(--transition), color var(--transition);
+}
+.sidebar__foot .delete-account-link:hover {
+    background: rgba(0, 0, 0, 0.05);
+    color: var(--ink);
+}
+.sidebar__foot #delete-account-btn:hover {
+    background: #fbe9e7;
+    color: #b3392f;
+}
+@media (max-width: 900px) {
+    .sidebar__foot .delete-account-link { justify-content: flex-end; text-align: right; }
+}

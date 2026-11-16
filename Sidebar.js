@@ -622,9 +622,7 @@ function wireChangePassword(user) {
   btn.id = "change-password-btn";
   btn.className = "delete-account-link";
   btn.textContent = "Change Password";
-  btn.style.paddingBottom = "6px";
-  btn.addEventListener("mouseenter", () => { btn.style.color = "inherit"; });
-  btn.addEventListener("mouseleave", () => { btn.style.color = ""; });
+  
   btn.addEventListener("click", () => promptChangePassword(user));
   deleteBtn.before(btn);
 }
