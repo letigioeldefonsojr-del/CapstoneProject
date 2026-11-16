@@ -201,3 +201,12 @@ input[type=checkbox],input[type=radio]{accent-color:var(--brand)}
 .ohead__date{margin:0;font-size:.88rem;color:var(--muted)}
 .ohead__pill{flex:none;font-size:.9rem;padding:8px 16px;border-radius:999px}
 @media(max-width:420px){.ohead{flex-wrap:wrap}.ohead h1{font-size:1.45rem}}
+
+/* ---- Order items, simple version (20261116k) ---- */
+.oitem__top{display:flex;justify-content:space-between;gap:12px;align-items:baseline;margin-bottom:4px}
+.oitem__line{display:flex;justify-content:space-between;gap:12px;font-size:.9rem;color:var(--muted);padding:2px 0}
+.oitem__line span:last-child{color:var(--ink);white-space:nowrap}
+.oitem__tag{font-style:normal;font-size:.72rem;font-weight:700;background:var(--brand-l);color:var(--brand);padding:1px 8px;border-radius:999px;margin-left:4px}
+.oitem__note{margin:6px 0 0;font-size:.82rem;color:var(--muted)}
+.oitem__note b{color:var(--brand)}
+.oitem__name{display:none}

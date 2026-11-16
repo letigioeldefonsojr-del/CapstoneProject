@@ -1114,6 +1114,26 @@ function renderOrders() {
     </section>`;
 }
 
+// One item of a placed order, kept simple: name + total, then one short line per price used.
+function orderItemHtml(i) {
+  const parts = orderItemParts(i);
+  const qty = Number(i.amount) || 0;
+  const pcs = (n) => `${n} pc${n === 1 ? "" : "s"}`;
+  const head = `<div class="oitem__top"><div><strong>${esc(i.productName)}</strong>${i.flavor ? ` <span class="muted">· ${esc(i.flavor)}</span>` : ""}</div><strong>${peso(i.subtotal)}</strong></div>`;
+  let lines;
+  let note = "";
+  if (!parts) {
+    lines = `<div class="oitem__line"><span>${pcs(qty)} × ${peso(i.unitPrice)} <em class="muted">(average)</em></span><span>${peso(i.subtotal)}</span></div>`;
+  } else {
+    lines = "";
+    if (parts.wsQty > 0) lines += `<div class="oitem__line"><span>${pcs(parts.wsQty)} × ${peso(parts.ws)} <em class="oitem__tag">Wholesale</em></span><span>${peso(parts.wsTotal)}</span></div>`;
+    if (parts.retailQty > 0) lines += `<div class="oitem__line"><span>${pcs(parts.retailQty)} × ${peso(parts.unit)}${parts.wsQty > 0 ? ` <em class="muted">Regular</em>` : ""}</span>${parts.wsQty > 0 ? `<span>${peso(parts.retailTotal)}</span>` : ""}</div>`;
+    const save = round2(parts.regularTotal - parts.total);
+    if (parts.wsQty > 0) note = `<p class="oitem__note">Wholesale price applies to every full set of ${WHOLESALE_MIN}.${save > 0.004 ? ` <b>You saved ${peso(save)}.</b>` : ""}</p>`;
+  }
+  return `<div class="oitem">${head}${lines}${note}</div>`;
+}
+
 const STEPS_DELIVERY = ["pending", "approved", "on_the_way", "delivered"];
 const STEPS_PICKUP = ["pending", "approved", "ready_for_pickup", "delivered"];
 
@@ -1155,13 +1175,7 @@ async function renderOrderDetails(id) {
       </div>
       <div class="card">
         <h2 class="section">Items</h2>
-        ${(o.items || []).map((i) => {
-          const parts = orderItemParts(i);
-          const head = `<strong>${esc(i.productName)}</strong>${i.flavor ? ` <span class="muted">· ${esc(i.flavor)}</span>` : ""}`;
-          return parts
-            ? `<div class="oitem"><div class="oitem__name">${head}</div>${calcTable(parts, { placed: true })}</div>`
-            : `<div class="oitem"><div class="oitem__name">${head}</div><div class="calc"><div class="calc__head"><span>Qty</span><span>Price</span><span>Rate</span><span>Amount</span></div><div class="calc__row"><span>${Number(i.amount)}</span><span>Per piece</span><span>${peso(i.unitPrice)}</span><span>${peso(i.subtotal)}</span></div><div class="calc__foot"><span>Line total</span><strong>${peso(i.subtotal)}</strong></div></div><p class="calc__why">Average price per piece for this item.</p></div>`;
-        }).join("")}
+        ${(o.items || []).map((i) => orderItemHtml(i)).join("")}
         <div class="summary__row"><span>Subtotal</span><span>${peso(o.itemsSubtotal)}</span></div>
         <div class="summary__row"><span>${pickup ? "Pick-up" : "Delivery fee"}</span><span>${pickup ? "Free" : o.deliveryFeeUnresolved ? "To be confirmed" : peso(o.deliveryFee)}</span></div>
         <div class="summary__row summary__row--total"><span>Total</span><span>${peso(o.total)}</span></div>
