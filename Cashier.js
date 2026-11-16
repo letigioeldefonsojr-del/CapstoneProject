@@ -1,4 +1,4 @@
-// cashier — Counter POS page: cart, checkout, receipts, refunds.
+// pos — Counter POS page: cart, checkout, receipts, refunds.
 
 import { db } from "./firebase-config.js";
 import {
@@ -12,11 +12,11 @@ import * as SB from "./SupabaseStore.js?v=20261029c";
 import {
   candidatesForProduct, findCandidateByBarcode, searchProducts,
   addToCart, setLineQty, setLineMode, removeLine,
-  lineUnitPrice, lineTotal, linePricing, cartTotal, cartUnits, WHOLESALE_GROUP_SIZE,
+  lineUnitPrice, lineTotal, linePricing, cartTotal, cartUnits, cartRegularSubtotal, cartWholesaleDiscount, WHOLESALE_GROUP_SIZE,
   computePayment, planStockUpdates, makeReceiptNo, buildSaleItems, formatMoney,
   itemRefundedQty, remainingQty, saleRefundStatus, planRefund, planRestock, round2,
   applyNumpadKey, quickCashAmounts
-} from "./CashierLogic.js?v=20261110b";
+} from "./CashierLogic.js?v=20261116a";
 
 const STORE_NAME = "Almares 328";
 
@@ -612,6 +612,17 @@ function renderResults() {
   `).join("");
 }
 
+// Invoice-style rows for one line: quantity x rate = amount, wholesale group first.
+function calcRows(line) {
+  const pr = linePricing(line);
+  const rows = [];
+  if (pr.groups > 0) rows.push({ qty: pr.wholesaleQty, rate: formatMoney(line.wholesaleUnit), tag: "wholesale", amount: formatMoney(pr.wholesaleTotal) });
+  if (pr.retailQty > 0 || pr.groups === 0) {
+    rows.push({ qty: pr.retailQty, rate: formatMoney(line.retailUnit ?? 0), tag: line.discountPercent ? `-${line.discountPercent}%` : "", amount: formatMoney(pr.retailTotal) });
+  }
+  return rows;
+}
+
 function renderCart() {
   const box = $("pos-lines");
   if (cart.length === 0) {
@@ -635,15 +646,22 @@ function renderCart() {
               <button type="button" data-action="inc" data-key="${esc(line.key)}" aria-label="More">+</button>
             </div>
             <div class="pos-line__money">
-              <span class="pos-line__unit">${pr.groups > 0 ? `${pr.wholesaleQty} × wholesale ${formatMoney(line.wholesaleUnit)}${pr.retailQty > 0 ? ` + ${pr.retailQty} × ${formatMoney(line.retailUnit)}` : ""}` : `${formatMoney(line.retailUnit)} each${line.discountPercent ? ` (−${line.discountPercent}%)` : ""}`}</span>
               <strong>${formatMoney(lineTotal(line))}</strong>
             </div>
+          </div>
+          <div class="pos-calc">
+            <div class="pos-calc__head"><span>Qty</span><span>Rate</span><span>Amount</span></div>
+            ${calcRows(line).map((r) => `<div class="pos-calc__row"><span>${r.qty}</span><span>${r.rate}${r.tag ? ` <em>${r.tag}</em>` : ""}</span><span>${r.amount}</span></div>`).join("")}
           </div>
           <div class="pos-hint" style="margin-top:4px;font-size:12px;">${wsNote}</div>
         </div>`;
     }).join("");
   }
+  const discount = cartWholesaleDiscount(cart);
   $("pos-units").textContent = String(cartUnits(cart));
+  $("pos-subtotal").textContent = formatMoney(cartRegularSubtotal(cart));
+  $("pos-discount").textContent = `-${formatMoney(discount)}`;
+  $("pos-discount-row").hidden = discount <= 0;
   $("pos-total").textContent = formatMoney(cartTotal(cart));
 }
 
@@ -1151,9 +1169,10 @@ function wireCustomerPicker() {
 function showReceipt(sale) {
   const rows = sale.lines.map((l) => `
     <tr>
-      <td>${esc(l.name)}${linePricing(l).groups > 0 ? " <em>(wholesale)</em>" : ""}<br><small>${linePricing(l).groups > 0 ? `${linePricing(l).wholesaleQty} × ${formatMoney(l.wholesaleUnit)}${linePricing(l).retailQty > 0 ? ` + ${linePricing(l).retailQty} × ${formatMoney(l.retailUnit)}` : ""}` : `${l.qty} × ${formatMoney(l.retailUnit)}`}</small></td>
+      <td>${esc(l.name)}<br>${calcRows(l).map((r) => `<small>${r.qty} × ${r.rate}${r.tag === "wholesale" ? " (wholesale)" : ""} = ${r.amount}</small>`).join("<br>")}</td>
       <td class="r">${formatMoney(lineTotal(l))}</td>
     </tr>`).join("");
+  const receiptDiscount = cartWholesaleDiscount(sale.lines);
 
   $("pos-receipt").innerHTML = `
     <div class="pos-receipt__head">
@@ -1166,6 +1185,8 @@ function showReceipt(sale) {
     <table>${rows}</table>
     <div class="pos-receipt__sum">
       <div><span>Items</span><span>${sale.units}</span></div>
+      <div><span>Subtotal</span><span>${formatMoney(cartRegularSubtotal(sale.lines))}</span></div>
+      ${receiptDiscount > 0 ? `<div><span>Wholesale discount</span><span>-${formatMoney(receiptDiscount)}</span></div>` : ""}
       <div class="pos-receipt__total"><span>Total</span><span>${formatMoney(sale.total)}</span></div>
       <div><span>Paid by</span><span>${sale.paymentMethod === "gcash" ? "GCash" : "Cash"}</span></div>
       ${sale.paymentMethod === "cash"

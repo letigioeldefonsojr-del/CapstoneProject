@@ -76,7 +76,7 @@
                     <path d="M4 12.5H20L19 20.5H5L4 12.5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
                     <path d="M9 15.5V17.5M12 15.5V17.5M15 15.5V17.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                 </svg>
-                <span class="nav-item__label">Cashier</span>
+                <span class="nav-item__label">POS</span>
             </a>
 
             <a href="Orders" class="nav-item">
@@ -184,7 +184,7 @@
         <!-- ================================================================
              INVENTORY
              Employee: browse/search only, no controls below this line.
-             Admin: can also add products, edit stock/price, and bulk
+             Admin: can also add products, edit stock/price, and
              import via CSV — all gated behind role checks in Inventory.js.
              ================================================================ -->
         <div class="shared-toolbar">
@@ -208,7 +208,7 @@
                     <path d="M12 15V4M12 4L8 8M12 4L16 8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
                     <path d="M4 15V18.5C4 19.3 4.7 20 5.5 20H18.5C19.3 20 20 19.3 20 18.5V15" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
-                Bulk Import (CSV)
+                Import (CSV)
             </button>
             <button type="button" class="btn-outline" id="export-csv-btn">
                 <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -509,12 +509,12 @@
 </div>
 
 <!-- ================================================================
-     BULK CSV IMPORT MODAL (admin only)
+     CSV IMPORT MODAL (admin only)
      ================================================================ -->
 <div class="modal-overlay" id="csv-modal-overlay" hidden>
     <div class="modal modal--wide">
         <div class="modal__header">
-            <h3>Bulk Import Preview</h3>
+            <h3>Import Preview</h3>
             <button type="button" class="modal__close" id="csv-modal-close" aria-label="Close">
                 <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                     <path d="M6 6L18 18M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
@@ -591,7 +591,7 @@
     <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M6 15L12 9L18 15" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
 </button>
 
-<script type="module" src="Sidebar.js?v=20261111b"></script>
-<script type="module" src="Inventory.js?v=20261106a"></script>
+<script type="module" src="Sidebar.js?v=20261116a"></script>
+<script type="module" src="Inventory.js?v=20261116a"></script>
 </body>
 </html>

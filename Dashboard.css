@@ -3465,3 +3465,14 @@ body.has-share-bar .scroll-to-top-btn { bottom: 84px; z-index: 85; }
 
 /* The rider's location bar sits along the bottom of the screen; shorten the desktop sidebar so Log out stays visible above it. */
 @media (min-width: 901px) { body.has-share-bar .sidebar { height: calc(100vh - 52px); } }
+
+/* POS: invoice-style wholesale breakdown */
+.pos-calc { margin-top: 8px; border-top: 1px solid var(--border); font-size: 12.5px; }
+.pos-calc__head, .pos-calc__row { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; gap: 8px; padding: 3px 0; align-items: baseline; }
+.pos-calc__head { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.pos-calc__head span:last-child, .pos-calc__row span:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+.pos-calc__row { color: var(--ink); }
+.pos-calc em { font-style: normal; font-size: 10.5px; margin-left: 4px; padding: 1px 7px; border-radius: 999px; background: #e3f1e8; color: #1b5e3b; white-space: nowrap; }
+.pos-totals { margin-bottom: 14px; }
+.pos-totals__row--discount { color: #1b6b43; }
+.pos-receipt small { display: block; color: var(--muted); }

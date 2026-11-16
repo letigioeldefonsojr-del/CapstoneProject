@@ -106,7 +106,7 @@ document.addEventListener("sidebar:ready", (event) => {
   isAdmin = event.detail.role === "admin";
   currentUserRole = event.detail.role;
   currentUser = event.detail.user;
-  // "Prepare Cashier Search" only existed for the old Firebase product search.
+  // "Prepare POS Search" only existed for the old Firebase product search.
   if (SUPABASE_ENABLED) document.getElementById("index-products-btn")?.remove();
   loadInventory();
   wireControls();
@@ -2587,9 +2587,9 @@ async function handleIndexProducts() {
   const todo = allProducts.filter((p) => needsIndexUpdate(p));
   const confirmed = await confirmDialog(
     todo.length === 0
-      ? "Every product is already prepared. Mark the Cashier as ready for fast search?"
+      ? "Every product is already prepared. Mark the POS as ready for fast search?"
       : `This updates ${todo.length.toLocaleString()} product${todo.length === 1 ? "" : "s"} (a search helper field only; names, prices and stock are not touched). It takes about a minute. Keep this page open.`,
-    { title: "Prepare products for fast Cashier search?", confirmLabel: "Start" }
+    { title: "Prepare products for fast POS search?", confirmLabel: "Start" }
   );
   if (!confirmed) return;
 
@@ -2611,7 +2611,7 @@ async function handleIndexProducts() {
     }
     await setDoc(doc(db, "settings", "productIndex"), { ready: true, count: allProducts.length, updatedAt: serverTimestamp() });
     hideDeleteProgress();
-    showNotice("Done. The Cashier will now find products with quick lookups instead of downloading the whole catalogue.");
+    showNotice("Done. The POS will now find products with quick lookups instead of downloading the whole catalogue.");
   } catch (error) {
     console.error("Couldn't prepare products:", error);
     hideDeleteProgress();

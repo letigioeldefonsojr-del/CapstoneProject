@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Almares 328 | Cashier</title>
+    <title>Almares 328 | POS</title>
     <link rel="icon" type="image/png" href="Logo.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="Dashboard.css?v=20261030c">
+    <link rel="stylesheet" href="Dashboard.css?v=20261116a">
 </head>
 <body class="page-cashier">
 
@@ -188,6 +188,8 @@
 
                 <div class="pos-totals">
                     <div class="pos-totals__row"><span>Items</span><span id="pos-units">0</span></div>
+                    <div class="pos-totals__row"><span>Subtotal</span><span id="pos-subtotal">₱0.00</span></div>
+                    <div class="pos-totals__row pos-totals__row--discount" id="pos-discount-row" hidden><span>Wholesale discount</span><span id="pos-discount">-₱0.00</span></div>
                     <div class="pos-totals__row pos-totals__row--total"><span>Total</span><span id="pos-total">₱0.00</span></div>
                 </div>
 
@@ -323,7 +325,7 @@
 </div>
 
 <script type="module" src="firebase-config.js"></script>
-<script type="module" src="Sidebar.js?v=20261111b"></script>
-<script type="module" src="Cashier.js?v=20261110b"></script>
+<script type="module" src="Sidebar.js?v=20261116a"></script>
+<script type="module" src="Cashier.js?v=20261116a"></script>
 </body>
 </html>

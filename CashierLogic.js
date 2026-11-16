@@ -184,6 +184,18 @@ export function lineTotal(line) {
   return linePricing(line).total;
 }
 
+// What the cart would cost with no wholesale price: every piece at the regular rate.
+export function cartRegularSubtotal(cart) {
+  return round2(cart.reduce((sum, line) => (
+    line.retailUnit === null || line.retailUnit === undefined ? sum : sum + (Number(line.qty) || 0) * line.retailUnit
+  ), 0));
+}
+
+// How much wholesale pricing took off the regular subtotal.
+export function cartWholesaleDiscount(cart) {
+  return Math.max(0, round2(cartRegularSubtotal(cart) - cartTotal(cart)));
+}
+
 export function cartTotal(cart) {
   return round2(cart.reduce((sum, line) => sum + lineTotal(line), 0));
 }

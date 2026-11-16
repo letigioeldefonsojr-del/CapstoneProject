@@ -192,7 +192,7 @@ async function fetchInPersonSales(start, end) {
       performedByEmail: data.performedByEmail || "unknown",
       timestampMillis: data.createdAt?.toMillis?.() ?? 0
     };
-  }).filter((s) => !s.fromPos) // Cashier sales are counted once, from posSales
+  }).filter((s) => !s.fromPos) // POS sales are counted once, from posSales
     .filter((s) => s.unitsSold > 0); // a "sale" movement with 0 or negative change isn't a real sale (shouldn't happen, but guards against bad data)
 }
 
@@ -339,7 +339,7 @@ function buildSalesTable(combined) {
         <tr>
           <td>${time}</td>
           <td><span class="role-pill role-pill--employee">In-Person</span></td>
-          <td>Cashier ${escapeHtmlSales(sale.receiptNo)} — ${sale.itemCount} item${sale.itemCount === 1 ? "" : "s"} · ${sale.paymentMethod} — by ${escapeHtmlSales(sale.performedByEmail)}</td>
+          <td>POS ${escapeHtmlSales(sale.receiptNo)} — ${sale.itemCount} item${sale.itemCount === 1 ? "" : "s"} · ${sale.paymentMethod} — by ${escapeHtmlSales(sale.performedByEmail)}</td>
           <td style="text-align:right;">${sale.revenue != null ? `₱${sale.revenue.toFixed(2)}` : "—"}${sale.refundedTotal > 0 ? `<br><small>${sale.refundStatus === "full" ? "voided / refunded" : "after"} −₱${sale.refundedTotal.toFixed(2)} refund${sale.refundStatus === "full" ? "" : ` (was ₱${sale.grossTotal.toFixed(2)})`}</small>` : ""}</td>
           <td></td>
         </tr>

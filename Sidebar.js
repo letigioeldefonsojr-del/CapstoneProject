@@ -31,7 +31,7 @@ function injectCashierNav() {
       <path d="M4 12.5H20L19 20.5H5L4 12.5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
       <path d="M9 15.5V17.5M12 15.5V17.5M15 15.5V17.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
     </svg>
-    <span class="nav-item__label">Cashier</span>`;
+    <span class="nav-item__label">POS</span>`;
   if (ordersLink) nav.insertBefore(link, ordersLink); else nav.appendChild(link);
 }
 injectCashierNav();
