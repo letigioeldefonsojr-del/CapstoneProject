@@ -136,9 +136,9 @@ document.addEventListener("DOMContentLoaded", () => {
     clearInterval(staffCodeTimer);
   }
 
-  // The staff code in the email only lasts 30 seconds: show how long is left.
+  // The staff code in the email only lasts 60 seconds: show how long is left.
   let staffCodeTimer = null;
-  const STAFF_CODE_SECONDS = 30;
+  const STAFF_CODE_SECONDS = 60;
   function startStaffCodeCountdown() {
     clearInterval(staffCodeTimer);
     const hint = document.getElementById("otp-staff-hint");

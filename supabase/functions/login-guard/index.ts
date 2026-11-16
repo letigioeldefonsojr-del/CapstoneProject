@@ -79,7 +79,7 @@ function tokenOf(req: Request) {
 }
 
 // How long the random staff code in the sign-up email stays valid.
-const STAFF_CODE_TTL_SEC = 30;
+const STAFF_CODE_TTL_SEC = 60;
 
 async function sha256Hex(text: string) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
