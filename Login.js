@@ -35,12 +35,15 @@ async function identify(id) {
     const customer = await guardCall("customer_resolve", { mobile: digits });
     return customer.found ? "Shop" : null;
   }
-  if (await lookup("admin", id)) return "AdminLogin";
-  if (await lookup("employee", id)) return "EmployeeLogin";
   if (id.includes("@")) {
+    // Admin emails can't be looked up ahead of time (only usernames can), so check the others first.
+    if (await lookup("employee", id)) return "EmployeeLogin";
     const taken = await guardCall("customer_taken", { email: id });
     if (taken.emailTaken) return "Shop";
+    return "AdminLogin";
   }
+  if (await lookup("admin", id)) return "AdminLogin";
+  if (await lookup("employee", id)) return "EmployeeLogin";
   return null;
 }
 
