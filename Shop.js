@@ -1123,11 +1123,11 @@ function orderItemHtml(i) {
   let lines;
   let note = "";
   if (!parts) {
-    lines = `<div class="oitem__line"><span>${pcs(qty)} × ${peso(i.unitPrice)} <em class="muted">(average)</em></span><span>${peso(i.subtotal)}</span></div>`;
+    lines = `<div class="oitem__line"><span>${pcs(qty)} × ${peso(i.unitPrice)} <em class="oitem__tag oitem__tag--reg">Average</em></span><span>${peso(i.subtotal)}</span></div>`;
   } else {
     lines = "";
     if (parts.wsQty > 0) lines += `<div class="oitem__line"><span>${pcs(parts.wsQty)} × ${peso(parts.ws)} <em class="oitem__tag">Wholesale</em></span><span>${peso(parts.wsTotal)}</span></div>`;
-    if (parts.retailQty > 0) lines += `<div class="oitem__line"><span>${pcs(parts.retailQty)} × ${peso(parts.unit)}${parts.wsQty > 0 ? ` <em class="muted">Regular</em>` : ""}</span>${parts.wsQty > 0 ? `<span>${peso(parts.retailTotal)}</span>` : ""}</div>`;
+    if (parts.retailQty > 0) lines += `<div class="oitem__line"><span>${pcs(parts.retailQty)} × ${peso(parts.unit)}${parts.wsQty > 0 ? ` <em class="oitem__tag oitem__tag--reg">Regular</em>` : ""}</span>${parts.wsQty > 0 ? `<span>${peso(parts.retailTotal)}</span>` : ""}</div>`;
     const save = round2(parts.regularTotal - parts.total);
     if (parts.wsQty > 0) note = `<p class="oitem__note">Wholesale price applies to every full set of ${WHOLESALE_MIN}.${save > 0.004 ? ` <b>You saved ${peso(save)}.</b>` : ""}</p>`;
   }

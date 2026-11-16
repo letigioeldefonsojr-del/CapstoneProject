@@ -210,3 +210,5 @@ input[type=checkbox],input[type=radio]{accent-color:var(--brand)}
 .oitem__note{margin:6px 0 0;font-size:.82rem;color:var(--muted)}
 .oitem__note b{color:var(--brand)}
 .oitem__name{display:none}
+.oitem__tag--reg{background:#eceeed;color:#5b6a60}
+.oitem__line{color:var(--ink)}
