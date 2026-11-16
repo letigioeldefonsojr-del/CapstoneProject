@@ -1162,3 +1162,10 @@ input:focus-visible {
 .login-alt__title { text-align: center; font-size: 0.82rem; color: rgba(255, 255, 255, 0.75); }
 .login-alt__btn { display: block; text-align: center; padding: 12px 16px; border-radius: 30px; border: 1px solid rgba(255, 255, 255, 0.45); color: #fff; font-weight: 600; font-size: 0.9rem; text-decoration: none; transition: background 0.15s; }
 .login-alt__btn:hover { background: rgba(255, 255, 255, 0.14); }
+
+.login-staff-note { margin: 16px 0 0; text-align: center; font-size: 0.74rem; color: rgba(255, 255, 255, 0.5); }
+.login-staff-note a { color: rgba(255, 255, 255, 0.7); text-decoration: underline; }
+.login-staff-note a:hover { color: #fff; }
+
+.otp-staff-hint { margin: 6px 2px 0; font-size: 0.78rem; color: rgba(255, 255, 255, 0.75); }
+.otp-staff-hint[data-expired="1"] { color: #ffd1cc; font-weight: 600; }

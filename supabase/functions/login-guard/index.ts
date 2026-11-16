@@ -78,6 +78,9 @@ function tokenOf(req: Request) {
   return (req.headers.get("x-firebase-token") ?? "").replace(/^Bearer\s+/i, "");
 }
 
+// How long the random staff code in the sign-up email stays valid.
+const STAFF_CODE_TTL_SEC = 30;
+
 async function sha256Hex(text: string) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -260,10 +263,26 @@ Deno.serve(async (req) => {
       if (gate?.state === "wait") return json({ valid: false, configured: true, secondsLeft: gate.secondsLeft });
       if (gate?.state === "locked") return json({ valid: false, configured: true, secondsLeft: 3600 });
 
-      const { data: row } = await admin.from("staff_code").select("code_hash").eq("id", 1).maybeSingle();
+      const { data: row } = await admin.from("staff_code").select("code_hash, one_time, expires_at").eq("id", 1).maybeSingle();
       if (!row?.code_hash) return json({ valid: false, configured: false });
 
-      if ((await sha256Hex(code)) === row.code_hash) {
+      const spent = String(row.code_hash).startsWith("used:");
+      const expired = !!row.expires_at && Date.parse(row.expires_at) < Date.now();
+      if (spent || expired) {
+        // A one-time code that was used or has timed out: nothing is valid until an admin makes a new one.
+        const { data: failed } = await admin.rpc("guard_fail", { k: key });
+        return json({ valid: false, configured: true, inactive: true, secondsLeft: failed?.secondsLeft ?? null });
+      }
+
+      const entered = await sha256Hex(code);
+      if (entered === row.code_hash) {
+        if (row.one_time) {
+          // Burn it: only one sign-up can ever use this code.
+          const { data: burned } = await admin.from("staff_code")
+            .update({ code_hash: `used:${crypto.randomUUID()}`, updated_at: new Date().toISOString() })
+            .eq("id", 1).eq("code_hash", entered).select("id");
+          if (!burned || burned.length === 0) return json({ valid: false, configured: true, inactive: true });
+        }
         await admin.rpc("guard_reset", { ks: [key] });
         return json({ valid: true, configured: true });
       }
@@ -383,9 +402,19 @@ Deno.serve(async (req) => {
       crypto.getRandomValues(buf);
       const code = String(100000 + (buf[0] % 900000));
       const expires = new Date(Date.now() + 15 * 60 * 1000);
+      // Staff sign-ups also get a random staff code in the same email. It lasts only STAFF_CODE_TTL_SEC seconds.
+      let staffCode = "";
+      let staffExpires: Date | null = null;
+      if (body.staff === true) {
+        const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        staffCode = [...crypto.getRandomValues(new Uint8Array(6))].map((b) => alphabet[b % alphabet.length]).join("");
+        staffExpires = new Date(Date.now() + STAFF_CODE_TTL_SEC * 1000);
+      }
       await admin.from("otp_codes").delete().lt("expires_at", new Date(Date.now() - 86400000).toISOString());
       const { error: upErr } = await admin.from("otp_codes").upsert({
         email, code_hash: await sha256Hex(`${email}:${code}`), expires_at: expires.toISOString(), attempts: 0,
+        staff_hash: staffCode ? await sha256Hex(`${email}:staff:${staffCode}`) : null,
+        staff_expires_at: staffExpires ? staffExpires.toISOString() : null,
       });
       if (upErr) return json({ error: "store_failed" }, 500);
 
@@ -401,6 +430,8 @@ Deno.serve(async (req) => {
             email,
             to_name: name,
             passcode: code,
+            staff_code: staffCode,
+            staff_code_seconds: String(STAFF_CODE_TTL_SEC),
             time: expires.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Manila" }),
           },
         }),
@@ -434,6 +465,17 @@ Deno.serve(async (req) => {
       if ((await sha256Hex(`${email}:${entered}`)) !== row.code_hash) {
         await admin.from("otp_codes").update({ attempts: row.attempts + 1 }).eq("email", email);
         return json({ valid: false, message: "Incorrect code. Please try again." });
+      }
+      if (row.staff_hash) {
+        const typed = String(body.staffCode ?? "").trim().toUpperCase();
+        if (!typed) return json({ valid: false, message: "Enter the staff code from your email." });
+        if (row.staff_expires_at && Date.parse(row.staff_expires_at) < Date.now()) {
+          return json({ valid: false, message: `The staff code expired (it only lasts ${STAFF_CODE_TTL_SEC} seconds). Tap "Resend code" to get a new one.` });
+        }
+        if ((await sha256Hex(`${email}:staff:${typed}`)) !== row.staff_hash) {
+          await admin.from("otp_codes").update({ attempts: row.attempts + 1 }).eq("email", email);
+          return json({ valid: false, message: "Incorrect staff code. Please try again." });
+        }
       }
       await admin.from("otp_codes").delete().eq("email", email); // single use
       return json({ valid: true, message: "" });
@@ -493,6 +535,22 @@ Deno.serve(async (req) => {
     // ---------- administrators only ----------
     const isAdmin = !!(await firestoreDoc(`admins/${who.uid}`, token));
     if (!isAdmin) return json({ error: "not_admin" }, 403);
+
+    // Makes a random one-time staff code (replaces any earlier one). Shown to the admin once.
+    if (action === "staff_code_generate") {
+      const wait = await throttle(`gencode:${who.uid}`, 10, 30);
+      if (wait) return json({ error: "slow_down", secondsLeft: wait }, 429);
+      const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I to avoid mix-ups
+      const bytes = crypto.getRandomValues(new Uint8Array(8));
+      const code = [...bytes].map((b) => alphabet[b % alphabet.length]).join("");
+      const validForSec = 900;
+      const { error } = await admin.from("staff_code").upsert({
+        id: 1, code_hash: await sha256Hex(code), one_time: true,
+        expires_at: new Date(Date.now() + validForSec * 1000).toISOString(), updated_at: new Date().toISOString(),
+      });
+      if (error) return json({ error: error.message }, 500);
+      return json({ ok: true, code, validForSec });
+    }
 
     if (action === "status") {
       const ids: string[] = (Array.isArray(body.ids) ? body.ids : []).slice(0, 20).map(norm).filter(validId);

@@ -8,8 +8,16 @@ const input = document.getElementById("identifier");
 const button = document.getElementById("identify-submit");
 const label = button.querySelector(".login-btn__label");
 
-function showStatus(message) {
+function showStatus(message, withSignup = false) {
   statusEl.textContent = message;
+  if (withSignup) {
+    statusEl.append(" New staff member? ");
+    const link = document.createElement("a");
+    link.href = "EmployeeLogin?signup=1";
+    link.textContent = "Register here";
+    link.style.cssText = "color:#fff;font-weight:700;text-decoration:underline;";
+    statusEl.append(link, ".");
+  }
   statusEl.dataset.kind = "error";
   statusEl.hidden = false;
 }
@@ -55,7 +63,7 @@ form.addEventListener("submit", async (event) => {
   try {
     const page = await identify(id);
     if (!page) {
-      showStatus("We couldn't find an account with that. Check it and try again, or create an account below.");
+      showStatus("We couldn't find an account with that. Check it and try again, or create a customer account below.");
       return;
     }
     go(page, id);

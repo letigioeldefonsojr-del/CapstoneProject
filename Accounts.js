@@ -232,6 +232,7 @@ function applyFilterAndRender() {
       <input type="search" id="accounts-customer-search" class="feedback-sort-select" style="min-width:230px;" placeholder="Find a customer: name or mobile" autocomplete="off">
       <button type="button" class="btn-outline" id="show-latest-customers-btn">Show latest 25 customers</button>
       <button type="button" class="btn-primary" id="add-admin-btn">+ Add New Admin</button>
+      <button type="button" class="btn-outline" id="staff-code-btn">Generate staff code</button>
       <select id="accounts-role-filter" class="feedback-sort-select">
         <option value="all">All roles</option>
         <option value="admin">Admin</option>
@@ -265,6 +266,7 @@ function applyFilterAndRender() {
   });
 
   panel.querySelector("#add-admin-btn").addEventListener("click", handleAddNewAdmin);
+  panel.querySelector("#staff-code-btn").addEventListener("click", (event) => handleGenerateStaffCode(event.currentTarget));
   panel.querySelector("#show-latest-customers-btn").addEventListener("click", loadLatestCustomers);
 
   const searchBox = panel.querySelector("#accounts-customer-search");
@@ -947,4 +949,59 @@ function escapeHtml(text) {
   const div = document.createElement("div");
   div.textContent = text;
   return div.innerHTML;
+}
+
+
+// ---- One-time staff registration code: shown for 15 seconds, works for one sign-up ----
+const STAFF_CODE_SHOW_SECONDS = 15;
+
+async function handleGenerateStaffCode(button) {
+  button.disabled = true;
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal staffcode-modal">
+      <div class="modal__header"><h3>Staff registration code</h3></div>
+      <div class="modal__body">
+        <p class="staffcode-note" id="staffcode-note">Making a new code...</p>
+        <div class="staffcode-code" id="staffcode-code">······</div>
+        <div class="staffcode-bar"><span id="staffcode-bar"></span></div>
+        <p class="staffcode-hint" id="staffcode-hint"></p>
+      </div>
+      <div class="modal__footer"><button type="button" class="btn-primary" id="staffcode-done">Done</button></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const codeEl = overlay.querySelector("#staffcode-code");
+  const noteEl = overlay.querySelector("#staffcode-note");
+  const hintEl = overlay.querySelector("#staffcode-hint");
+  const barEl = overlay.querySelector("#staffcode-bar");
+  let timer = null;
+  const close = () => { clearInterval(timer); codeEl.textContent = ""; overlay.remove(); button.disabled = false; };
+  overlay.querySelector("#staffcode-done").addEventListener("click", close);
+
+  try {
+    const result = await guardCall("staff_code_generate", {}, { signedIn: true });
+    codeEl.textContent = result.code;
+    noteEl.textContent = "Give this code to the new staff member. It works for ONE registration only.";
+    let left = STAFF_CODE_SHOW_SECONDS;
+    const tick = () => {
+      hintEl.textContent = `This code hides in ${left}s. If you miss it, generate a new one.`;
+      barEl.style.width = `${(left / STAFF_CODE_SHOW_SECONDS) * 100}%`;
+      if (left <= 0) {
+        codeEl.textContent = "Hidden";
+        hintEl.textContent = "The code is hidden. It stays valid for 15 minutes until it is used.";
+        clearInterval(timer);
+        return;
+      }
+      left -= 1;
+    };
+    tick();
+    timer = setInterval(tick, 1000);
+  } catch (error) {
+    console.error("Couldn't make a staff code:", error);
+    codeEl.textContent = "—";
+    noteEl.textContent = String(error?.message) === "slow_down"
+      ? "Too many codes in a short time. Wait a moment and try again."
+      : "Couldn't make a staff code. Check your connection and try again.";
+  }
 }

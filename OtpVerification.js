@@ -2,9 +2,9 @@
 
 import { guardCall } from "./LoginGuard.js?v=20261030d";
 
-export async function sendOtpCode(email, name) {
+export async function sendOtpCode(email, name, { staff = false } = {}) {
   try {
-    await guardCall("otp_send", { email, name: name || "" });
+    await guardCall("otp_send", { email, name: name || "", staff });
   } catch (error) {
     if (error.message === "limit") {
       throw new Error("Too many codes were requested for this email. Please try again in an hour.");
@@ -16,9 +16,9 @@ export async function sendOtpCode(email, name) {
   }
 }
 
-export async function verifyOtpCode(email, enteredCode) {
+export async function verifyOtpCode(email, enteredCode, staffCode = "") {
   try {
-    const data = await guardCall("otp_verify", { email, code: enteredCode });
+    const data = await guardCall("otp_verify", { email, code: enteredCode, staffCode });
     return { valid: data.valid === true, message: data.message || "" };
   } catch (error) {
     console.error("Couldn't verify OTP code:", error);

@@ -3490,3 +3490,11 @@ body.has-share-bar .scroll-to-top-btn { bottom: 84px; z-index: 85; }
 .pos-unit-summary { margin: 10px 0 0; padding: 10px 12px; border-radius: 8px; background: #eef6f0; font-size: 14px; min-height: 20px; }
 .pos-unit-summary small { color: #5b6b60; }
 .pos-unit-warn { color: #c0392b; font-weight: 700; }
+
+/* Accounts: one-time staff code prompt */
+.staffcode-modal { max-width: 420px; text-align: center; }
+.staffcode-note { margin: 0 0 12px; font-size: 14px; }
+.staffcode-code { font-size: 38px; font-weight: 800; letter-spacing: 0.18em; font-family: ui-monospace, Menlo, Consolas, monospace; padding: 14px 8px; background: #eef6f0; border-radius: 12px; color: #14502c; user-select: all; }
+.staffcode-bar { height: 6px; border-radius: 3px; background: #e2e8e4; margin: 14px 0 8px; overflow: hidden; }
+.staffcode-bar span { display: block; height: 100%; width: 100%; background: #1b6b3a; transition: width 1s linear; }
+.staffcode-hint { margin: 0; font-size: 12.5px; color: #66756b; }

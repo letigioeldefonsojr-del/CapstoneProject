@@ -6,8 +6,8 @@ import { promptForgotPassword } from "./ForgotPassword.js?v=20261030d";
 import { validatePasswordStrength } from "./PasswordStrength.js";
 import { checkLoginAllowed, recordFailedAttempt, resetAttempts } from "./LoginAttempts.js?v=20261030d";
 import { guardCall } from "./LoginGuard.js?v=20261030d";
-import { verifyStaffCode } from "./StaffCode.js?v=20261030d";
-import { sendOtpCode, verifyOtpCode } from "./OtpVerification.js?v=20261030e";
+import { verifyStaffCode } from "./StaffCode.js?v=20261116a";
+import { sendOtpCode, verifyOtpCode } from "./OtpVerification.js?v=20261116a";
 import { generateUniqueUsername, isUsernameTaken } from "./UsernameGenerator.js?v=20261030d";
 import {
   signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, onAuthStateChanged, signOut,
@@ -124,14 +124,36 @@ document.addEventListener("DOMContentLoaded", () => {
     formSignup.hidden = true;
     formOtpVerify.hidden = false;
     cardTitle.textContent = "Verify Your Email";
-    document.getElementById("otp-sent-to").textContent = `We sent a 6-digit code to ${email}.`;
+    document.getElementById("otp-sent-to").textContent = `We sent a 6-digit code and a staff code to ${email}.`;
     clearOtpDigitInputs();
+    startStaffCodeCountdown();
     hideStatus();
     document.querySelector('.otp-digit-input[data-index="0"]').focus();
   }
 
   function hideOtpStep() {
     formOtpVerify.hidden = true;
+    clearInterval(staffCodeTimer);
+  }
+
+  // The staff code in the email only lasts 30 seconds: show how long is left.
+  let staffCodeTimer = null;
+  const STAFF_CODE_SECONDS = 30;
+  function startStaffCodeCountdown() {
+    clearInterval(staffCodeTimer);
+    const hint = document.getElementById("otp-staff-hint");
+    document.getElementById("otp-staff-code").value = "";
+    let left = STAFF_CODE_SECONDS;
+    const tick = () => {
+      hint.textContent = left > 0
+        ? `The staff code expires ${left}s after it was sent.`
+        : 'The staff code expired. Tap "Resend code" to get a new one.';
+      hint.dataset.expired = left > 0 ? "0" : "1";
+      if (left <= 0) clearInterval(staffCodeTimer);
+      left -= 1;
+    };
+    tick();
+    staffCodeTimer = setInterval(tick, 1000);
   }
 
   function showGoogleCompleteProfileStep() {
@@ -433,12 +455,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const email = document.getElementById("signup-email").value.trim();
     const phoneDigits = document.getElementById("signup-phone").value.trim();
     const phone = phoneDigits ? `+63${phoneDigits}` : "";
-    const staffCode = document.getElementById("signup-staffcode").value.trim();
     const password = document.getElementById("signup-password").value;
     const confirmPassword = document.getElementById("signup-confirm-password").value;
     const submitBtn = document.getElementById("signup-submit");
 
-    if (!name || !username || !email || !phone || !staffCode || !password || !confirmPassword) {
+    if (!name || !username || !email || !phone || !password || !confirmPassword) {
       showStatus("Fill in every field to create an account.", "error");
       return;
     }
@@ -457,18 +478,12 @@ document.addEventListener("DOMContentLoaded", () => {
     setButtonLoading(submitBtn, true, "Create Account", "Verifying...");
 
     try {
-      const staffCodeResult = await verifyStaffCode(staffCode);
-      if (!staffCodeResult.valid) {
-        showStatus(staffCodeResult.message, "error");
-        return;
-      }
-
       if (await isUsernameTaken(username)) {
         showStatus("That username is already taken. Try regenerating or pick another.", "error");
         return;
       }
 
-      await sendOtpCode(email, name);
+      await sendOtpCode(email, name, { staff: true });
       pendingSignup = { role: "employee", name, username, email, phone, password };
       showOtpStep(email);
     } catch (error) {
@@ -495,11 +510,16 @@ document.addEventListener("DOMContentLoaded", () => {
       showStatus("Enter all 6 digits of the code.", "error");
       return;
     }
+    const staffCodeTyped = document.getElementById("otp-staff-code").value.trim();
+    if (!staffCodeTyped) {
+      showStatus("Enter the staff code from your email.", "error");
+      return;
+    }
 
     setButtonLoading(submitBtn, true, "Verify & Create Account", "Verifying...");
 
     try {
-      const result = await verifyOtpCode(pendingSignup.email, code);
+      const result = await verifyOtpCode(pendingSignup.email, code, staffCodeTyped);
       if (!result.valid) {
         showStatus(result.message, "error");
         return;
@@ -585,8 +605,9 @@ document.addEventListener("DOMContentLoaded", () => {
     resendBtn.disabled = true;
 
     try {
-      await sendOtpCode(pendingSignup.email, pendingSignup.name);
+      await sendOtpCode(pendingSignup.email, pendingSignup.name, { staff: true });
       clearOtpDigitInputs();
+      startStaffCodeCountdown();
       otpDigitInputs[0].focus();
       showStatus("A new code has been sent.", "success");
     } catch (error) {

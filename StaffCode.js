@@ -1,6 +1,6 @@
 // staff-code — Shared staff registration code check.
 
-import { guardCall } from "./LoginGuard.js?v=20261030c";
+import { guardCall } from "./LoginGuard.js?v=20261030d";
 
 export async function verifyStaffCode(enteredCode) {
   try {
@@ -9,6 +9,9 @@ export async function verifyStaffCode(enteredCode) {
       return { valid: false, message: "Staff code isn't configured yet. Contact an administrator." };
     }
     if (r.valid) return { valid: true, message: "" };
+    if (r.inactive) {
+      return { valid: false, message: "That code was already used or has expired. Ask an admin to generate a new one." };
+    }
     if (r.secondsLeft) {
       return { valid: false, message: `Too many wrong codes. Try again in ${r.secondsLeft < 60 ? `${r.secondsLeft}s` : `${Math.round(r.secondsLeft / 60)} min`}.` };
     }
