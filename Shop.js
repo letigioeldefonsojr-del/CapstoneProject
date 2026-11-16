@@ -303,6 +303,7 @@ function loadHistory() {
 function stopUserListeners() {
   state.cartUnsub?.(); state.ordersUnsub?.(); state.profileUnsub?.(); state.historyUnsub?.();
   state.cartUnsub = state.ordersUnsub = state.profileUnsub = state.historyUnsub = null;
+  newChat(); chat.open = false;
   Object.assign(state, { cart: [], orders: [], history: [], historyLoaded: false, profile: null, selected: new Set(), selectionTouched: false, address: null });
 }
 
@@ -353,6 +354,7 @@ function renderHeader() {
 
 function render() {
   renderHeader();
+  renderChat();
   if (!state.authReady) { app.innerHTML = `<p class="center muted">Loading...</p>`; return; }
   const { name, id } = route();
   if (!state.user) return name === "register" ? renderRegister() : renderLogin();
@@ -1170,6 +1172,103 @@ function rateOrder(o, auto = false) {
       if (route().name === "order") renderOrderDetails(o.id);
     } catch (e) { console.error("Rating failed:", e); toast("Couldn't save your rating. Try again.", "error"); }
   });
+}
+
+// ----------------------------- CHATBOT ("Ask Almares 328") -----------------------------
+// Same worker the app uses. Chats live only in memory, like the app.
+const CHAT_URL = "https://almares-328-chat-proxy.eldefonsojrletigio.workers.dev";
+const CHAT_GREETING = "Hi! I'm the Almares 328 assistant. I can help with products, prices, wholesale, ordering and your order status. What would you like to know?";
+const CHAT_POOL = [
+  "How do I place an order?", "How does wholesale pricing work?", "Where are your branches?", "How do I cancel my order?",
+  "What do the order statuses mean?", "What are the best sellers?", "How much is the delivery fee?", "Can I pick up my order in store?",
+  "Is there a discount right now?", "Where is my order?"
+];
+const CONTACT_Q = "What's your contact number?";
+let chat = { open: false, messages: [], quick: [], busy: false };
+function newChat() {
+  const picks = [...CHAT_POOL].sort(() => Math.random() - 0.5).slice(0, 2);
+  chat.messages = [{ role: "assistant", content: CHAT_GREETING }];
+  chat.quick = [...picks, CONTACT_Q];
+  chat.busy = false;
+}
+newChat();
+
+function mdToHtml(text) {
+  const lines = esc(text).split("\n");
+  let html = "", inList = false;
+  for (const raw of lines) {
+    const line = raw.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+    const m = line.match(/^\s*[-*]\s+(.*)$/);
+    if (m) { if (!inList) { html += "<ul>"; inList = true; } html += `<li>${m[1]}</li>`; }
+    else { if (inList) { html += "</ul>"; inList = false; } html += line.trim() ? `<p>${line}</p>` : ""; }
+  }
+  return html + (inList ? "</ul>" : "");
+}
+
+function chatRoot() {
+  let el = document.getElementById("chat-root");
+  if (!el) { el = document.createElement("div"); el.id = "chat-root"; document.body.appendChild(el); }
+  return el;
+}
+function renderChat() {
+  const root = chatRoot();
+  if (!state.user) { root.innerHTML = ""; return; }
+  const log = chat.messages.map((m) => `<div class="chat__msg chat__msg--${m.role === "user" ? "me" : "bot"}">${m.role === "user" ? `<p>${esc(m.content)}</p>` : mdToHtml(m.content)}</div>`).join("")
+    + (chat.busy ? `<div class="chat__msg chat__msg--bot chat__typing"><span></span><span></span><span></span></div>` : "")
+    + (chat.messages.length === 1 && !chat.busy ? `<div class="chat__quick">${chat.quick.map((q) => `<button type="button" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div>` : "");
+  const keepScroll = root.querySelector(".chat__log");
+  const wasBottom = !keepScroll || keepScroll.scrollHeight - keepScroll.scrollTop - keepScroll.clientHeight < 60;
+  const draft = root.querySelector(".chat__input")?.value || "";
+  root.innerHTML = `
+    ${chat.open ? `
+    <section class="chat" role="dialog" aria-label="Ask Almares 328">
+      <header class="chat__head"><strong>Ask Almares 328</strong><span><button type="button" data-chat="new" title="New chat">↻</button><button type="button" data-chat="close" title="Close">✕</button></span></header>
+      <div class="chat__log">${log}</div>
+      <form class="chat__form"><input class="chat__input" placeholder="Type your question..." maxlength="500" autocomplete="off" ${chat.busy ? "disabled" : ""}><button class="btn btn--primary btn--sm" ${chat.busy ? "disabled" : ""}>Send</button></form>
+    </section>` : ""}
+    <button type="button" class="chat__fab" data-chat="toggle" aria-label="Ask Almares 328">${chat.open ? "✕" : "💬"}</button>`;
+  const inp = root.querySelector(".chat__input");
+  if (inp) { inp.value = draft; if (!chat.busy) inp.focus(); }
+  const lg = root.querySelector(".chat__log");
+  if (lg && wasBottom) lg.scrollTop = lg.scrollHeight;
+}
+document.addEventListener("click", (e) => {
+  const root = document.getElementById("chat-root");
+  if (!root || !root.contains(e.target)) return;
+  const act = e.target.closest("[data-chat]")?.dataset.chat;
+  if (act === "toggle") { chat.open = !chat.open; renderChat(); }
+  else if (act === "close") { chat.open = false; renderChat(); }
+  else if (act === "new") { newChat(); renderChat(); }
+  const q = e.target.closest("[data-q]");
+  if (q) sendChat(q.dataset.q);
+});
+document.addEventListener("submit", (e) => {
+  if (!e.target.classList.contains("chat__form")) return;
+  e.preventDefault();
+  const input = e.target.querySelector(".chat__input");
+  const text = input.value.trim();
+  if (text) { input.value = ""; sendChat(text); }
+});
+async function sendChat(text) {
+  if (chat.busy || !state.user) return;
+  chat.messages.push({ role: "user", content: text });
+  chat.busy = true;
+  renderChat();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 60000);
+  try {
+    const res = await fetch(CHAT_URL, {
+      method: "POST", signal: ctrl.signal,
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${await state.user.getIdToken()}` },
+      body: JSON.stringify({ messages: chat.messages.map((m) => ({ role: m.role, content: m.content })) })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.ok || !data.reply) throw new Error(data?.error || `http_${res.status}`);
+    chat.messages.push({ role: "assistant", content: data.reply });
+  } catch (error) {
+    console.error("Chat failed:", error);
+    chat.messages.push({ role: "assistant", content: "Sorry, I couldn't answer right now. Please try again in a moment." });
+  } finally { clearTimeout(timer); chat.busy = false; renderChat(); }
 }
 
 render();

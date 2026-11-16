@@ -143,3 +143,22 @@ a.order:hover{border-color:var(--brand)}
 .shop__bar{position:sticky;top:64px;z-index:10;background:var(--bg);padding:8px 0}
 @media(max-width:760px){.hero{padding:20px 16px}.hero h1{font-size:1.3rem}.shop__bar{top:104px}}
 input[type=checkbox],input[type=radio]{accent-color:var(--brand)}
+
+.chat__fab{position:fixed;right:18px;bottom:18px;width:56px;height:56px;border-radius:50%;border:0;background:var(--brand);color:#fff;font-size:1.5rem;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.28);z-index:60}
+.chat__fab:hover{background:var(--brand-d)}
+.chat{position:fixed;right:18px;bottom:88px;width:360px;max-width:calc(100vw - 24px);height:480px;max-height:calc(100vh - 110px);background:#fff;border-radius:16px;box-shadow:0 12px 40px rgba(0,0,0,.28);display:flex;flex-direction:column;overflow:hidden;z-index:60;border:1px solid var(--line)}
+.chat__head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;background:linear-gradient(135deg,#1d7440,#0f4a27);color:#fff}
+.chat__head button{background:none;border:0;color:#fff;font-size:1.05rem;cursor:pointer;padding:2px 6px}
+.chat__log{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:8px;background:var(--bg)}
+.chat__msg{max-width:86%;padding:8px 12px;border-radius:14px;font-size:.92rem;overflow-wrap:anywhere}
+.chat__msg p{margin:0 0 6px}.chat__msg p:last-child,.chat__msg ul:last-child{margin-bottom:0}.chat__msg ul{margin:0 0 6px;padding-left:18px}
+.chat__msg--bot{background:#fff;border:1px solid var(--line);align-self:flex-start;border-bottom-left-radius:4px}
+.chat__msg--me{background:var(--brand);color:#fff;align-self:flex-end;border-bottom-right-radius:4px}
+.chat__quick{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.chat__quick button{background:#fff;border:1px solid var(--brand);color:var(--brand);border-radius:16px;padding:6px 12px;font:inherit;font-size:.85rem;cursor:pointer;text-align:left}
+.chat__quick button:hover{background:var(--brand-l)}
+.chat__form{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line);background:#fff}
+.chat__typing{display:flex;gap:4px;padding:12px}.chat__typing span{width:7px;height:7px;border-radius:50%;background:#9db8a6;animation:blink 1.2s infinite}
+.chat__typing span:nth-child(2){animation-delay:.2s}.chat__typing span:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,60%,100%{opacity:.3}30%{opacity:1}}
+@media(max-width:760px){.chat{right:8px;bottom:80px;height:70vh}.chat__fab{right:12px;bottom:12px}}
