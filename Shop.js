@@ -2,7 +2,7 @@
 
 import { auth, db } from "./firebase-config.js";
 import {
-  onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, signOut
+  onAuthStateChanged, signInWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, createUserWithEmailAndPassword, updateProfile, signOut
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import {
   doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, orderBy, limit,
@@ -166,7 +166,7 @@ const mapUrlFor = (lat, lng) => `https://www.openstreetmap.org/?mlat=${lat}&mlon
 // ----------------------------- STATE -----------------------------
 const state = {
   user: null, profile: null, authReady: false,
-  products: [], productsById: new Map(), catalogLoaded: false, catalogLoading: null,
+  products: [], productsById: new Map(), catalogLoaded: false, catalogComplete: false, catalogLoading: null, cartReady: false, cartFresh: 0,
   cart: [], cartUnsub: null, selected: new Set(), selectionTouched: false,
   orders: [], ordersUnsub: null, history: [], historyLoaded: false,
   search: "", category: "All", shown: 48,
@@ -175,24 +175,76 @@ const state = {
 };
 
 // ----------------------------- CATALOG -----------------------------
-async function loadCatalog(force = false) {
-  if (state.catalogLoading && !force) return state.catalogLoading;
+// Fast start: show cached products at once (or the first 100), then load the rest in the background.
+const IDB_NAME = "almares_shop", IDB_STORE = "catalog";
+const openDb = () => new Promise((res, rej) => {
+  const r = indexedDB.open(IDB_NAME, 1);
+  r.onupgradeneeded = () => r.result.createObjectStore(IDB_STORE);
+  r.onsuccess = () => res(r.result);
+  r.onerror = () => rej(r.error);
+});
+async function cacheGet() {
+  try {
+    const db = await openDb();
+    return await new Promise((res) => { const q = db.transaction(IDB_STORE).objectStore(IDB_STORE).get("rows"); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); });
+  } catch { return null; }
+}
+async function cachePut(rows) {
+  try { const db = await openDb(); db.transaction(IDB_STORE, "readwrite").objectStore(IDB_STORE).put({ rows, at: Date.now() }, "rows"); } catch { /* cache is optional */ }
+}
+let drawShopGrid = null;
+function applyCatalog(list) {
+  const sorted = [...list].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  state.products = sorted;
+  sorted.forEach((p) => state.productsById.set(p.id, p));
+  if (drawShopGrid && route().name === "shop") drawShopGrid();
+}
+function loadCatalog() {
+  if (state.catalogLoading) return state.catalogLoading;
   state.catalogLoading = (async () => {
-    const all = [];
-    let offset = 0;
-    while (true) {
-      const data = await storeCall("app_list_products", { offset, limit: 1000 });
-      const rows = (data.products || []).map(rowToProduct);
-      all.push(...rows);
-      if (data.done || rows.length === 0) break;
-      offset += rows.length;
+    let fromCache = false;
+    if (!state.catalogLoaded) {
+      const cached = await cacheGet();
+      if (cached?.rows?.length) { applyCatalog(cached.rows); state.catalogLoaded = true; fromCache = true; }
     }
-    all.sort((a, b) => String(a.name).localeCompare(String(b.name)));
-    state.products = all;
-    state.productsById = new Map(all.map((p) => [p.id, p]));
-    state.catalogLoaded = true;
+    const first = await storeCall("app_list_products", { offset: 0, limit: 100 });
+    const all = (first.products || []).map(rowToProduct);
+    if (!state.catalogLoaded) { applyCatalog(all); state.catalogLoaded = true; }
+    let done = first.done === true || all.length === 0, offset = all.length;
+    while (!done) {
+      const waves = await Promise.all([0, 1, 2, 3].map((i) => storeCall("app_list_products", { offset: offset + i * 1000, limit: 1000 })));
+      for (const w of waves) { all.push(...(w.products || []).map(rowToProduct)); if (w.done) done = true; }
+      offset += 4000;
+      if (!done && !fromCache && !state.catalogComplete) applyCatalog(all);
+    }
+    applyCatalog(all);
+    state.catalogComplete = true;
+    cachePut(all);
+    if (drawShopGrid && route().name === "shop") drawShopGrid();
   })();
-  try { await state.catalogLoading; } finally { state.catalogLoading = null; }
+  state.catalogLoading.finally(() => { state.catalogLoading = null; });
+  return state.catalogLoading;
+}
+
+// The cart and checkout only need their own products: fetch just those (fast), not the whole catalogue.
+async function ensureProducts(ids) {
+  const need = [...new Set(ids)];
+  for (let i = 0; i < need.length; i += 200) {
+    const chunk = need.slice(i, i + 200);
+    const data = await storeCall("app_get_products", { ids: chunk });
+    const got = new Set();
+    (data.products || []).map(rowToProduct).forEach((p) => { state.productsById.set(p.id, p); got.add(p.id); });
+    chunk.forEach((id) => { if (!got.has(id)) state.productsById.delete(id); });
+  }
+  state.cartReady = true;
+  state.cartFresh = Date.now();
+}
+async function prepareCart() {
+  const ids = state.cart.map((c) => c.productId);
+  const stale = !state.cartReady || Date.now() - (state.cartFresh || 0) > 60000 || ids.some((id) => !state.productsById.has(id) && !state.cartMissing?.has(id));
+  if (!stale || !ids.length) return;
+  try { await ensureProducts(ids); } catch (e) { console.error("Couldn't refresh cart products:", e); state.cartFresh = Date.now(); }
+  state.cartMissing = new Set(ids.filter((id) => !state.productsById.has(id)));
 }
 
 // ----------------------------- AUTH + PROFILE -----------------------------
@@ -234,19 +286,23 @@ function startUserListeners(user) {
   loadHistory();
 }
 
-async function loadHistory() {
-  try {
-    const since = Timestamp.fromDate(new Date(Date.now() - 30 * 86400000));
-    const snap = await getDocs(query(collection(db, "orders"), where("userId", "==", state.user.uid), where("createdAt", ">=", since), orderBy("createdAt", "desc"), limit(100)));
-    state.history = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-  } catch (e) { console.error("Order history failed:", e); }
-  state.historyLoaded = true;
-  if (["orders", "order"].includes(route().name)) render();
+function loadHistory() {
+  state.historyUnsub?.();
+  const since = Timestamp.fromDate(new Date(Date.now() - 30 * 86400000));
+  state.historyUnsub = onSnapshot(
+    query(collection(db, "orders"), where("userId", "==", state.user.uid), where("createdAt", ">=", since), orderBy("createdAt", "desc"), limit(100)),
+    (snap) => {
+      state.history = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      state.historyLoaded = true;
+      if (["orders", "order"].includes(route().name)) render();
+    },
+    (e) => { console.error("Order history failed:", e); state.historyLoaded = true; if (["orders", "order"].includes(route().name)) render(); }
+  );
 }
 
 function stopUserListeners() {
-  state.cartUnsub?.(); state.ordersUnsub?.(); state.profileUnsub?.();
-  state.cartUnsub = state.ordersUnsub = state.profileUnsub = null;
+  state.cartUnsub?.(); state.ordersUnsub?.(); state.profileUnsub?.(); state.historyUnsub?.();
+  state.cartUnsub = state.ordersUnsub = state.profileUnsub = state.historyUnsub = null;
   Object.assign(state, { cart: [], orders: [], history: [], historyLoaded: false, profile: null, selected: new Set(), selectionTouched: false, address: null });
 }
 
@@ -323,9 +379,12 @@ function renderLogin() {
         <p class="form-error" id="login-error" hidden></p>
         <button class="btn btn--primary btn--block" type="submit">Log in</button>
       </form>
+      <div class="or"><span>or</span></div>
+      <button type="button" class="btn btn--outline btn--block btn--google" id="google-btn">${GOOGLE_SVG} Continue with Google</button>
       <p class="muted center">New here? <a href="#/register">Create an account</a></p>
     </section>`;
   wirePasswordToggles();
+  $("#google-btn").addEventListener("click", googleSignIn);
   const prefill = new URLSearchParams(location.search).get("u");
   if (prefill) { $("#login-id").value = prefill; $("#login-pw").focus(); }
   $("#login-form").addEventListener("submit", async (e) => {
@@ -372,6 +431,30 @@ function openSuspended(reason, until) {
     <div class="modal__body"><p>Your account is suspended until <strong>${esc(until.toLocaleDateString())}</strong>.</p>${reason ? `<p class="muted">Reason: ${esc(reason)}</p>` : ""}</div>
     <div class="modal__foot"><button class="btn btn--primary" data-close>OK</button></div>`);
   return modal;
+}
+
+const GOOGLE_SVG = `<svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true"><path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.6H24v9.1h11.9c-.5 2.8-2.1 5.1-4.4 6.7v5.5h7.1c4.2-3.9 6.5-9.6 6.5-16.7z"/><path fill="#34A853" d="M24 46c6 0 11-2 14.6-5.4l-7.1-5.5c-2 1.3-4.5 2.1-7.5 2.1-5.8 0-10.7-3.9-12.4-9.2H4.3v5.7C7.9 41.6 15.4 46 24 46z"/><path fill="#FBBC05" d="M11.6 28c-.4-1.3-.7-2.7-.7-4.1s.3-2.8.7-4.1v-5.7H4.3C2.8 17.1 2 20.4 2 24s.8 6.9 2.3 9.9L11.6 28z"/><path fill="#EA4335" d="M24 10.8c3.3 0 6.2 1.1 8.5 3.3l6.4-6.4C35 4.1 30 2 24 2 15.4 2 7.9 6.4 4.3 14.1l7.3 5.7c1.7-5.2 6.6-9 12.4-9z"/></svg>`;
+async function googleSignIn() {
+  try {
+    const result = await signInWithPopup(auth, new GoogleAuthProvider());
+    const user = result.user;
+    const ref = doc(db, "users", user.uid);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      const parts = (user.displayName || "").trim().split(/\s+/).filter(Boolean);
+      const firstName = parts[0] || "";
+      const lastName = parts.length > 1 ? parts[parts.length - 1] : "";
+      await setDoc(ref, {
+        firstName, middleInitial: "", lastName, fullName: user.displayName || user.email || "",
+        mobileNumber: "", address: "", email: user.email || "", authEmail: user.email || "",
+        signInMethod: "google", createdAt: serverTimestamp()
+      });
+    }
+  } catch (error) {
+    if (error.code === "auth/popup-closed-by-user" || error.code === "auth/cancelled-popup-request") return;
+    console.error("Google sign-in failed:", error);
+    toast(error.code === "auth/popup-blocked" ? "Your browser blocked the Google window. Allow pop-ups and try again." : "Couldn't sign in with Google. Please try again.", "error");
+  }
 }
 
 const EYE = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2 12C4 7.5 7.8 5 12 5C16.2 5 20 7.5 22 12C20 16.5 16.2 19 12 19C7.8 19 4 16.5 2 12Z" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/></svg>`;
@@ -436,9 +519,12 @@ function renderRegister() {
         <p class="form-error" id="reg-error" hidden></p>
         <button class="btn btn--primary btn--block" type="submit">Create account</button>
       </form>
+      <div class="or"><span>or</span></div>
+      <button type="button" class="btn btn--outline btn--block btn--google" id="google-btn">${GOOGLE_SVG} Sign up with Google</button>
       <p class="muted center">Already have an account? <a href="#/login">Log in</a></p>
     </section>`;
   wirePasswordToggles();
+  $("#google-btn").addEventListener("click", googleSignIn);
   loadBarangays().then((list) => {
     const sel = $("#r-brgy");
     if (!sel) return;
@@ -612,25 +698,32 @@ function productCardHtml(p) {
     </article>`;
 }
 
-async function renderShop() {
+function renderShop() {
   app.innerHTML = `
+    <section class="hero"><div><h1>Fresh groceries, delivered</h1><p>Order from Almares 328 and pick up in store or get it delivered in Batangas City.</p></div></section>
     <section class="shop">
       <div class="shop__bar">
         <input id="shop-q" type="search" placeholder="Search products..." value="${esc(state.search)}" autocomplete="off">
         <select id="shop-cat" aria-label="Category"></select>
       </div>
+      <p class="muted small" id="shop-status" hidden>Loading more products...</p>
       <div id="shop-grid" class="grid-products"><p class="muted center">Loading products...</p></div>
       <div class="center"><button type="button" class="btn btn--outline" id="shop-more" hidden>Show more</button></div>
     </section>`;
   const draw = () => {
-    const list = filteredProducts();
     const grid = $("#shop-grid");
     if (!grid) return;
-    grid.innerHTML = list.length ? list.slice(0, state.shown).map(productCardHtml).join("") : `<p class="muted center">No products found.</p>`;
+    const cats = categoriesOf();
+    const sel = $("#shop-cat");
+    if (sel && sel.options.length !== cats.length) sel.innerHTML = cats.map((c) => `<option ${c === state.category ? "selected" : ""}>${esc(c)}</option>`).join("");
+    const list = filteredProducts();
+    grid.innerHTML = list.length ? list.slice(0, state.shown).map(productCardHtml).join("") : `<p class="muted center">${state.catalogComplete ? "No products found." : "Loading products..."}</p>`;
     const more = $("#shop-more");
     more.hidden = list.length <= state.shown;
     more.textContent = `Show more (${list.length - state.shown} left)`;
+    $("#shop-status").hidden = state.catalogComplete;
   };
+  drawShopGrid = draw;
   $("#shop-q").addEventListener("input", (e) => { state.search = e.target.value; state.shown = 48; draw(); });
   $("#shop-cat").addEventListener("change", (e) => { state.category = e.target.value; state.shown = 48; draw(); });
   $("#shop-more").addEventListener("click", () => { state.shown += 48; draw(); });
@@ -638,18 +731,14 @@ async function renderShop() {
     const b = e.target.closest("[data-add]");
     if (b) openProduct(b.dataset.add);
   });
-  if (!state.catalogLoaded) {
-    try { await loadCatalog(); } catch (e) {
-      console.error("Couldn't load products:", e);
-      if ($("#shop-grid")) $("#shop-grid").innerHTML = `<p class="center muted">Couldn't load products. <button class="btn btn--outline btn--sm" id="retry">Try again</button></p>`;
+  if (state.catalogLoaded) draw();
+  loadCatalog().then(() => { if (route().name === "shop") draw(); }).catch((e) => {
+    console.error("Couldn't load products:", e);
+    if (!state.catalogLoaded && $("#shop-grid")) {
+      $("#shop-grid").innerHTML = `<p class="center muted">Couldn't load products. <button class="btn btn--outline btn--sm" id="retry">Try again</button></p>`;
       $("#retry")?.addEventListener("click", renderShop);
-      return;
     }
-  } else loadCatalog(true).then(() => { if (route().name === "shop") draw(); }).catch(() => {});
-  if (route().name !== "shop") return;
-  const cats = categoriesOf();
-  $("#shop-cat").innerHTML = cats.map((c) => `<option ${c === state.category ? "selected" : ""}>${esc(c)}</option>`).join("");
-  draw();
+  });
 }
 
 function openProduct(id) {
@@ -725,7 +814,7 @@ function cartLines() {
   return state.cart.map((c) => {
     const p = state.productsById.get(c.productId);
     const v = p && c.flavor ? findVariant(p, c.flavor) : null;
-    const status = state.catalogLoaded ? itemStatus(p, c.flavor) : "available";
+    const status = state.cartReady ? itemStatus(p, c.flavor) : "available";
     const qty = Math.max(1, Math.floor(Number(c.amount) || 1));
     const parts = p ? priceParts(p, v, qty) : priceParts({ price: c.unitPrice, wholesalePrice: num(c.wholesalePrice) || null }, null, qty);
     return { c, p, v, status, qty, parts, stock: p ? stockOf(p, v) : null };
@@ -733,11 +822,9 @@ function cartLines() {
 }
 
 async function renderCart() {
-  if (!state.catalogLoaded) {
-    app.innerHTML = `<p class="center muted">Loading your cart...</p>`;
-    try { await loadCatalog(); } catch (e) { console.error(e); }
-    if (route().name !== "cart") return;
-  }
+  if (!state.cartReady) app.innerHTML = `<p class="center muted">Loading your cart...</p>`;
+  await prepareCart();
+  if (route().name !== "cart") return;
   const lines = cartLines();
   if (!lines.length) {
     app.innerHTML = `<section class="card center"><h1>Your cart is empty</h1><p class="muted">Add some products to get started.</p><a class="btn btn--primary" href="#/">Browse products</a></section>`;
@@ -810,11 +897,9 @@ function currentAddress() {
 }
 
 async function renderCheckout() {
-  if (!state.catalogLoaded) {
-    app.innerHTML = `<p class="center muted">Loading...</p>`;
-    try { await loadCatalog(); } catch (e) { console.error(e); }
-    if (route().name !== "checkout") return;
-  }
+  if (!state.cartReady) app.innerHTML = `<p class="center muted">Loading...</p>`;
+  await prepareCart();
+  if (route().name !== "checkout") return;
   const lines = cartLines().filter((l) => l.status === "available" && state.selected.has(l.c.id));
   if (!lines.length) { location.hash = "#/cart"; return; }
   const isPickup = state.fulfillment === "pickup";
