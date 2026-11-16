@@ -347,7 +347,7 @@ function renderHeader() {
   const el = $("#site-header");
   if (!el) return;
   const signedIn = !!state.user;
-  const cartCount = state.cart.reduce((n, c) => n + (Number(c.amount) || 0), 0);
+  const cartCount = state.cart.filter((c) => (Number(c.amount) || 0) > 0).length; // number of different products, not pieces
   const r = route().name;
   el.innerHTML = `
     <div class="header__inner">
@@ -867,7 +867,7 @@ async function renderCart() {
           </article>`).join("")}
       </div>
       <aside class="card summary">
-        <div class="summary__row"><span>Items</span><span>${chosen.reduce((n, l) => n + l.qty, 0)}</span></div>
+        <div class="summary__row"><span>Products</span><span>${chosen.length}</span></div>
         <div class="summary__row"><span>Subtotal</span><span>${peso(subtotal)}</span></div>
         ${discount > 0 ? `<div class="summary__row summary__row--good"><span>Wholesale discount</span><span>−${peso(discount)}</span></div>` : ""}
         <div class="summary__row summary__row--total"><span>Total</span><span>${peso(total)}</span></div>
@@ -956,7 +956,7 @@ async function renderCheckout() {
           </div>
         </div>
         <aside class="card summary">
-          <div class="summary__row"><span>Items</span><span>${lines.reduce((n, l) => n + l.qty, 0)}</span></div>
+          <div class="summary__row"><span>Products</span><span>${lines.length}</span></div>
           <div class="summary__row"><span>Subtotal</span><span>${peso(regular)}</span></div>
           ${regular - itemsSubtotal > 0.004 ? `<div class="summary__row summary__row--good"><span>Wholesale discount</span><span>−${peso(round2(regular - itemsSubtotal))}</span></div>` : ""}
           <div class="summary__row"><span>${isPickup ? "Pick-up" : "Delivery fee"}</span><span>${isPickup ? "Free" : quote ? peso(fee) : "To be confirmed"}</span></div>
