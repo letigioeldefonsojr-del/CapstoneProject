@@ -326,6 +326,8 @@ function renderLogin() {
       <p class="muted center">New here? <a href="#/register">Create an account</a></p>
     </section>`;
   wirePasswordToggles();
+  const prefill = new URLSearchParams(location.search).get("u");
+  if (prefill) { $("#login-id").value = prefill; $("#login-pw").focus(); }
   $("#login-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const err = $("#login-error"), btn = e.submitter || $("#login-form button[type=submit]");

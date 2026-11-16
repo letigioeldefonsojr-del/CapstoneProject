@@ -23,6 +23,14 @@ const EYE_SLASH_INNER = EYE_OPEN_INNER + '<line x1="3.5" y1="20.5" x2="20.5" y2=
 
 document.addEventListener("DOMContentLoaded", () => {
   guardAutofill(["admin-email", "admin-password"]);
+  const prefill = new URLSearchParams(window.location.search).get("u");
+  if (prefill) {
+    setTimeout(() => {
+      document.getElementById("admin-email").value = prefill;
+      document.getElementById("admin-password").focus();
+    }, 0);
+  }
+
   const formAdmin = document.getElementById("form-admin");
   const formOtpVerify = document.getElementById("form-otp-verify");
   const cardTitle = document.querySelector(".card-header h2");

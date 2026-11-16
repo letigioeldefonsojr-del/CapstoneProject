@@ -45,6 +45,16 @@ onAuthStateChanged(auth, async (user) => {
 document.addEventListener("DOMContentLoaded", () => {
 
   guardAutofill(["employee-username", "employee-password"]);
+  const prefill = new URLSearchParams(window.location.search).get("u");
+  if (prefill) {
+    setTimeout(() => {
+      document.getElementById("employee-username").value = prefill;
+      document.getElementById("employee-password").focus();
+    }, 0);
+  } else if (new URLSearchParams(window.location.search).get("signup") === "1") {
+    setTimeout(() => document.getElementById("to-signup")?.click(), 0);
+  }
+
 
   const SIGNUP_PASSWORD_FIELD_IDS = ["signup-password", "signup-confirm-password"];
   const touchedPasswordFields = new Set();

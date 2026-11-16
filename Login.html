@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Almares 328 - Select Role</title>
+    <title>Almares 328 - Sign In</title>
     <link rel="icon" type="image/png" href="Logo.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -30,66 +30,50 @@
         </div>
 
         <!-- ============================================================
-             RIGHT PANEL — ROLE SELECTION
+             RIGHT PANEL — SIGN IN
              ============================================================ -->
         <div class="right-panel">
             <div class="login-card">
 
                 <div class="card-header">
                     <span class="line"></span>
-                    <h2>Who's logging in?</h2>
+                    <h2>Sign in</h2>
                     <span class="line"></span>
                 </div>
 
-                <p class="role-select__subtitle">Choose your role to continue.</p>
+                <p class="role-select__subtitle">Enter your username, email or mobile number. We'll take you to the right place.</p>
 
-                <div class="role-select__options">
-                    <a href="AdminLogin" class="role-select__card">
-                        <div class="role-select__icon">
+                <div class="form-status" id="form-status" role="alert" hidden></div>
+
+                <form class="login-form" id="form-identify" novalidate>
+                    <div class="input-label">Username, email or mobile number:</div>
+                    <div class="input-wrapper">
+                        <div class="icon-badge">
                             <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                                <path d="M12 3L19 6.5V11C19 15.5 16 19.3 12 21C8 19.3 5 15.5 5 11V6.5L12 3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
-                                <path d="M9 12L11 14L15.5 9.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                                <circle cx="12" cy="8" r="3.2" stroke="currentColor" stroke-width="1.8"/>
+                                <path d="M4.5 20C5.5 16 8.4 14.3 12 14.3C15.6 14.3 18.5 16 19.5 20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
                             </svg>
                         </div>
-                        <div class="role-select__text">
-                            <h3>Administrator</h3>
-                            <p>Full system access and account management.</p>
-                        </div>
-                        <svg class="role-select__arrow" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M9 5L15 12L9 19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    </a>
+                        <input type="text" id="identifier" placeholder="Username, email or 09XX XXX XXXX" autocomplete="username" required>
+                    </div>
 
-                    <a href="EmployeeLogin" class="role-select__card">
-                        <div class="role-select__icon">
-                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                                <circle cx="12" cy="8" r="3.2" stroke="currentColor" stroke-width="1.7"/>
-                                <path d="M4.5 20C5.5 16 8.4 14.3 12 14.3C15.6 14.3 18.5 16 19.5 20" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-                            </svg>
-                        </div>
-                        <div class="role-select__text">
-                            <h3>Employee</h3>
-                            <p>Day-to-day inventory, orders, and store tasks.</p>
-                        </div>
-                        <svg class="role-select__arrow" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M9 5L15 12L9 19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    </a>
+                    <button type="submit" class="login-btn" id="identify-submit">
+                        <span class="login-btn__label">Continue</span>
+                        <svg class="icon-chevron" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M9 5L15 12L9 19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
 
-                    <a href="Shop" class="role-select__card">
-                        <div class="role-select__icon">
-                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                                <path d="M5 8H19L18 20H6L5 8Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
-                                <path d="M9 10V7C9 5.3 10.3 4 12 4C13.7 4 15 5.3 15 7V10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-                            </svg>
-                        </div>
-                        <div class="role-select__text">
-                            <h3>Customer</h3>
-                            <p>Order online: browse products, checkout and track your order.</p>
-                        </div>
-                        <svg class="role-select__arrow" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M9 5L15 12L9 19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    </a>
-                </div>
+                    <p class="auth-switch">
+                        New customer? <a class="auth-switch__link" href="Shop#/register">Create an account</a>
+                    </p>
+                    <p class="auth-switch">
+                        New staff member? <a class="auth-switch__link" href="EmployeeLogin?signup=1">Register here</a>
+                    </p>
+                </form>
 
             </div>
         </div>
 
     </div>
+<script type="module" src="Login.js?v=20261116a"></script>
 </body>
 </html>
