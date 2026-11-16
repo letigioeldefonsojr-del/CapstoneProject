@@ -212,3 +212,4 @@ input[type=checkbox],input[type=radio]{accent-color:var(--brand)}
 .oitem__name{display:none}
 .oitem__tag--reg{background:#eceeed;color:#5b6a60}
 .oitem__line{color:var(--ink)}
+.card > .section:first-child,.card > h2:first-child,.card > h3:first-child{margin-top:0}
