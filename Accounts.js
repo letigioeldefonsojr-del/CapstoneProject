@@ -372,7 +372,7 @@ function buildAccountRow(account) {
     // Rider/Employee can only be changed once the account is approved.
     if (account.role === "employee" && !pendingApproval && !rejectedSignup) {
       actionsCell.appendChild(buildActionButton(
-        account.isDriver ? "Make Regular Employee" : "Make Rider",
+        account.isDriver ? "Make Employee" : "Make Rider",
         "btn-outline",
         (event) => handleToggleDriver(account, event.currentTarget)
       ));

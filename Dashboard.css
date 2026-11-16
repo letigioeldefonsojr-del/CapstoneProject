@@ -3504,6 +3504,8 @@ body.has-share-bar .scroll-to-top-btn { bottom: 84px; z-index: 85; }
    =========================== */
 .accounts-table__actions { min-height: 40px; gap: 8px; }
 .accounts-table__actions > button {
+    width: 132px;
+    flex: 0 0 132px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
