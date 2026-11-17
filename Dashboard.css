@@ -3663,3 +3663,8 @@ body.has-share-bar .scroll-to-top-btn { bottom: 84px; z-index: 85; }
 .pos-payment__back{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid var(--border);border-radius:999px;background:#fff;font-size:14px}
 .pos-payment__back:hover{background:#f1f6f2}
 .pos-payment__title{font-size:16px}
+
+/* Wholesale set size: label and small number side by side (20261117h) */
+#pos-edit-size-box{flex-direction:row;align-items:center;justify-content:space-between;gap:12px;margin-top:10px;padding:8px 8px 8px 14px;border:1px solid var(--border);border-radius:14px;background:#f6f7f5}
+#pos-edit-size-box .pos-edit-label{margin:0;flex:1;font-size:13px;line-height:1.25}
+#pos-edit-size{width:84px;flex:0 0 84px;font-size:18px;padding:8px;border-radius:10px}
