@@ -28,7 +28,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="Dashboard.css?v=20261116f">
+    <link rel="stylesheet" href="Dashboard.css?v=20261117a">
 </head>
 <body>
 
@@ -424,8 +424,14 @@
                     </label>
                 </div>
                 <div class="form-field" id="simple-price-field">
-                    <label for="pf-price">Price (₱) *</label>
+                    <label for="pf-price">Retail price (₱) *</label>
                     <input type="number" id="pf-price" min="0" step="0.01">
+                    <small class="form-hint">Price of 1 piece (what a single piece sells for).</small>
+                </div>
+                <div class="form-field" id="wholesale-price-field">
+                    <label for="pf-wholesale">Wholesale price (₱)</label>
+                    <input type="number" id="pf-wholesale" min="0" step="0.01">
+                    <small class="form-hint">Price per piece when buying a full set of 6. Leave empty if none.</small>
                 </div>
                 <div class="form-field" id="simple-stock-field">
                     <label for="pf-stock">Stock count *</label>
@@ -447,10 +453,6 @@
                 <div class="form-field">
                     <label for="pf-principal">Principal</label>
                     <input type="text" id="pf-principal">
-                </div>
-                <div class="form-field">
-                    <label for="pf-wholesale">Wholesale price (₱)</label>
-                    <input type="number" id="pf-wholesale" min="0" step="0.01">
                 </div>
                 <div class="form-field form-field--full">
                     <label>Product image</label>
