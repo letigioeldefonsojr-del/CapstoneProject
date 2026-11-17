@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="Dashboard.css?v=20261117c">
+    <link rel="stylesheet" href="Dashboard.css?v=20261117d">
 </head>
 <body class="page-cashier">
 
@@ -177,6 +177,19 @@
                     <p class="notif-list__empty">No items yet. Scan or search to add.</p>
                 </div>
 
+                <div class="pos-confirm" id="pos-confirm">
+                    <div class="pos-confirm__sum"><span id="pos-confirm-count">No items yet</span><strong id="pos-confirm-total">₱0.00</strong></div>
+                    <div class="pos-confirm__btns">
+                        <button type="button" class="btn-outline" id="pos-confirm-clear">Clear</button>
+                        <button type="button" class="btn-primary" id="pos-confirm-go" disabled>Confirm items &amp; go to payment</button>
+                    </div>
+                </div>
+
+                <div class="pos-payment" id="pos-payment" hidden>
+                <div class="pos-payment__bar">
+                    <button type="button" class="pos-payment__back" id="pos-payment-back">← Back to items</button>
+                    <span>Payment</span>
+                </div>
                 <div class="pos-customer">
                     <label for="pos-customer-input">Customer <span class="pos-customer__opt">(optional)</span></label>
                     <div class="pos-customer__picked" id="pos-customer-picked" hidden>
@@ -221,6 +234,7 @@
                 <div class="pos-actions">
                     <button type="button" class="btn-outline" id="pos-clear">Clear</button>
                     <button type="button" class="btn-primary" id="pos-complete" disabled>Complete sale</button>
+                </div>
                 </div>
             </section>
 
@@ -270,29 +284,45 @@
 <!-- ================================================================
      QUANTITY NUMBER PAD (touch screens)
      ================================================================ -->
-<div class="modal-overlay" id="pos-price-overlay" hidden>
-    <div class="modal pos-unit-modal">
+<div class="modal-overlay" id="pos-edit-overlay" hidden>
+    <div class="modal pos-edit-modal">
         <div class="modal__header">
-            <h3>Change price</h3>
-            <button type="button" class="modal__close" id="pos-price-close" aria-label="Close">
+            <h3 id="pos-edit-name">Edit item</h3>
+            <button type="button" class="modal__close" id="pos-edit-close" aria-label="Close">
                 <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                     <path d="M6 6L18 18M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
                 </svg>
             </button>
         </div>
         <div class="modal__body">
-            <p class="pos-unit-product" id="pos-price-name"></p>
-            <div class="pos-unit-pair">
-                <label class="pos-unit-field"><span>Retail price (₱) each</span><input type="number" id="pos-price-retail" min="0" step="0.01" inputmode="decimal"></label>
-                <label class="pos-unit-field"><span>Wholesale price (₱) each</span><input type="number" id="pos-price-ws" min="0" step="0.01" placeholder="None" inputmode="decimal"></label>
+            <label class="pos-edit-label" for="pos-edit-price" id="pos-edit-price-label">Price (₱) each</label>
+            <input type="number" id="pos-edit-price" class="pos-edit-price" min="0" step="0.01" inputmode="decimal" placeholder="0.00">
+
+            <div id="pos-edit-variation-box">
+                <span class="pos-edit-label">Price variation</span>
+                <div class="pos-edit-chips" id="pos-edit-chips">
+                    <button type="button" class="pos-edit-chip is-on" data-var="retail"><small>Retail</small><b id="pos-edit-chip-retail">₱0.00</b></button>
+                    <button type="button" class="pos-edit-chip" data-var="ws"><small>Wholesale</small><b id="pos-edit-chip-ws">None</b></button>
+                </div>
+                <div id="pos-edit-size-box" hidden>
+                    <label class="pos-edit-label" for="pos-edit-size">Wholesale starts at (pieces per set)</label>
+                    <input type="number" id="pos-edit-size" min="2" step="1" inputmode="numeric">
+                </div>
             </div>
-            <label class="pos-unit-field"><span>Wholesale price starts at (pieces per set)</span><input type="number" id="pos-price-size" min="2" step="1" inputmode="numeric"></label>
-            <p class="pos-hint">Wholesale applies to every full set of that many pieces. Leave the wholesale price empty for none. This changes the price for this sale only, not the product.</p>
-            <p class="pos-unit-summary pos-unit-warn" id="pos-price-error"></p>
+
+            <span class="pos-edit-label">Quantity</span>
+            <div class="pos-edit-qty">
+                <button type="button" id="pos-edit-minus" aria-label="Less">−</button>
+                <input type="number" id="pos-edit-qty" min="1" step="1" inputmode="numeric">
+                <button type="button" id="pos-edit-plus" aria-label="More">+</button>
+            </div>
+
+            <p class="pos-edit-summary" id="pos-edit-summary"></p>
+            <p class="pos-unit-summary pos-unit-warn" id="pos-edit-error"></p>
         </div>
-        <div class="modal__footer">
-            <button type="button" class="btn-outline" id="pos-price-cancel">Cancel</button>
-            <button type="button" class="btn-primary" id="pos-price-ok">Apply price</button>
+        <div class="modal__footer pos-edit-footer">
+            <button type="button" class="btn-outline pos-edit-remove" id="pos-edit-remove">Remove</button>
+            <button type="button" class="btn-primary pos-edit-confirm" id="pos-edit-ok">Confirm</button>
         </div>
     </div>
 </div>
@@ -377,6 +407,6 @@
 
 <script type="module" src="firebase-config.js"></script>
 <script type="module" src="Sidebar.js?v=20261116b"></script>
-<script type="module" src="Cashier.js?v=20261117b"></script>
+<script type="module" src="Cashier.js?v=20261117c"></script>
 </body>
 </html>

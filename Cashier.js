@@ -11,12 +11,12 @@ import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
 import * as SB from "./SupabaseStore.js?v=20261116b";
 import {
   candidatesForProduct, findCandidateByBarcode, searchProducts,
-  addToCart, addUnitToCart, addPricedToCart, setLinePrices, stockQty, setLineQty, setLineMode, removeLine,
+  addToCart, addUnitToCart, addPricedToCart, setLinePrices, setUnitLinePrice, stockQty, setLineQty, setLineMode, removeLine,
   lineUnitPrice, lineTotal, linePricing, cartTotal, cartUnits, cartRegularSubtotal, cartWholesaleDiscount, WHOLESALE_GROUP_SIZE, wsSize,
   computePayment, planStockUpdates, makeReceiptNo, buildSaleItems, formatMoney,
   itemRefundedQty, remainingQty, saleRefundStatus, planRefund, planRestock, round2,
   applyNumpadKey, quickCashAmounts
-} from "./CashierLogic.js?v=20261117a";
+} from "./CashierLogic.js?v=20261117b";
 
 const STORE_NAME = "Almares 328";
 
@@ -275,7 +275,8 @@ async function refreshCartProducts() {
 function wireUi() {
   const input = $("pos-input");
   wireUnitPrompt();
-  wirePricePrompt();
+  wireEditDialog();
+  wireStages();
 
   input.addEventListener("input", () => {
     const value = input.value.trim();
@@ -390,7 +391,7 @@ function wireUi() {
     if (el.dataset.action === "dec") result = line.qty > 1 ? setLineQty(cart, key, line.qty - 1) : { cart };
     if (el.dataset.action === "remove") result = { cart: removeLine(cart, key) };
     if (el.dataset.action === "mode") result = setLineMode(cart, key, el.dataset.mode);
-    if (el.dataset.action === "price") { openPricePrompt(line, el.dataset.focus); return; }
+    if (el.dataset.action === "edit") { openEditDialog(line); return; }
     applyCartResult(result);
   });
 
@@ -692,44 +693,132 @@ function wireUnitPrompt() {
   });
 }
 
-// ---------------- Change the price of a line already in the sale (this sale only) ----------------
-let pricePrompt = null;
-function openPricePrompt(line, focus) {
-  pricePrompt = { key: line.key };
-  $("pos-price-name").textContent = line.name;
-  $("pos-price-retail").value = line.retailUnit ?? "";
-  $("pos-price-ws").value = line.wholesaleUnit ?? "";
-  $("pos-price-size").value = wsSize(line);
-  $("pos-price-error").textContent = "";
-  $("pos-price-overlay").hidden = false;
-  const box = focus === "ws" ? $("pos-price-ws") : $("pos-price-retail");
-  box.focus({ preventScroll: true }); box.select?.();
+// ---------------- Edit one item of the sale: price, retail / wholesale, quantity (this sale only) ----------------
+let editing = null;
+const pesoText = (n) => (n == null || !Number.isFinite(n) ? "None" : formatMoney(n));
+
+function openEditDialog(line) {
+  const unit = !!line.saleUnit;
+  editing = {
+    key: line.key, unit, variation: "retail", qty: line.qty,
+    retail: unit ? line.saleUnit.price : line.retailUnit,
+    ws: unit ? null : (line.wholesaleUnit ?? null),
+    size: wsSize(line), base: line
+  };
+  $("pos-edit-name").textContent = line.name;
+  $("pos-edit-variation-box").hidden = unit;
+  $("pos-edit-qty").value = line.qty;
+  $("pos-edit-error").textContent = "";
+  $("pos-edit-overlay").hidden = false;
+  refreshEditFields();
+  const box = $("pos-edit-price"); box.focus({ preventScroll: true }); box.select?.();
 }
-function closePricePrompt() {
-  $("pos-price-overlay").hidden = true;
-  pricePrompt = null;
+function closeEditDialog() {
+  $("pos-edit-overlay").hidden = true;
+  editing = null;
   focusScanInput();
 }
-function confirmPricePrompt() {
-  if (!pricePrompt) return;
-  const result = setLinePrices(cart, pricePrompt.key, { retail: $("pos-price-retail").value, wholesale: $("pos-price-ws").value, size: $("pos-price-size").value });
-  if (result.error) { $("pos-price-error").textContent = result.error; return; }
-  closePricePrompt();
-  applyCartResult(result);
+// The single price box edits whichever chip is selected (retail or wholesale).
+function readEditPrice() {
+  if (!editing) return;
+  const raw = $("pos-edit-price").value.trim();
+  const n = raw === "" ? null : Number(raw);
+  if (editing.variation === "ws") editing.ws = n;
+  else editing.retail = n;
 }
-function wirePricePrompt() {
-  $("pos-price-ok").addEventListener("click", confirmPricePrompt);
-  $("pos-price-cancel").addEventListener("click", closePricePrompt);
-  $("pos-price-close").addEventListener("click", closePricePrompt);
-  $("pos-price-overlay").addEventListener("keydown", (event) => {
-    if (event.key === "Enter") { event.preventDefault(); confirmPricePrompt(); }
-    if (event.key === "Escape") closePricePrompt();
+function refreshEditFields() {
+  const e = editing;
+  const ws = e.variation === "ws";
+  $("pos-edit-price-label").textContent = e.unit ? `Price per ${e.base.saleUnit.label} (₱)` : ws ? "Wholesale price (₱) each" : "Retail price (₱) each";
+  const val = ws ? e.ws : e.retail;
+  $("pos-edit-price").value = val == null ? "" : val;
+  $("pos-edit-price").placeholder = ws ? "Type a wholesale price (empty = none)" : "0.00";
+  $("pos-edit-chip-retail").textContent = pesoText(e.retail);
+  $("pos-edit-chip-ws").textContent = e.ws == null ? "None — add" : pesoText(e.ws);
+  document.querySelectorAll("#pos-edit-chips .pos-edit-chip").forEach((c) => c.classList.toggle("is-on", c.dataset.var === e.variation));
+  $("pos-edit-size-box").hidden = !ws;
+  $("pos-edit-size").value = e.size;
+  updateEditSummary();
+}
+function updateEditSummary() {
+  const e = editing; if (!e) return;
+  const qty = Math.floor(Number($("pos-edit-qty").value));
+  const out = $("pos-edit-summary");
+  if (!(qty >= 1)) { out.textContent = ""; return; }
+  if (e.unit) { out.innerHTML = `${qty} ${esc(e.base.saleUnit.label)} × ${formatMoney(e.retail || 0)} = <b>${formatMoney(round2(qty * (e.retail || 0)))}</b>`; return; }
+  const size = Math.floor(Number($("pos-edit-size").value)) >= 2 ? Math.floor(Number($("pos-edit-size").value)) : e.size;
+  const tmp = { qty, retailUnit: e.retail || 0, wholesaleUnit: e.ws, wsSize: size };
+  const pr = linePricing(tmp);
+  const parts = [];
+  if (pr.groups > 0) parts.push(`${pr.wholesaleQty} pcs × ${formatMoney(e.ws)} (wholesale)`);
+  if (pr.retailQty > 0 || !parts.length) parts.push(`${pr.retailQty} pc${pr.retailQty === 1 ? "" : "s"} × ${formatMoney(e.retail || 0)}`);
+  out.innerHTML = `${parts.join(" + ")} = <b>${formatMoney(pr.total)}</b>`
+    + (e.ws != null && pr.groups === 0 ? `<br><small>Wholesale applies from ${size} pcs.</small>` : "");
+}
+function confirmEditDialog() {
+  const e = editing; if (!e) return;
+  readEditPrice();
+  e.size = Math.floor(Number($("pos-edit-size").value)) || e.size;
+  const qty = Math.floor(Number($("pos-edit-qty").value));
+  if (!(qty >= 1)) { $("pos-edit-error").textContent = "Quantity must be at least 1."; return; }
+  let result = e.unit
+    ? setUnitLinePrice(cart, e.key, e.retail)
+    : setLinePrices(cart, e.key, { retail: e.retail, wholesale: e.ws, size: e.size });
+  if (result.error) { $("pos-edit-error").textContent = result.error; return; }
+  const sized = setLineQty(result.cart, e.key, qty);
+  closeEditDialog();
+  applyCartResult({ cart: sized.cart, error: sized.error });
+}
+function wireEditDialog() {
+  $("pos-edit-chips").addEventListener("click", (event) => {
+    const chip = event.target.closest("[data-var]");
+    if (!chip || !editing || chip.dataset.var === editing.variation) return;
+    readEditPrice();
+    editing.variation = chip.dataset.var;
+    refreshEditFields();
+    $("pos-edit-price").focus({ preventScroll: true });
   });
+  $("pos-edit-price").addEventListener("input", () => { readEditPrice(); const e = editing; if (e) { $("pos-edit-chip-retail").textContent = pesoText(e.retail); $("pos-edit-chip-ws").textContent = e.ws == null ? "None — add" : pesoText(e.ws); updateEditSummary(); } });
+  $("pos-edit-size").addEventListener("input", updateEditSummary);
+  $("pos-edit-qty").addEventListener("input", updateEditSummary);
+  $("pos-edit-minus").addEventListener("click", () => { const n = Math.max(1, (Math.floor(Number($("pos-edit-qty").value)) || 1) - 1); $("pos-edit-qty").value = n; updateEditSummary(); });
+  $("pos-edit-plus").addEventListener("click", () => { $("pos-edit-qty").value = (Math.floor(Number($("pos-edit-qty").value)) || 0) + 1; updateEditSummary(); });
+  $("pos-edit-remove").addEventListener("click", () => { if (!editing) return; const key = editing.key; closeEditDialog(); applyCartResult({ cart: removeLine(cart, key) }); });
+  $("pos-edit-ok").addEventListener("click", confirmEditDialog);
+  $("pos-edit-close").addEventListener("click", closeEditDialog);
+  $("pos-edit-overlay").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") { event.preventDefault(); confirmEditDialog(); }
+    if (event.key === "Escape") closeEditDialog();
+  });
+}
+
+// ---------------- Two steps: 1) build the sale, 2) confirm the items, then payment appears ----------------
+let payStage = false;
+function applyStage() {
+  if (cart.length === 0) payStage = false;
+  $("pos-payment").hidden = !payStage;
+  $("pos-confirm").hidden = payStage;
+  document.querySelector(".pos-cart")?.classList.toggle("is-paying", payStage);
+  $("pos-confirm-go").disabled = cart.length === 0;
+  $("pos-confirm-count").textContent = cart.length === 0 ? "No items yet" : `${cartUnits(cart)} item${cartUnits(cart) === 1 ? "" : "s"} · ${cart.length} product${cart.length === 1 ? "" : "s"}`;
+  $("pos-confirm-total").textContent = formatMoney(cartTotal(cart));
+}
+function wireStages() {
+  $("pos-confirm-go").addEventListener("click", () => {
+    if (cart.length === 0) return;
+    payStage = true;
+    applyStage();
+    renderPayment();
+    $("pos-payment").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  });
+  $("pos-payment-back").addEventListener("click", () => { payStage = false; applyStage(); });
+  $("pos-confirm-clear").addEventListener("click", () => $("pos-clear").click());
 }
 
 function applyCartResult(result) {
   if (result.error) showMessage(result.error, true); else hideMessage();
   cart = result.cart;
+  payStage = false;
   renderAll();
 }
 
@@ -836,37 +925,33 @@ function renderCart() {
       const size = wsSize(line);
       const pcs = (n) => `${n} pc${n === 1 ? "" : "s"}`;
       const adjusted = line.priceSet && !line.saleUnit ? ` <em class="pos-line__adj">price changed</em>` : "";
-      let lines;
+      let rows;
       let note;
       if (line.saleUnit) {
-        lines = `<div class="pos-ln"><span>${line.qty} ${esc(line.saleUnit.label)} × ${formatMoney(line.saleUnit.price)}</span><span>${formatMoney(pr.total)}</span></div>`;
-        note = `${line.saleUnit.pieces} pcs per ${esc(line.saleUnit.label)} · ${stockQty(line)} pcs out of stock · price set at the counter`;
+        rows = `<div class="pos-ln"><span>${line.qty} ${esc(line.saleUnit.label)} × ${formatMoney(line.saleUnit.price)}</span><span>${formatMoney(pr.total)}</span></div>`;
+        note = `${line.saleUnit.pieces} pcs per ${esc(line.saleUnit.label)} · ${stockQty(line)} pcs out of stock`;
       } else {
-        lines = "";
-        if (pr.groups > 0) lines += `<div class="pos-ln"><span>${pcs(pr.wholesaleQty)} × ${formatMoney(line.wholesaleUnit)} <em class="pos-tag">Wholesale</em></span><span>${formatMoney(pr.wholesaleTotal)}</span></div>`;
-        if (pr.retailQty > 0 || pr.groups === 0) lines += `<div class="pos-ln"><span>${pcs(pr.retailQty)} × ${formatMoney(line.retailUnit ?? 0)}${pr.groups > 0 ? ` <em class="pos-tag pos-tag--reg">Regular</em>` : ""}${line.discountPercent ? ` <em class="pos-tag">-${line.discountPercent}%</em>` : ""}</span><span>${formatMoney(pr.retailTotal)}</span></div>`;
+        rows = "";
+        if (pr.groups > 0) rows += `<div class="pos-ln"><span>${pcs(pr.wholesaleQty)} × ${formatMoney(line.wholesaleUnit)} <em class="pos-tag">Wholesale</em></span><span>${formatMoney(pr.wholesaleTotal)}</span></div>`;
+        if (pr.retailQty > 0 || pr.groups === 0) rows += `<div class="pos-ln"><span>${pcs(pr.retailQty)} × ${formatMoney(line.retailUnit ?? 0)}${pr.groups > 0 ? ` <em class="pos-tag pos-tag--reg">Regular</em>` : ""}${line.discountPercent ? ` <em class="pos-tag">-${line.discountPercent}%</em>` : ""}</span><span>${formatMoney(pr.retailTotal)}</span></div>`;
         note = line.wholesaleUnit != null
           ? `Wholesale ${formatMoney(line.wholesaleUnit)} each for every ${size} pcs${pr.groups > 0 ? ` · ${pr.groups} set${pr.groups === 1 ? "" : "s"} applied` : ` · buy ${size}+ to apply`}`
-          : `No wholesale price`;
-        note += ` · <button type="button" class="pos-link" data-action="price" data-key="${k}" data-focus="ws">${line.wholesaleUnit != null ? "Change" : "+ Add wholesale price"}</button>`;
+          : "No wholesale price";
       }
       return `
         <div class="pos-line">
-          <div class="pos-line__top">
-            <span class="pos-line__name">${esc(line.name)}${adjusted}</span>
-            <button type="button" class="pos-line__remove" data-action="remove" data-key="${k}" aria-label="Remove">✕</button>
+          <div class="pos-line__info">
+            <div class="pos-line__name">${esc(line.name)}${adjusted}</div>
+            <div class="pos-ln-list">${rows}</div>
+            <p class="pos-line__note">${note}</p>
           </div>
-          <div class="pos-line__row">
-            <div class="pos-qty">
-              <button type="button" data-action="dec" data-key="${k}" aria-label="Less">−</button>
-              <input type="number" min="1" max="${line.saleUnit ? Math.floor(line.stock / line.saleUnit.pieces) : line.stock}" value="${line.qty}" inputmode="${IS_TOUCH ? "none" : "numeric"}" data-qty-input="${k}">
-              <button type="button" data-action="inc" data-key="${k}" aria-label="More">+</button>
-            </div>
-            ${line.saleUnit ? "" : `<button type="button" class="pos-line__edit" data-action="price" data-key="${k}">Edit price</button>`}
+          <div class="pos-line__side">
             <strong class="pos-line__total">${formatMoney(lineTotal(line))}</strong>
+            <button type="button" class="pos-line__edit" data-action="edit" data-key="${k}" aria-label="Edit ${esc(line.name)}">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z"/></svg>
+              Edit
+            </button>
           </div>
-          <div class="pos-ln-list">${lines}</div>
-          <p class="pos-line__note">${note}</p>
         </div>`;
     }).join("");
   }
@@ -876,6 +961,7 @@ function renderCart() {
   $("pos-discount").textContent = `-${formatMoney(discount)}`;
   $("pos-discount-row").hidden = discount <= 0;
   $("pos-total").textContent = formatMoney(cartTotal(cart));
+  applyStage();
 }
 
 // ----------------------------- NUMBER PAD ------------------------------

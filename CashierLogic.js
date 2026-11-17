@@ -318,11 +318,24 @@ export function setLinePrices(cart, key, input) {
   if (!line || line.saleUnit) return { cart };
   const prices = checkCounterPrices(input);
   if (prices.error) return { cart, error: prices.error };
+  const differs = Math.abs((line.retailUnit ?? 0) - prices.retail) > 0.001
+    || (line.wholesaleUnit ?? null) !== prices.wholesale
+    || (prices.wholesale != null && prices.size !== wsSize(line));
   return {
     cart: cart.map((l) => (l.key === key
-      ? { ...l, retailUnit: prices.retail, wholesaleUnit: prices.wholesale, wsSize: prices.size, discountPercent: null, priceSet: true, mode: prices.wholesale == null ? "retail" : l.mode }
+      ? { ...l, retailUnit: prices.retail, wholesaleUnit: prices.wholesale, wsSize: prices.size,
+          discountPercent: differs ? null : l.discountPercent, priceSet: l.priceSet || differs, mode: prices.wholesale == null ? "retail" : l.mode }
       : l))
   };
+}
+
+// Change the price per unit of a line sold by the case/ream/etc. (this sale only).
+export function setUnitLinePrice(cart, key, price) {
+  const line = cart.find((l) => l.key === key);
+  if (!line || !line.saleUnit) return { cart };
+  const n = round2(Number(price));
+  if (!(n > 0)) return { cart, error: "Enter a price greater than 0." };
+  return { cart: cart.map((l) => (l.key === key ? { ...l, saleUnit: { ...l.saleUnit, price: n } } : l)) };
 }
 
 export function addUnitToCart(cart, candidate, unit, units) {
