@@ -709,9 +709,20 @@ function openEditDialog(line) {
   $("pos-edit-variation-box").hidden = unit;
   $("pos-edit-qty").value = line.qty;
   $("pos-edit-error").textContent = "";
+  editing.unlocked = false;
   $("pos-edit-overlay").hidden = false;
   refreshEditFields();
-  const box = $("pos-edit-price"); box.focus({ preventScroll: true }); box.select?.();
+  $("pos-edit-ok").focus({ preventScroll: true });
+}
+// The price is shown locked; the pencil unlocks it for typing.
+function setPriceLocked(locked, focus) {
+  if (!editing) return;
+  editing.unlocked = !locked;
+  const box = $("pos-edit-price");
+  box.readOnly = locked;
+  $("pos-edit-pricebox")?.classList.toggle("is-editing", !locked);
+  document.getElementById("pos-edit-pencil").classList.toggle("is-on", !locked);
+  if (!locked && focus) { box.focus({ preventScroll: true }); box.select?.(); }
 }
 function closeEditDialog() {
   $("pos-edit-overlay").hidden = true;
@@ -735,6 +746,7 @@ function refreshEditFields() {
   $("pos-edit-price").placeholder = ws ? "Type a wholesale price (empty = none)" : "0.00";
   $("pos-edit-chip-retail").textContent = pesoText(e.retail);
   $("pos-edit-chip-ws").textContent = e.ws == null ? "None — add" : pesoText(e.ws);
+  setPriceLocked(!(e.unlocked || (ws && e.ws == null)), false); // no wholesale price yet: ready to type
   document.querySelectorAll("#pos-edit-chips .pos-edit-chip").forEach((c) => c.classList.toggle("is-on", c.dataset.var === e.variation));
   $("pos-edit-size-box").hidden = !ws;
   $("pos-edit-size").value = e.size;
@@ -776,8 +788,9 @@ function wireEditDialog() {
     readEditPrice();
     editing.variation = chip.dataset.var;
     refreshEditFields();
-    $("pos-edit-price").focus({ preventScroll: true });
+    if (editing.unlocked) $("pos-edit-price").focus({ preventScroll: true });
   });
+  $("pos-edit-pencil").addEventListener("click", () => setPriceLocked(!editing?.unlocked, true));
   $("pos-edit-price").addEventListener("input", () => { readEditPrice(); const e = editing; if (e) { $("pos-edit-chip-retail").textContent = pesoText(e.retail); $("pos-edit-chip-ws").textContent = e.ws == null ? "None — add" : pesoText(e.ws); updateEditSummary(); } });
   $("pos-edit-size").addEventListener("input", updateEditSummary);
   $("pos-edit-qty").addEventListener("input", updateEditSummary);

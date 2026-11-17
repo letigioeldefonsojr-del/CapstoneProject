@@ -3624,3 +3624,13 @@ body.has-share-bar .scroll-to-top-btn { bottom: 84px; z-index: 85; }
 .pos-edit-remove{color:#b3392f;border-color:#e7b9b5}
 .pos-edit-confirm{flex:1;padding:14px 18px;font-size:15px;letter-spacing:.04em;text-transform:uppercase;border-radius:999px}
 @media(max-width:480px){.pos-line{flex-direction:column}.pos-line__side{flex-direction:row;align-items:center;justify-content:space-between}}
+
+/* Edit box: price locked until the pencil is tapped (20261117e) */
+.pos-edit-pricebox{position:relative}
+.pos-edit-pricebox .pos-edit-price{padding-right:60px;-moz-appearance:textfield;appearance:textfield}
+.pos-edit-price::-webkit-outer-spin-button,.pos-edit-price::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.pos-edit-price[readonly]{background:#f6f7f5;color:var(--ink);cursor:default;outline:none}
+.pos-edit-pricebox.is-editing .pos-edit-price{background:#fff;border-color:#2a6fd1;box-shadow:0 0 0 3px rgba(42,111,209,.14)}
+.pos-edit-pencil{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:38px;height:38px;border:0;border-radius:50%;background:#e9eee9;color:#4a5a50;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.pos-edit-pencil:hover{background:#dbe5dd}
+.pos-edit-pencil.is-on{background:#2a6fd1;color:#fff}
