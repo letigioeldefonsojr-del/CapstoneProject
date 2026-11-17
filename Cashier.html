@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="Dashboard.css?v=20261117b">
+    <link rel="stylesheet" href="Dashboard.css?v=20261117c">
 </head>
 <body class="page-cashier">
 
@@ -286,7 +286,8 @@
                 <label class="pos-unit-field"><span>Retail price (₱) each</span><input type="number" id="pos-price-retail" min="0" step="0.01" inputmode="decimal"></label>
                 <label class="pos-unit-field"><span>Wholesale price (₱) each</span><input type="number" id="pos-price-ws" min="0" step="0.01" placeholder="None" inputmode="decimal"></label>
             </div>
-            <p class="pos-hint">Wholesale applies to every full set of 6 pieces. Leave it empty for no wholesale. This changes the price for this sale only, not the product.</p>
+            <label class="pos-unit-field"><span>Wholesale price starts at (pieces per set)</span><input type="number" id="pos-price-size" min="2" step="1" inputmode="numeric"></label>
+            <p class="pos-hint">Wholesale applies to every full set of that many pieces. Leave the wholesale price empty for none. This changes the price for this sale only, not the product.</p>
             <p class="pos-unit-summary pos-unit-warn" id="pos-price-error"></p>
         </div>
         <div class="modal__footer">
@@ -376,6 +377,6 @@
 
 <script type="module" src="firebase-config.js"></script>
 <script type="module" src="Sidebar.js?v=20261116b"></script>
-<script type="module" src="Cashier.js?v=20261117a"></script>
+<script type="module" src="Cashier.js?v=20261117b"></script>
 </body>
 </html>

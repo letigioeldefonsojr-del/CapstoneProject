@@ -12,7 +12,7 @@ import * as SB from "./SupabaseStore.js?v=20261116b";
 import {
   candidatesForProduct, findCandidateByBarcode, searchProducts,
   addToCart, addUnitToCart, addPricedToCart, setLinePrices, stockQty, setLineQty, setLineMode, removeLine,
-  lineUnitPrice, lineTotal, linePricing, cartTotal, cartUnits, cartRegularSubtotal, cartWholesaleDiscount, WHOLESALE_GROUP_SIZE,
+  lineUnitPrice, lineTotal, linePricing, cartTotal, cartUnits, cartRegularSubtotal, cartWholesaleDiscount, WHOLESALE_GROUP_SIZE, wsSize,
   computePayment, planStockUpdates, makeReceiptNo, buildSaleItems, formatMoney,
   itemRefundedQty, remainingQty, saleRefundStatus, planRefund, planRestock, round2,
   applyNumpadKey, quickCashAmounts
@@ -592,7 +592,8 @@ function renderUnitPrompt() {
         <label class="pos-unit-field"><span>Retail price (₱) each</span><input type="number" id="pos-unit-retail" min="0" step="0.01" value="${candidate.retailUnit ?? ""}" inputmode="decimal"></label>
         <label class="pos-unit-field"><span>Wholesale price (₱) each</span><input type="number" id="pos-unit-ws" min="0" step="0.01" value="${candidate.wholesaleUnit ?? ""}" placeholder="None" inputmode="decimal"></label>
       </div>
-      <p class="pos-hint">${candidate.wholesaleUnit != null ? `Wholesale applies to every full set of ${WHOLESALE_GROUP_SIZE} pieces.` : `No wholesale price yet. Type one to give a price for every full set of ${WHOLESALE_GROUP_SIZE}, or leave it empty.`} You can change either price for this sale only.</p>`
+      <label class="pos-unit-field"><span>Wholesale price starts at (pieces per set)</span><input type="number" id="pos-unit-wssize" min="2" step="1" value="${WHOLESALE_GROUP_SIZE}" inputmode="numeric"></label>
+      <p class="pos-hint">${candidate.wholesaleUnit != null ? "Wholesale applies to every full set of pieces." : "No wholesale price yet. Type one to price every full set, or leave it empty."} These changes are for this sale only.</p>`
     : `${customLabel}
       <label class="pos-unit-field"><span>Pieces in one <b class="pos-unit-name-label">${esc(opt.label.toLowerCase())}</b></span><input type="number" id="pos-unit-pieces" min="1" value="${d.pieces}" inputmode="numeric"></label>
       <label class="pos-unit-field"><span>Price per <b class="pos-unit-name-label">${esc(opt.label.toLowerCase())}</b> (₱) — you can change this</span><input type="number" id="pos-unit-price" min="0" step="0.01" value="${d.price}" inputmode="decimal"></label>
@@ -642,7 +643,7 @@ function confirmUnitPrompt() {
   if (unitId === "piece") {
     if (!(v.count >= 1)) { $("pos-unit-summary").textContent = "Quantity must be at least 1."; return; }
     result = addPricedToCart(cart, candidate, Math.floor(v.count), {
-      retail: $("pos-unit-retail")?.value, wholesale: $("pos-unit-ws")?.value
+      retail: $("pos-unit-retail")?.value, wholesale: $("pos-unit-ws")?.value, size: $("pos-unit-wssize")?.value
     });
     if (result.error) { $("pos-unit-summary").textContent = result.error; return; }
   } else {
@@ -698,6 +699,7 @@ function openPricePrompt(line, focus) {
   $("pos-price-name").textContent = line.name;
   $("pos-price-retail").value = line.retailUnit ?? "";
   $("pos-price-ws").value = line.wholesaleUnit ?? "";
+  $("pos-price-size").value = wsSize(line);
   $("pos-price-error").textContent = "";
   $("pos-price-overlay").hidden = false;
   const box = focus === "ws" ? $("pos-price-ws") : $("pos-price-retail");
@@ -710,7 +712,7 @@ function closePricePrompt() {
 }
 function confirmPricePrompt() {
   if (!pricePrompt) return;
-  const result = setLinePrices(cart, pricePrompt.key, { retail: $("pos-price-retail").value, wholesale: $("pos-price-ws").value });
+  const result = setLinePrices(cart, pricePrompt.key, { retail: $("pos-price-retail").value, wholesale: $("pos-price-ws").value, size: $("pos-price-size").value });
   if (result.error) { $("pos-price-error").textContent = result.error; return; }
   closePricePrompt();
   applyCartResult(result);
@@ -830,34 +832,41 @@ function renderCart() {
   } else {
     box.innerHTML = cart.map((line) => {
       const pr = linePricing(line);
-      const wsNote = line.saleUnit
-        ? `Sold by the ${esc(line.saleUnit.label)} · ${line.saleUnit.pieces} pcs each · ${stockQty(line)} pcs out of stock · price set at the counter`
-        : line.wholesaleUnit != null
-        ? `Wholesale ${formatMoney(line.wholesaleUnit)} each for every ${WHOLESALE_GROUP_SIZE}${pr.groups > 0 ? ` · ${pr.groups} group${pr.groups === 1 ? "" : "s"} applied` : ` · buy ${WHOLESALE_GROUP_SIZE}+ to apply`}`
-        : `No wholesale price · <button type="button" class="pos-link" data-action="price" data-key="${esc(line.key)}" data-focus="ws">+ Add wholesale price</button>`;
-      const adjusted = line.priceSet && !line.saleUnit ? ` <em class="pos-line__adj">price set at the counter</em>` : "";
+      const k = esc(line.key);
+      const size = wsSize(line);
+      const pcs = (n) => `${n} pc${n === 1 ? "" : "s"}`;
+      const adjusted = line.priceSet && !line.saleUnit ? ` <em class="pos-line__adj">price changed</em>` : "";
+      let lines;
+      let note;
+      if (line.saleUnit) {
+        lines = `<div class="pos-ln"><span>${line.qty} ${esc(line.saleUnit.label)} × ${formatMoney(line.saleUnit.price)}</span><span>${formatMoney(pr.total)}</span></div>`;
+        note = `${line.saleUnit.pieces} pcs per ${esc(line.saleUnit.label)} · ${stockQty(line)} pcs out of stock · price set at the counter`;
+      } else {
+        lines = "";
+        if (pr.groups > 0) lines += `<div class="pos-ln"><span>${pcs(pr.wholesaleQty)} × ${formatMoney(line.wholesaleUnit)} <em class="pos-tag">Wholesale</em></span><span>${formatMoney(pr.wholesaleTotal)}</span></div>`;
+        if (pr.retailQty > 0 || pr.groups === 0) lines += `<div class="pos-ln"><span>${pcs(pr.retailQty)} × ${formatMoney(line.retailUnit ?? 0)}${pr.groups > 0 ? ` <em class="pos-tag pos-tag--reg">Regular</em>` : ""}${line.discountPercent ? ` <em class="pos-tag">-${line.discountPercent}%</em>` : ""}</span><span>${formatMoney(pr.retailTotal)}</span></div>`;
+        note = line.wholesaleUnit != null
+          ? `Wholesale ${formatMoney(line.wholesaleUnit)} each for every ${size} pcs${pr.groups > 0 ? ` · ${pr.groups} set${pr.groups === 1 ? "" : "s"} applied` : ` · buy ${size}+ to apply`}`
+          : `No wholesale price`;
+        note += ` · <button type="button" class="pos-link" data-action="price" data-key="${k}" data-focus="ws">${line.wholesaleUnit != null ? "Change" : "+ Add wholesale price"}</button>`;
+      }
       return `
         <div class="pos-line">
           <div class="pos-line__top">
             <span class="pos-line__name">${esc(line.name)}${adjusted}</span>
-            ${line.saleUnit ? "" : `<button type="button" class="pos-line__edit" data-action="price" data-key="${esc(line.key)}" aria-label="Edit price">Edit price</button>`}
-            <button type="button" class="pos-line__remove" data-action="remove" data-key="${esc(line.key)}" aria-label="Remove">✕</button>
+            <button type="button" class="pos-line__remove" data-action="remove" data-key="${k}" aria-label="Remove">✕</button>
           </div>
           <div class="pos-line__row">
             <div class="pos-qty">
-              <button type="button" data-action="dec" data-key="${esc(line.key)}" aria-label="Less">−</button>
-              <input type="number" min="1" max="${line.saleUnit ? Math.floor(line.stock / line.saleUnit.pieces) : line.stock}" value="${line.qty}" inputmode="${IS_TOUCH ? "none" : "numeric"}" data-qty-input="${esc(line.key)}">
-              <button type="button" data-action="inc" data-key="${esc(line.key)}" aria-label="More">+</button>
+              <button type="button" data-action="dec" data-key="${k}" aria-label="Less">−</button>
+              <input type="number" min="1" max="${line.saleUnit ? Math.floor(line.stock / line.saleUnit.pieces) : line.stock}" value="${line.qty}" inputmode="${IS_TOUCH ? "none" : "numeric"}" data-qty-input="${k}">
+              <button type="button" data-action="inc" data-key="${k}" aria-label="More">+</button>
             </div>
-            <div class="pos-line__money">
-              <strong>${formatMoney(lineTotal(line))}</strong>
-            </div>
+            ${line.saleUnit ? "" : `<button type="button" class="pos-line__edit" data-action="price" data-key="${k}">Edit price</button>`}
+            <strong class="pos-line__total">${formatMoney(lineTotal(line))}</strong>
           </div>
-          <div class="pos-calc">
-            <div class="pos-calc__head"><span>Qty</span><span>Rate</span><span>Amount</span></div>
-            ${calcRows(line).map((r) => `<div class="pos-calc__row"><span>${r.qty}</span><span>${r.rate}${r.tag ? ` <em>${r.tag}</em>` : ""}</span><span>${r.amount}</span></div>`).join("")}
-          </div>
-          <div class="pos-hint" style="margin-top:4px;font-size:12px;">${wsNote}</div>
+          <div class="pos-ln-list">${lines}</div>
+          <p class="pos-line__note">${note}</p>
         </div>`;
     }).join("");
   }

@@ -159,6 +159,11 @@ export function searchProducts(products, term, limit = 30) {
 }
 
 export const WHOLESALE_GROUP_SIZE = 6;
+// How many pieces make one wholesale set for a line (the cashier can change it for a sale).
+export function wsSize(line) {
+  const n = Math.floor(Number(line?.wsSize));
+  return Number.isFinite(n) && n >= 2 ? n : WHOLESALE_GROUP_SIZE;
+}
 
 // Pieces taken out of stock for a line (a line sold by the case/ream/etc. holds N pieces per unit).
 export function stockQty(line) {
@@ -174,8 +179,9 @@ export function linePricing(line) {
   }
   const qty = Math.max(0, Math.floor(Number(line.qty) || 0));
   const hasWholesale = line.wholesaleUnit !== null && line.wholesaleUnit !== undefined && Number.isFinite(line.wholesaleUnit);
-  const groups = hasWholesale ? Math.floor(qty / WHOLESALE_GROUP_SIZE) : 0;
-  const wholesaleQty = groups * WHOLESALE_GROUP_SIZE;
+  const size = wsSize(line);
+  const groups = hasWholesale ? Math.floor(qty / size) : 0;
+  const wholesaleQty = groups * size;
   const retailQty = qty - wholesaleQty;
   const retail = line.retailUnit ?? 0;
   const wholesaleTotal = hasWholesale ? round2(wholesaleQty * line.wholesaleUnit) : 0;
@@ -261,11 +267,15 @@ export function checkCounterPrices(input) {
   if (!(retail > 0)) return { error: "Enter a retail price greater than 0." };
   const raw = input.wholesale;
   const hasWs = raw !== null && raw !== undefined && String(raw).trim() !== "";
-  if (!hasWs) return { retail, wholesale: null };
+  const sizeRaw = input.size;
+  const hasSize = sizeRaw !== null && sizeRaw !== undefined && String(sizeRaw).trim() !== "";
+  const size = hasSize ? Math.floor(Number(sizeRaw)) : WHOLESALE_GROUP_SIZE;
+  if (hasWs && !(size >= 2)) return { error: "Enter how many pieces make a wholesale set (2 or more)." };
+  if (!hasWs) return { retail, wholesale: null, size: WHOLESALE_GROUP_SIZE };
   const wholesale = round2(Number(raw));
   if (!(wholesale > 0)) return { error: "Enter a wholesale price greater than 0, or leave it empty for none." };
   if (wholesale > retail) return { error: "The wholesale price can't be higher than the retail price." };
-  return { retail, wholesale };
+  return { retail, wholesale, size };
 }
 
 // Add a product by the piece at a price the cashier set at the counter (different from the product's own).
@@ -278,10 +288,11 @@ export function addPricedToCart(cart, candidate, qty, input) {
   if (!(count >= 1)) return { cart, error: "Quantity must be at least 1." };
   const sameAsProduct = candidate.retailUnit != null && Math.abs(candidate.retailUnit - prices.retail) <= 0.001
     && ((candidate.wholesaleUnit ?? null) === prices.wholesale
-      || (candidate.wholesaleUnit != null && prices.wholesale != null && Math.abs(candidate.wholesaleUnit - prices.wholesale) <= 0.001));
+      || (candidate.wholesaleUnit != null && prices.wholesale != null && Math.abs(candidate.wholesaleUnit - prices.wholesale) <= 0.001))
+    && (prices.wholesale == null || prices.size === WHOLESALE_GROUP_SIZE);
   if (sameAsProduct) return addToCart(cart, candidate, count);
 
-  const key = `${candidate.key}#price|${prices.retail}|${prices.wholesale ?? ""}`;
+  const key = `${candidate.key}#price|${prices.retail}|${prices.wholesale ?? ""}|${prices.wholesale != null ? prices.size : ""}`;
   const otherPieces = cart.filter((l) => (l.baseKey || l.key) === candidate.key && l.key !== key).reduce((sum, l) => sum + stockQty(l), 0);
   const existing = cart.find((l) => l.key === key);
   const want = (existing ? existing.qty : 0) + count;
@@ -296,7 +307,7 @@ export function addPricedToCart(cart, candidate, qty, input) {
       productId: candidate.productId, variantName: candidate.variantName, barcode: candidate.barcode,
       name: candidate.name, productName: candidate.productName, imageUrl: candidate.imageUrl,
       stock: candidate.stock, retailUnit: prices.retail, regularUnit: candidate.regularUnit ?? candidate.retailUnit,
-      discountPercent: null, wholesaleUnit: prices.wholesale, mode: "retail", priceSet: true, qty: count
+      discountPercent: null, wholesaleUnit: prices.wholesale, wsSize: prices.size, mode: "retail", priceSet: true, qty: count
     }]
   };
 }
@@ -309,7 +320,7 @@ export function setLinePrices(cart, key, input) {
   if (prices.error) return { cart, error: prices.error };
   return {
     cart: cart.map((l) => (l.key === key
-      ? { ...l, retailUnit: prices.retail, wholesaleUnit: prices.wholesale, discountPercent: null, priceSet: true, mode: prices.wholesale == null ? "retail" : l.mode }
+      ? { ...l, retailUnit: prices.retail, wholesaleUnit: prices.wholesale, wsSize: prices.size, discountPercent: null, priceSet: true, mode: prices.wholesale == null ? "retail" : l.mode }
       : l))
   };
 }
