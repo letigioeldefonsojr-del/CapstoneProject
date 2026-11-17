@@ -140,8 +140,13 @@ function itemStatus(p, flavorName) {
 
 function calcTable(parts, opts = {}) {
   const rows = [];
-  if (parts.wsQty > 0) rows.push(`<div class="calc__row"><span>${parts.wsQty}</span><span><em>Wholesale</em></span><span>${peso(parts.ws)}</span><span>${peso(parts.wsTotal)}</span></div>`);
-  if (parts.retailQty > 0 || parts.wsQty === 0) rows.push(`<div class="calc__row"><span>${parts.retailQty}</span><span>Regular</span><span>${peso(parts.unit)}</span><span>${peso(parts.retailTotal)}</span></div>`);
+  const pcs = (n) => `${n} pc${n === 1 ? "" : "s"}`;
+  const sets = parts.wsQty / WHOLESALE_MIN;
+  if (parts.wsQty > 0) rows.push(`<div class="calc__row"><span class="calc__what"><b>${pcs(parts.wsQty)}</b> <em>Wholesale</em><small>${sets} full set${sets === 1 ? "" : "s"} of ${WHOLESALE_MIN} pcs (${sets} × ${WHOLESALE_MIN} = ${parts.wsQty})</small></span><span>${peso(parts.ws)} each</span><span>${peso(parts.wsTotal)}</span></div>`);
+  if (parts.retailQty > 0 || parts.wsQty === 0) {
+    const sub = parts.ws == null ? "" : parts.wsQty > 0 ? `left over, not enough for another set of ${WHOLESALE_MIN}` : `fewer than ${WHOLESALE_MIN} pcs, so no wholesale yet`;
+    rows.push(`<div class="calc__row"><span class="calc__what"><b>${pcs(parts.retailQty)}</b> <em class="calc__reg">Regular</em>${sub ? `<small>${sub}</small>` : ""}</span><span>${peso(parts.unit)} each</span><span>${peso(parts.retailTotal)}</span></div>`);
+  }
   const save = round2(parts.regularTotal - parts.total);
   let why;
   const placed = opts.placed === true; // an order already placed: describe what happened, don't suggest adding more
@@ -162,7 +167,7 @@ function calcTable(parts, opts = {}) {
       + (parts.retailQty > 0 ? ` The other ${parts.retailQty} pc${parts.retailQty === 1 ? "" : "s"} ${parts.retailQty === 1 ? "is" : "are"} at the regular ${peso(parts.unit)}. Add ${WHOLESALE_MIN - parts.retailQty} more to make another wholesale set.` : "");
   }
   return `<div class="calc">
-    <div class="calc__head"><span>Qty</span><span>Price</span><span>Rate</span><span>Amount</span></div>
+    <div class="calc__head"><span>Pieces</span><span>Price</span><span>Amount</span></div>
     ${rows.join("")}
     <div class="calc__foot"><span>Line total</span><strong>${peso(parts.total)}</strong></div>
   </div>
