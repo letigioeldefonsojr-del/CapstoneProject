@@ -720,6 +720,7 @@ function setPriceLocked(locked, focus) {
   editing.unlocked = !locked;
   const box = $("pos-edit-price");
   box.readOnly = locked;
+  showEditPrice();
   $("pos-edit-pricebox")?.classList.toggle("is-editing", !locked);
   document.getElementById("pos-edit-pencil").classList.toggle("is-on", !locked);
   if (!locked && focus) { box.focus({ preventScroll: true }); box.select?.(); }
@@ -730,10 +731,17 @@ function closeEditDialog() {
   focusScanInput();
 }
 // The single price box edits whichever chip is selected (retail or wholesale).
+function showEditPrice() {
+  if (!editing) return;
+  const n = editing.variation === "ws" ? editing.ws : editing.retail;
+  const box = $("pos-edit-price");
+  // locked: "₱9.00"; while typing: the plain number
+  box.value = n == null || !Number.isFinite(n) ? "" : editing.unlocked ? String(n) : formatMoney(n);
+}
 function readEditPrice() {
   if (!editing) return;
-  const raw = $("pos-edit-price").value.trim();
-  const n = raw === "" ? null : Number(raw);
+  const raw = $("pos-edit-price").value.replace(/[^\d.]/g, "");
+  const n = raw === "" || raw === "." ? null : Number(raw);
   if (editing.variation === "ws") editing.ws = n;
   else editing.retail = n;
 }
@@ -741,12 +749,11 @@ function refreshEditFields() {
   const e = editing;
   const ws = e.variation === "ws";
   $("pos-edit-price-label").textContent = e.unit ? `Price per ${e.base.saleUnit.label} (₱)` : ws ? "Wholesale price (₱) each" : "Retail price (₱) each";
-  const val = ws ? e.ws : e.retail;
-  $("pos-edit-price").value = val == null ? "" : val;
-  $("pos-edit-price").placeholder = ws ? "Type a wholesale price (empty = none)" : "0.00";
+  $("pos-edit-price").placeholder = ws ? "Type a wholesale price" : "₱0.00";
   $("pos-edit-chip-retail").textContent = pesoText(e.retail);
   $("pos-edit-chip-ws").textContent = e.ws == null ? "None — add" : pesoText(e.ws);
   setPriceLocked(!(e.unlocked || (ws && e.ws == null)), false); // no wholesale price yet: ready to type
+  showEditPrice();
   document.querySelectorAll("#pos-edit-chips .pos-edit-chip").forEach((c) => c.classList.toggle("is-on", c.dataset.var === e.variation));
   $("pos-edit-size-box").hidden = !ws;
   $("pos-edit-size").value = e.size;
@@ -790,8 +797,14 @@ function wireEditDialog() {
     refreshEditFields();
     if (editing.unlocked) $("pos-edit-price").focus({ preventScroll: true });
   });
-  $("pos-edit-pencil").addEventListener("click", () => setPriceLocked(!editing?.unlocked, true));
-  $("pos-edit-price").addEventListener("input", () => { readEditPrice(); const e = editing; if (e) { $("pos-edit-chip-retail").textContent = pesoText(e.retail); $("pos-edit-chip-ws").textContent = e.ws == null ? "None — add" : pesoText(e.ws); updateEditSummary(); } });
+  $("pos-edit-pencil").addEventListener("click", () => setPriceLocked(!!editing?.unlocked, true));
+  $("pos-edit-price").addEventListener("input", () => {
+    const box = $("pos-edit-price");
+    let v = box.value.replace(/[^\d.]/g, "");
+    const dot = v.indexOf(".");
+    if (dot !== -1) v = v.slice(0, dot + 1) + v.slice(dot + 1).replace(/\./g, "").slice(0, 2);
+    box.value = v.slice(0, 10);
+    readEditPrice(); const e = editing; if (e) { $("pos-edit-chip-retail").textContent = pesoText(e.retail); $("pos-edit-chip-ws").textContent = e.ws == null ? "None — add" : pesoText(e.ws); updateEditSummary(); } });
   $("pos-edit-size").addEventListener("input", updateEditSummary);
   $("pos-edit-qty").addEventListener("input", updateEditSummary);
   $("pos-edit-minus").addEventListener("click", () => { const n = Math.max(1, (Math.floor(Number($("pos-edit-qty").value)) || 1) - 1); $("pos-edit-qty").value = n; updateEditSummary(); });

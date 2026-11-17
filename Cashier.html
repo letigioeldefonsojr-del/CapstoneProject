@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="Dashboard.css?v=20261117e">
+    <link rel="stylesheet" href="Dashboard.css?v=20261117f">
 </head>
 <body class="page-cashier">
 
@@ -297,7 +297,7 @@
         <div class="modal__body">
             <label class="pos-edit-label" for="pos-edit-price" id="pos-edit-price-label">Price (₱) each</label>
             <div class="pos-edit-pricebox" id="pos-edit-pricebox">
-                <input type="number" id="pos-edit-price" class="pos-edit-price" min="0" step="0.01" inputmode="decimal" placeholder="0.00" readonly>
+                <input type="text" id="pos-edit-price" class="pos-edit-price" inputmode="decimal" autocomplete="off" placeholder="₱0.00" readonly>
                 <button type="button" class="pos-edit-pencil" id="pos-edit-pencil" aria-label="Edit price" title="Tap to edit the price">
                     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z"/></svg>
                 </button>
@@ -412,6 +412,6 @@
 
 <script type="module" src="firebase-config.js"></script>
 <script type="module" src="Sidebar.js?v=20261116b"></script>
-<script type="module" src="Cashier.js?v=20261117d"></script>
+<script type="module" src="Cashier.js?v=20261117e"></script>
 </body>
 </html>
