@@ -950,7 +950,6 @@ function renderCart() {
       const k = esc(line.key);
       const size = wsSize(line);
       const pcs = (n) => `${n} pc${n === 1 ? "" : "s"}`;
-      const adjusted = line.priceSet && !line.saleUnit ? ` <em class="pos-line__adj">price changed</em>` : "";
       let rows;
       let note;
       if (line.saleUnit) {
@@ -967,7 +966,7 @@ function renderCart() {
       return `
         <div class="pos-line">
           <div class="pos-line__info">
-            <div class="pos-line__name">${esc(line.name)}${adjusted}</div>
+            <div class="pos-line__name">${esc(line.name)}</div>
             <div class="pos-ln-list">${rows}</div>
             <p class="pos-line__note">${note}</p>
           </div>

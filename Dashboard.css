@@ -3638,3 +3638,28 @@ body.has-share-bar .scroll-to-top-btn { bottom: 84px; z-index: 85; }
 /* Edit box: centered, bigger price (20261117f) */
 .pos-edit-pricebox .pos-edit-price{text-align:center;font-size:28px;letter-spacing:.01em;padding:14px 56px}
 .pos-edit-pricebox .pos-edit-price::placeholder{font-size:16px;font-weight:500;color:#8a948d}
+
+/* POS: consistent edit box + confirm bar + payment header (20261117g) */
+.pos-edit-modal .modal__body{gap:6px}
+.pos-edit-label{margin-top:10px}
+#pos-edit-size{text-align:center;font-size:22px;font-weight:700;padding:12px;border-radius:14px;border:1px solid var(--border);background:#fff;-moz-appearance:textfield;appearance:textfield}
+#pos-edit-size::-webkit-outer-spin-button,#pos-edit-size::-webkit-inner-spin-button,.pos-edit-qty input::-webkit-outer-spin-button,.pos-edit-qty input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.pos-edit-qty input{-moz-appearance:textfield;appearance:textfield;font-size:22px;padding:12px;border-radius:14px}
+.pos-edit-qty button{width:48px;height:48px;border-radius:14px}
+.pos-edit-footer{display:flex;gap:12px;align-items:stretch}
+.pos-edit-footer .pos-edit-remove,.pos-edit-footer .pos-edit-confirm{height:48px;padding:0 22px;border-radius:999px;font-size:15px;font-weight:700;letter-spacing:0;text-transform:none;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box}
+.pos-edit-footer .pos-edit-remove{flex:0 0 120px}
+.pos-edit-footer .pos-edit-confirm{flex:1}
+
+.pos-confirm{gap:12px;padding-top:14px}
+.pos-confirm__sum{align-items:center;font-size:14px;font-weight:600;color:var(--muted)}
+.pos-confirm__sum strong{font-size:26px;line-height:1}
+.pos-confirm__btns{align-items:stretch;gap:12px}
+.pos-confirm__btns .btn-outline,.pos-confirm__btns .btn-primary{height:48px;padding:0 20px;border-radius:999px;font-size:15px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box}
+.pos-confirm__btns .btn-outline{flex:0 0 96px}
+.pos-confirm__btns .btn-primary{flex:1}
+
+.pos-payment__bar{padding:14px 0 12px;margin:10px 0 14px;border-bottom:1px solid var(--border);border-top:1px solid var(--border)}
+.pos-payment__back{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid var(--border);border-radius:999px;background:#fff;font-size:14px}
+.pos-payment__back:hover{background:#f1f6f2}
+.pos-payment__title{font-size:16px}
