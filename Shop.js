@@ -859,7 +859,7 @@ function openProduct(id) {
   const draw = () => {
     const v = flavor ? findVariant(p, flavor) : null;
     const stock = stockOf(p, v);
-    const max = Math.min(stock ?? 500, 500);
+    const max = Math.min(stock ?? 5000, 5000);
     if (qty > max) qty = Math.max(1, max);
     const parts = priceParts(p, v, qty);
     const status = itemStatus(p, flavor);

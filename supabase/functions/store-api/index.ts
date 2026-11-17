@@ -280,7 +280,7 @@ Deno.serve(async (req) => {
           if (!ref || ref.length > 100 || items.length === 0 || items.length > 60) return json({ error: "bad_request" }, 400);
           for (const it of items) {
             const q = Number(it?.qty);
-            if (!it?.id || !Number.isInteger(q) || q < 1 || q > 500) return json({ error: "bad_quantity" }, 400);
+            if (!it?.id || !Number.isInteger(q) || q < 1 || q > 5000) return json({ error: "bad_quantity" }, 400);
           }
           const clean = items.map((it) => ({ id: String(it.id), variant: it.variant ?? null, qty: Number(it.qty) }));
           const key = `app:${uid}:${ref}`;
