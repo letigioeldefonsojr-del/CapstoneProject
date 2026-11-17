@@ -11,12 +11,12 @@ import { SUPABASE_ENABLED } from "./SupabaseConfig.js";
 import * as SB from "./SupabaseStore.js?v=20261116b";
 import {
   candidatesForProduct, findCandidateByBarcode, searchProducts,
-  addToCart, addUnitToCart, stockQty, setLineQty, setLineMode, removeLine,
+  addToCart, addUnitToCart, addPricedToCart, setLinePrices, stockQty, setLineQty, setLineMode, removeLine,
   lineUnitPrice, lineTotal, linePricing, cartTotal, cartUnits, cartRegularSubtotal, cartWholesaleDiscount, WHOLESALE_GROUP_SIZE,
   computePayment, planStockUpdates, makeReceiptNo, buildSaleItems, formatMoney,
   itemRefundedQty, remainingQty, saleRefundStatus, planRefund, planRestock, round2,
   applyNumpadKey, quickCashAmounts
-} from "./CashierLogic.js?v=20261116b";
+} from "./CashierLogic.js?v=20261117a";
 
 const STORE_NAME = "Almares 328";
 
@@ -275,6 +275,7 @@ async function refreshCartProducts() {
 function wireUi() {
   const input = $("pos-input");
   wireUnitPrompt();
+  wirePricePrompt();
 
   input.addEventListener("input", () => {
     const value = input.value.trim();
@@ -389,6 +390,7 @@ function wireUi() {
     if (el.dataset.action === "dec") result = line.qty > 1 ? setLineQty(cart, key, line.qty - 1) : { cart };
     if (el.dataset.action === "remove") result = { cart: removeLine(cart, key) };
     if (el.dataset.action === "mode") result = setLineMode(cart, key, el.dataset.mode);
+    if (el.dataset.action === "price") { openPricePrompt(line, el.dataset.focus); return; }
     applyCartResult(result);
   });
 
@@ -586,7 +588,11 @@ function renderUnitPrompt() {
     ? `<label class="pos-unit-field"><span>What do you call it? (e.g. box, bundle, sack)</span><input type="text" id="pos-unit-label" maxlength="20" placeholder="Unit name"></label>` : "";
   $("pos-unit-fields").innerHTML = isPiece ? `
       <label class="pos-unit-field"><span>Quantity (pieces)</span><input type="number" id="pos-unit-count" min="1" value="1" inputmode="numeric"></label>
-      <p class="pos-hint">Regular price ${formatMoney(candidate.retailUnit)}${candidate.wholesaleUnit != null ? ` · wholesale ${formatMoney(candidate.wholesaleUnit)} applies on every ${WHOLESALE_GROUP_SIZE} pieces` : ""}.</p>`
+      <div class="pos-unit-pair">
+        <label class="pos-unit-field"><span>Retail price (₱) each</span><input type="number" id="pos-unit-retail" min="0" step="0.01" value="${candidate.retailUnit ?? ""}" inputmode="decimal"></label>
+        <label class="pos-unit-field"><span>Wholesale price (₱) each</span><input type="number" id="pos-unit-ws" min="0" step="0.01" value="${candidate.wholesaleUnit ?? ""}" placeholder="None" inputmode="decimal"></label>
+      </div>
+      <p class="pos-hint">${candidate.wholesaleUnit != null ? `Wholesale applies to every full set of ${WHOLESALE_GROUP_SIZE} pieces.` : `No wholesale price yet. Type one to give a price for every full set of ${WHOLESALE_GROUP_SIZE}, or leave it empty.`} You can change either price for this sale only.</p>`
     : `${customLabel}
       <label class="pos-unit-field"><span>Pieces in one <b class="pos-unit-name-label">${esc(opt.label.toLowerCase())}</b></span><input type="number" id="pos-unit-pieces" min="1" value="${d.pieces}" inputmode="numeric"></label>
       <label class="pos-unit-field"><span>Price per <b class="pos-unit-name-label">${esc(opt.label.toLowerCase())}</b> (₱) — you can change this</span><input type="number" id="pos-unit-price" min="0" step="0.01" value="${d.price}" inputmode="decimal"></label>
@@ -614,7 +620,7 @@ function updateUnitSummary() {
   const el = $("pos-unit-summary");
   const v = readUnitInputs();
   if (unitId === "piece") {
-    el.textContent = Number.isFinite(v.count) && v.count >= 1 ? `${v.count} piece${v.count === 1 ? "" : "s"} · priced automatically.` : "";
+    el.textContent = Number.isFinite(v.count) && v.count >= 1 ? `${v.count} piece${v.count === 1 ? "" : "s"} at the prices above.` : "";
     return;
   }
   document.querySelectorAll(".pos-unit-name-label").forEach((n) => { n.textContent = v.label; });
@@ -635,7 +641,10 @@ function confirmUnitPrompt() {
   let result;
   if (unitId === "piece") {
     if (!(v.count >= 1)) { $("pos-unit-summary").textContent = "Quantity must be at least 1."; return; }
-    result = addToCart(cart, candidate, Math.floor(v.count));
+    result = addPricedToCart(cart, candidate, Math.floor(v.count), {
+      retail: $("pos-unit-retail")?.value, wholesale: $("pos-unit-ws")?.value
+    });
+    if (result.error) { $("pos-unit-summary").textContent = result.error; return; }
   } else {
     result = addUnitToCart(cart, candidate, { label: v.label, pieces: v.pieces, price: v.price }, v.count);
     if (result.error) { $("pos-unit-summary").textContent = result.error; return; }
@@ -682,6 +691,40 @@ function wireUnitPrompt() {
   });
 }
 
+// ---------------- Change the price of a line already in the sale (this sale only) ----------------
+let pricePrompt = null;
+function openPricePrompt(line, focus) {
+  pricePrompt = { key: line.key };
+  $("pos-price-name").textContent = line.name;
+  $("pos-price-retail").value = line.retailUnit ?? "";
+  $("pos-price-ws").value = line.wholesaleUnit ?? "";
+  $("pos-price-error").textContent = "";
+  $("pos-price-overlay").hidden = false;
+  const box = focus === "ws" ? $("pos-price-ws") : $("pos-price-retail");
+  box.focus({ preventScroll: true }); box.select?.();
+}
+function closePricePrompt() {
+  $("pos-price-overlay").hidden = true;
+  pricePrompt = null;
+  focusScanInput();
+}
+function confirmPricePrompt() {
+  if (!pricePrompt) return;
+  const result = setLinePrices(cart, pricePrompt.key, { retail: $("pos-price-retail").value, wholesale: $("pos-price-ws").value });
+  if (result.error) { $("pos-price-error").textContent = result.error; return; }
+  closePricePrompt();
+  applyCartResult(result);
+}
+function wirePricePrompt() {
+  $("pos-price-ok").addEventListener("click", confirmPricePrompt);
+  $("pos-price-cancel").addEventListener("click", closePricePrompt);
+  $("pos-price-close").addEventListener("click", closePricePrompt);
+  $("pos-price-overlay").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") { event.preventDefault(); confirmPricePrompt(); }
+    if (event.key === "Escape") closePricePrompt();
+  });
+}
+
 function applyCartResult(result) {
   if (result.error) showMessage(result.error, true); else hideMessage();
   cart = result.cart;
@@ -703,16 +746,15 @@ function refreshCartFromProducts() {
     .map((line) => {
       const fresh = byKey.get(line.baseKey || line.key);
       if (!fresh) return null;
+      const keepPrice = line.saleUnit || line.priceSet; // prices the cashier set at the counter stay as typed
       return {
         ...line,
         stock: fresh.stock ?? 0,
-        retailUnit: fresh.retailUnit,
+        retailUnit: keepPrice ? line.retailUnit : fresh.retailUnit,
         regularUnit: fresh.regularUnit,
-        discountPercent: fresh.discountPercent,
-        wholesaleUnit: fresh.wholesaleUnit,
-        mode: line.mode === "wholesale" && fresh.wholesaleUnit == null ? "retail" : line.mode,
-        discountPercent: line.saleUnit ? null : fresh.discountPercent,
-        wholesaleUnit: line.saleUnit ? null : fresh.wholesaleUnit,
+        mode: line.mode === "wholesale" && (keepPrice ? line.wholesaleUnit : fresh.wholesaleUnit) == null ? "retail" : line.mode,
+        discountPercent: keepPrice ? null : fresh.discountPercent,
+        wholesaleUnit: line.saleUnit ? null : keepPrice ? line.wholesaleUnit : fresh.wholesaleUnit,
         qty: Math.min(line.qty, Math.floor(Math.max(fresh.stock ?? 0, 0) / (line.saleUnit ? line.saleUnit.pieces : 1)))
       };
     })
@@ -792,11 +834,13 @@ function renderCart() {
         ? `Sold by the ${esc(line.saleUnit.label)} · ${line.saleUnit.pieces} pcs each · ${stockQty(line)} pcs out of stock · price set at the counter`
         : line.wholesaleUnit != null
         ? `Wholesale ${formatMoney(line.wholesaleUnit)} each for every ${WHOLESALE_GROUP_SIZE}${pr.groups > 0 ? ` · ${pr.groups} group${pr.groups === 1 ? "" : "s"} applied` : ` · buy ${WHOLESALE_GROUP_SIZE}+ to apply`}`
-        : "No wholesale price";
+        : `No wholesale price · <button type="button" class="pos-link" data-action="price" data-key="${esc(line.key)}" data-focus="ws">+ Add wholesale price</button>`;
+      const adjusted = line.priceSet && !line.saleUnit ? ` <em class="pos-line__adj">price set at the counter</em>` : "";
       return `
         <div class="pos-line">
           <div class="pos-line__top">
-            <span class="pos-line__name">${esc(line.name)}</span>
+            <span class="pos-line__name">${esc(line.name)}${adjusted}</span>
+            ${line.saleUnit ? "" : `<button type="button" class="pos-line__edit" data-action="price" data-key="${esc(line.key)}" aria-label="Edit price">Edit price</button>`}
             <button type="button" class="pos-line__remove" data-action="remove" data-key="${esc(line.key)}" aria-label="Remove">✕</button>
           </div>
           <div class="pos-line__row">
@@ -975,7 +1019,7 @@ async function commitSaleSupabase(ctx) {
     if (!data) throw new SaleError(`"${line.name}" no longer exists.`);
     const cand = candidatesForProduct(data).find((c) => c.key === (line.baseKey || line.key));
     if (!cand) throw new SaleError(`"${line.name}" is no longer available.`);
-    if (line.saleUnit) continue; // price was set at the counter
+    if (line.saleUnit || line.priceSet) continue; // price was set at the counter
     const sameRetail = cand.retailUnit != null && Math.abs(cand.retailUnit - line.retailUnit) <= 0.001;
     const sameWholesale = (cand.wholesaleUnit ?? null) === (line.wholesaleUnit ?? null)
       || (cand.wholesaleUnit != null && line.wholesaleUnit != null && Math.abs(cand.wholesaleUnit - line.wholesaleUnit) <= 0.001);
@@ -1109,8 +1153,9 @@ async function completeSale() {
       for (const line of lines) {
         const data = fresh.get(line.productId);
         if (!data) throw new SaleError(`"${line.name}" no longer exists.`);
-        const cand = candidatesForProduct({ id: line.productId, ...data }).find((c) => c.key === line.key);
+        const cand = candidatesForProduct({ id: line.productId, ...data }).find((c) => c.key === (line.baseKey || line.key));
         if (!cand) throw new SaleError(`"${line.name}" is no longer available.`);
+        if (line.saleUnit || line.priceSet) continue; // price was set at the counter
         const sameRetail = cand.retailUnit != null && Math.abs(cand.retailUnit - line.retailUnit) <= 0.001;
         const sameWholesale = (cand.wholesaleUnit ?? null) === (line.wholesaleUnit ?? null)
           || (cand.wholesaleUnit != null && line.wholesaleUnit != null && Math.abs(cand.wholesaleUnit - line.wholesaleUnit) <= 0.001);

@@ -255,6 +255,65 @@ export function addToCart(cart, candidate, qty = 1) {
 }
 
 // A sale by the unit (piece, pack, ream, 1/2 case, case...) with a price the cashier sets.
+// Check a price the cashier typed for one piece: { retail, wholesale|null }. Returns { error } or { retail, wholesale }.
+export function checkCounterPrices(input) {
+  const retail = round2(Number(input.retail));
+  if (!(retail > 0)) return { error: "Enter a retail price greater than 0." };
+  const raw = input.wholesale;
+  const hasWs = raw !== null && raw !== undefined && String(raw).trim() !== "";
+  if (!hasWs) return { retail, wholesale: null };
+  const wholesale = round2(Number(raw));
+  if (!(wholesale > 0)) return { error: "Enter a wholesale price greater than 0, or leave it empty for none." };
+  if (wholesale > retail) return { error: "The wholesale price can't be higher than the retail price." };
+  return { retail, wholesale };
+}
+
+// Add a product by the piece at a price the cashier set at the counter (different from the product's own).
+// It becomes its own line, so the same product at the normal price is never mixed with it.
+export function addPricedToCart(cart, candidate, qty, input) {
+  if (!candidate.inStock) return { cart, error: `"${candidate.name}" is out of stock.` };
+  const prices = checkCounterPrices(input);
+  if (prices.error) return { cart, error: prices.error };
+  const count = Math.floor(Number(qty));
+  if (!(count >= 1)) return { cart, error: "Quantity must be at least 1." };
+  const sameAsProduct = candidate.retailUnit != null && Math.abs(candidate.retailUnit - prices.retail) <= 0.001
+    && ((candidate.wholesaleUnit ?? null) === prices.wholesale
+      || (candidate.wholesaleUnit != null && prices.wholesale != null && Math.abs(candidate.wholesaleUnit - prices.wholesale) <= 0.001));
+  if (sameAsProduct) return addToCart(cart, candidate, count);
+
+  const key = `${candidate.key}#price|${prices.retail}|${prices.wholesale ?? ""}`;
+  const otherPieces = cart.filter((l) => (l.baseKey || l.key) === candidate.key && l.key !== key).reduce((sum, l) => sum + stockQty(l), 0);
+  const existing = cart.find((l) => l.key === key);
+  const want = (existing ? existing.qty : 0) + count;
+  if (candidate.stock !== null && otherPieces + want > candidate.stock) {
+    return { cart, error: `Only ${candidate.stock} piece(s) of "${candidate.name}" in stock (${otherPieces + want} requested).` };
+  }
+  if (existing) return { cart: cart.map((l) => (l.key === key ? { ...l, qty: want } : l)) };
+  if (cart.length >= MAX_CART_LINES) return { cart, error: `A sale can have at most ${MAX_CART_LINES} different items.` };
+  return {
+    cart: [...cart, {
+      key, baseKey: candidate.key,
+      productId: candidate.productId, variantName: candidate.variantName, barcode: candidate.barcode,
+      name: candidate.name, productName: candidate.productName, imageUrl: candidate.imageUrl,
+      stock: candidate.stock, retailUnit: prices.retail, regularUnit: candidate.regularUnit ?? candidate.retailUnit,
+      discountPercent: null, wholesaleUnit: prices.wholesale, mode: "retail", priceSet: true, qty: count
+    }]
+  };
+}
+
+// Change the retail / wholesale price of a line already in the cart (this sale only).
+export function setLinePrices(cart, key, input) {
+  const line = cart.find((l) => l.key === key);
+  if (!line || line.saleUnit) return { cart };
+  const prices = checkCounterPrices(input);
+  if (prices.error) return { cart, error: prices.error };
+  return {
+    cart: cart.map((l) => (l.key === key
+      ? { ...l, retailUnit: prices.retail, wholesaleUnit: prices.wholesale, discountPercent: null, priceSet: true, mode: prices.wholesale == null ? "retail" : l.mode }
+      : l))
+  };
+}
+
 export function addUnitToCart(cart, candidate, unit, units) {
   if (!candidate.inStock) return { cart, error: `"${candidate.name}" is out of stock.` };
   const pieces = Math.floor(Number(unit.pieces));
@@ -402,7 +461,8 @@ export function buildSaleItems(cart) {
       productName: line.productName,
       variantName: line.variantName,
       barcode: line.barcode || null,
-      regularUnitPrice: line.regularUnit ?? null
+      regularUnitPrice: line.regularUnit ?? null,
+      ...(line.priceSet ? { priceAdjusted: true } : {})
     };
     const items = [];
     if (p.wholesaleQty > 0) {

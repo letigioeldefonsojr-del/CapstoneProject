@@ -3556,3 +3556,13 @@ body.has-share-bar .scroll-to-top-btn { bottom: 84px; z-index: 85; }
 
 /* Inventory form: hints under the retail / wholesale price (20261117a) */
 .form-field .form-hint{font-size:11.5px;line-height:1.35;color:var(--muted);font-weight:400}
+
+/* POS: change price at the counter (20261117b) */
+.pos-unit-pair{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.pos-line__top{align-items:center;gap:8px}
+.pos-line__edit,.pos-link{background:none;border:0;color:var(--brand-green);font:inherit;font-weight:700;font-size:12px;cursor:pointer;padding:2px 6px;text-decoration:underline}
+.pos-line__edit{margin-left:auto}
+.pos-line__adj{font-style:normal;font-size:11px;font-weight:700;color:#8a5a00;background:#fff3d6;border-radius:999px;padding:1px 8px;margin-left:6px;white-space:nowrap}
+.pos-link{font-size:inherit;padding:0 2px}
+.pos-line__top .pos-line__name{flex:1;min-width:0}
+.pos-unit-summary:empty{display:none}
